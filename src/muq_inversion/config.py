@@ -55,6 +55,25 @@ class DataConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class CacheConfig:
+    cache_dir: str = "data/cache"
+    dtype: str = "float32"  # one of: float32, float16
+    representation_name: str = "last_hidden_state"
+
+
+@dataclasses.dataclass(frozen=True)
+class FeatureContractConfig:
+    """Gate 2 validation parameters."""
+
+    probe_durations_seconds: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0)
+    probe_track_count: int = 3
+    frame_rate_tolerance_hz: float = 0.5
+    alignment_tolerance_frames: int = 1
+    lowprecision_dtype: str = "float16"
+    lowprecision_max_abs_error: float = 0.05
+
+
+@dataclasses.dataclass(frozen=True)
 class DecoderConfig:
     """Shape-only placeholder for Gate 0. upsample_rates is provisional until
     Gate 2 measures MuQ's actual samples-per-frame ratio (CLAUDE.md Decoder Design)."""
@@ -69,6 +88,8 @@ class ExperimentConfig:
     environment: EnvironmentConfig
     muq: MuQConfig
     data: DataConfig
+    cache: CacheConfig
+    feature_contract: FeatureContractConfig
     decoder: DecoderConfig
 
 
@@ -92,6 +113,15 @@ def load_config(path: str | Path) -> ExperimentConfig:
         data_raw["genres"] = tuple(data_raw["genres"])
     data = _dataclass_from_dict(DataConfig, data_raw)
 
+    cache = _dataclass_from_dict(CacheConfig, raw.get("cache", {}))
+
+    feature_contract_raw = dict(raw.get("feature_contract", {}))
+    if "probe_durations_seconds" in feature_contract_raw:
+        feature_contract_raw["probe_durations_seconds"] = tuple(
+            feature_contract_raw["probe_durations_seconds"]
+        )
+    feature_contract = _dataclass_from_dict(FeatureContractConfig, feature_contract_raw)
+
     decoder_raw = dict(raw.get("decoder", {}))
     if "upsample_rates" in decoder_raw:
         decoder_raw["upsample_rates"] = tuple(decoder_raw["upsample_rates"])
@@ -102,6 +132,8 @@ def load_config(path: str | Path) -> ExperimentConfig:
         environment=environment,
         muq=muq,
         data=data,
+        cache=cache,
+        feature_contract=feature_contract,
         decoder=decoder,
     )
 

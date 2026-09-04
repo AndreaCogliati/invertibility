@@ -117,7 +117,7 @@ def find_duplicate_checksums(records: list[TrackRecord]) -> dict[str, list[str]]
     return {checksum: ids for checksum, ids in by_checksum.items() if len(ids) > 1}
 
 
-def _deterministic_unit_interval(key: str, seed: int) -> float:
+def deterministic_unit_interval(key: str, seed: int) -> float:
     """Stable hash of (key, seed) mapped to [0, 1), used for a reproducible split."""
     digest = hashlib.sha256(f"{seed}:{key}".encode()).digest()
     as_int = int.from_bytes(digest[:8], "big")
@@ -151,7 +151,7 @@ def assign_splits(
     for record in records:
         # Keyed purely by checksum (not genre/track_id): guarantees every
         # byte-identical duplicate, even across genres, hashes to the same split.
-        u = _deterministic_unit_interval(record.checksum, seed)
+        u = deterministic_unit_interval(record.checksum, seed)
         if u < train_fraction:
             split = "train"
         elif u < train_fraction + val_fraction:
@@ -203,7 +203,7 @@ def verify_resample_sample(
     import numpy as np
 
     usable = [r for r in records if not r.corrupted]
-    ordered = sorted(usable, key=lambda r: _deterministic_unit_interval(r.track_id, seed))
+    ordered = sorted(usable, key=lambda r: deterministic_unit_interval(r.track_id, seed))
     sample = ordered[:sample_size]
 
     results = []

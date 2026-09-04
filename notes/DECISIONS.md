@@ -116,3 +116,50 @@ breakdown (5,4,4,3,2,2) is the right one architecturally. That decision belongs 
 
 **Rollback plan.** Revisit `decoder.upsample_rates` explicitly during Gate 2/3 work; this
 decision record exists so nobody mistakes the placeholder for a validated architectural choice.
+
+**Update (Gate 2, 2026-09-04).** Real GTZAN clips do not land on an exact 960-samples-per-frame
+boundary: full-length probes measured `samples_per_frame = 960.0067` (750 frames for 720,005
+samples), vs. exactly 960.0 for probe crops whose sample count is itself a multiple of 960 (e.g.
+the 1s/2s/5s/10s crops, which were *taken* as `round(duration * 24000)` and happened to divide
+evenly). This confirms CLAUDE.md's caveat that "if the ratio is not integral" an explicit
+alignment/cropping strategy is required (Decoder Design item 3) -- Gate 3/4 training must crop
+waveform targets to `num_frames * upsample_product` samples (or pad/trim the generator output to
+match the target), not assume every clip's raw length is an exact multiple of the upsample
+product. Not fixed now -- this is a Gate 3 concern once real training crops are implemented.
+
+---
+
+## gate2-cache-format: `torch.save`/`torch.load` for cache entries, not `.npy`/`.npz`
+
+**Context.** CLAUDE.md's Resource Discipline section requires content-addressed, atomic,
+resumable cache writes supporting float32 and one explicitly validated lower-precision format.
+
+**Alternatives considered.**
+
+1. `numpy.savez` with the array plus a JSON-encoded metadata string -- avoids pickle, but storing
+   a dict of mixed types (str, int, float) as an npz sidecar either needs `allow_pickle=True`
+   (same trust boundary as `torch.save`) or manual flattening into parallel arrays, which is more
+   code for no real safety gain since these caches are entirely self-generated, never loaded from
+   an untrusted source.
+2. Two files per entry (`.npy` for the tensor + `.json` for metadata) -- keeps things
+   inspectable without `torch`, but a crash between the two atomic renames leaves a valid tensor
+   file with no matching metadata (or vice versa), which is exactly the corruption atomicity is
+   meant to prevent.
+
+**Decision.** Single `.pt` file per cache entry via `torch.save({"features": tensor, "metadata":
+dict}, ...)`, written to a temp file in the same directory and `os.replace`'d into place
+(`cache.py:save_atomic`). One file, one atomic rename, no cross-file consistency window.
+
+**Evidence.** Gate 2's cache round-trip test (`cmd_extract` in `cli.py`) writes 30 (tensor,
+dtype) pairs across 3 real tracks x 5 durations x {float32, float16}, reloads each, and asserts
+`torch.equal` against the tensor as saved (not against the original float32 tensor, since
+casting to float16 before saving is an intentional, separately-measured lossy step) -- all 30
+passed exactly. Re-running `extract` a second time overwrites the same 30 keys without error
+(resumability check).
+
+**Consequences.** Cache entries require `torch` to inspect (not plain `numpy`/`json`), which is
+already a hard dependency of this project, so no new cost.
+
+**Rollback plan.** If cache entries ever need to be inspected/edited by non-Python tooling,
+switch to the two-file `.npy`+`.json` layout and add a manifest-level checksum step to close the
+cross-file atomicity gap.

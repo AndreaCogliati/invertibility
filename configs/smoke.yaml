@@ -23,6 +23,19 @@ data:
   val_fraction: 0.1
   test_fraction: 0.1
 
+cache:
+  cache_dir: data/cache
+  dtype: float32
+  representation_name: last_hidden_state
+
+feature_contract:
+  probe_durations_seconds: [1.0, 2.0, 5.0, 10.0]
+  probe_track_count: 3
+  frame_rate_tolerance_hz: 0.5
+  alignment_tolerance_frames: 1
+  lowprecision_dtype: float16
+  lowprecision_max_abs_error: 0.05
+
 decoder:
   base_channels: 256
   upsample_rates: [5, 4, 4, 3, 2, 2]  # product 960; provisional until Gate 2 measures MuQ's real ratio

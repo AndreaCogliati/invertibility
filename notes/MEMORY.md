@@ -13,6 +13,11 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   upsampling stage product).
 - Output is finite; repeated forward passes on the same input produce the same shape
   (determinism spot-check, not a full byte-identity check).
+- Confirmed against real GTZAN audio (Gate 2, `extract`, 2026-09-04) across 1s/2s/5s/10s/full-length
+  crops of 3 tracks (15 probes): `frames_per_second` stayed within `[24.9998, 25.0000]` (spread
+  well inside the 0.5 Hz tolerance), `mean_samples_per_frame = 960.0013`. Frame counts matched
+  `round(num_samples / mean_samples_per_frame)` within 1 frame for every probe -- i.e. MuQ's
+  frame rate is stable across duration and content, not just on synthetic noise.
 
 ## Working dependency versions (Apple Silicon, macOS 26.6.2, M4 Max, 2026-09-04)
 
@@ -26,8 +31,19 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 
 - Doctor (Gate 0): `uv run python -m muq_inversion.cli doctor --config configs/smoke.yaml`
 - Prepare data (Gate 1): `uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml`
+- Extract / feature contract (Gate 2): `uv run python -m muq_inversion.cli extract --config configs/smoke.yaml`
 - Manifest output: `data/manifests/gtzan_manifest_<config-name>.csv` (tracked in git).
 - Raw GTZAN audio lives at `data/raw/gtzan/genres/<genre>/<genre>.NNNNN.wav` (git-ignored).
+- Cache entries live at `data/cache/<key[:2]>/<key>.pt` (git-ignored), each a
+  `torch.save({"features": tensor, "metadata": dict})`, content-addressed by
+  (audio checksum, MuQ model id, preprocessing dict, representation name, dtype).
+
+## Cache size (measured, Gate 2, 2026-09-04)
+
+- float32: ~102,399 bytes/audio-second at 1024 channels, 25 fps.
+- float16: ~51,200 bytes/audio-second (half, as expected).
+- float16 quantization error vs float32: max abs error 0.0074 across all probes, well under the
+  documented tolerance of 0.05 (`feature_contract.lowprecision_max_abs_error`).
 
 ## Validated design choices
 
@@ -46,3 +62,6 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   file (`jazz.00054.wav`) flagged and excluded, 14 duplicate-checksum pairs detected and kept
   within a single split each, split counts train=793/val=94/test=113, 20-file resample
   verification sample all finite. See [[gtzan-source-and-defects]].
+- Gate 2 (feature contract): PASSED on 2026-09-04 -- 15 probes (3 real GTZAN tracks x 5 durations)
+  all finite, frame rate consistent within tolerance, alignment within 1 frame, 30 cache
+  (tensor, dtype) round-trips exact, float16 quantization error within documented tolerance.

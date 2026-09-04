@@ -58,22 +58,32 @@ class FrozenMuQEncoder:
         """Run one forward pass and measure the feature geometry (CLAUDE.md MuQ Feature Contract)."""
         assert waveform_24khz.ndim == 2, "expected (batch, num_samples)"
         features = self.encode(waveform_24khz)
-        num_samples = waveform_24khz.shape[-1]
-        duration = num_samples / sample_rate
-        num_frames = features.shape[1]
-        frames_per_second = num_frames / duration if duration > 0 else float("nan")
-        samples_per_frame = num_samples / num_frames if num_frames > 0 else float("nan")
+        return measure_feature_geometry(features, waveform_24khz.shape[-1], sample_rate)
 
-        return MuQProbeResult(
-            input_sample_rate=sample_rate,
-            input_num_samples=num_samples,
-            input_duration_seconds=duration,
-            feature_shape=tuple(features.shape),
-            feature_channels=features.shape[-1],
-            num_frames=num_frames,
-            frames_per_second=frames_per_second,
-            samples_per_frame=samples_per_frame,
-            dtype=str(features.dtype),
-            device=str(features.device),
-            is_finite=bool(torch.isfinite(features).all().item()),
-        )
+
+def measure_feature_geometry(
+    features: torch.Tensor, num_samples: int, sample_rate: int
+) -> MuQProbeResult:
+    """Compute the MuQProbeResult stats for an already-computed `last_hidden_state` tensor.
+
+    Split out from `FrozenMuQEncoder.probe` so callers that need the raw feature
+    tensor (e.g. for caching) can measure geometry without a second forward pass.
+    """
+    duration = num_samples / sample_rate
+    num_frames = features.shape[1]
+    frames_per_second = num_frames / duration if duration > 0 else float("nan")
+    samples_per_frame = num_samples / num_frames if num_frames > 0 else float("nan")
+
+    return MuQProbeResult(
+        input_sample_rate=sample_rate,
+        input_num_samples=num_samples,
+        input_duration_seconds=duration,
+        feature_shape=tuple(features.shape),
+        feature_channels=features.shape[-1],
+        num_frames=num_frames,
+        frames_per_second=frames_per_second,
+        samples_per_frame=samples_per_frame,
+        dtype=str(features.dtype),
+        device=str(features.device),
+        is_finite=bool(torch.isfinite(features).all().item()),
+    )

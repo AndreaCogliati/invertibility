@@ -62,3 +62,47 @@ Append-only lab notebook. Unverified until summarized into MEMORY.md/DECISIONS.m
 
 - Did not commit to git yet -- scope was explicitly Gate 0 + Gate 1 only; leaving the commit
   decision to the user per instructions to only commit when asked.
+- User asked to commit; committed as `95da3c5` on `main`.
+
+## 2026-09-04 (cont.) -- Gate 2 (Feature Contract)
+
+- Added `cache.py`: content-addressed key = sha256(audio_checksum | muq_model_id |
+  sorted(preprocessing.items()) | representation_name | dtype); entries sharded into
+  `data/cache/<key[:2]>/<key>.pt`; atomic write via `tempfile.mkstemp` in the same directory +
+  `os.replace`. Considered `.npy`+`.json` two-file layout but rejected it (crash between the two
+  renames leaves an inconsistent pair) -- see [[DECISIONS.md#gate2-cache-format]].
+- Refactored `encoder.py`: split `FrozenMuQEncoder.probe()` into `encode()` (forward pass) +
+  a new module-level `measure_feature_geometry(features, num_samples, sample_rate)` (pure stats),
+  so `extract` can get both the geometry stats *and* the raw feature tensor from a single forward
+  pass instead of encoding twice.
+- Made `data.py`'s `_deterministic_unit_interval` public (`deterministic_unit_interval`) so
+  `cli.py`'s `extract` command can reuse the same deterministic-sample-selection logic used for
+  the Gate 1 resample-verification sample, picking the same kind of stable subset of tracks to
+  probe.
+- Added `cache`, `feature_contract` sections to `config.py` and both YAML configs:
+  `cache.dtype` (float32 default), `feature_contract.probe_durations_seconds` (1/2/5/10s + full),
+  `probe_track_count` (3), `frame_rate_tolerance_hz` (0.5), `alignment_tolerance_frames` (1),
+  `lowprecision_dtype` (float16), `lowprecision_max_abs_error` (0.05, chosen as a round,
+  conservative bound -- not derived from any measurement in advance).
+- `extract` command: for `probe_track_count` deterministically-chosen real GTZAN tracks, crop to
+  each configured duration (skipping durations longer than the clip; always including the
+  clip's true full length), run MuQ, check finiteness, then aggregate: frame-rate consistency
+  across all probes (min/max fps spread vs. tolerance), a single shared `feature_channels` value,
+  and per-probe alignment (`num_frames` vs `round(num_samples / mean_samples_per_frame)`).
+  Then, for every probe, cache the feature tensor at both `cache.dtype` and
+  `feature_contract.lowprecision_dtype`, reload, and assert bit-exact equality against the tensor
+  *as saved* (not the original float32, since the float16 cast is an intentional lossy step
+  measured separately via max-abs-error vs. the float32 tensor).
+- First `extract` run on `configs/smoke.yaml`: all 15 probes (3 tracks x 5 durations) finite;
+  `frames_per_second` in `[24.9998, 25.0000]` (well under the 0.5 Hz tolerance);
+  `mean_samples_per_frame = 960.0013`; alignment passed for all 15; 30 cache round-trips exact;
+  float16 max abs error 0.0074 (under the 0.05 tolerance). Noted: full-length clips give
+  `samples_per_frame = 960.0067`, not exactly 960 -- confirms the ratio isn't perfectly integral
+  for real (non-hand-picked-length) audio, recorded as a Gate 3 concern in
+  [[DECISIONS.md#decoder-upsample-placeholder]] (see the "Update (Gate 2, ...)" addendum there).
+- Second `extract` run (same config, cache already populated): completed identically with no
+  errors -- confirms idempotency/resumability of the content-addressed cache writes.
+- Added `tests/test_cache.py` (5 tests: key determinism, key sensitivity to every input field,
+  save/load round trip, missing-key returns None, no leftover tmp file after a successful save).
+  `ruff check .` clean, `uv run pytest -q` -> 18 passed.
+- Registered `extract` in `cli.py`'s argparse subcommands and `main()` dispatch.
