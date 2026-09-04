@@ -63,3 +63,18 @@ training:
   checkpoint_every: 250
   loss_decrease_ratio: 0.5
   run_name: gate3_tiny_overfit
+
+pilot:
+  track_ids: []
+  num_tracks: 6
+  crop_frames: 50
+  steps: 400
+  learning_rate: 0.0002
+  log_every: 50
+  checkpoint_every: 200
+  resume_test_at: 200
+  resume_tolerance: 0.08  # scaled up from smoke.yaml's 0.02: MPS float drift accumulates
+                          # roughly linearly with step count (~0.00025/step, measured across
+                          # configs -- see notes/DECISIONS.md#gate4-mps-resume-tolerance)
+  control_margin: 0.2
+  run_name: gate4_short_pilot

@@ -43,8 +43,13 @@ def build_checkpoint_state(
     step: int,
     samples_seen: int,
     best_metric: float | None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Assemble the full checkpoint payload required by CLAUDE.md's Checkpointing section."""
+    """Assemble the full checkpoint payload required by CLAUDE.md's Checkpointing section.
+
+    `extra` carries any additional state a specific training loop needs restored on resume
+    (e.g. a dedicated crop-sampling RNG's state) without hard-coding it into this shared module.
+    """
     torch_rng_state = torch.get_rng_state()
     mps_rng_state = torch.mps.get_rng_state() if torch.backends.mps.is_available() else None
 
@@ -62,6 +67,7 @@ def build_checkpoint_state(
         "uv_lock_hash": _file_hash(repo_root / "uv.lock"),
         "environment": capture_environment_manifest(repo_root),
         "best_metric": best_metric,
+        **(extra or {}),
     }
 
 

@@ -33,8 +33,10 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 - Prepare data (Gate 1): `uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml`
 - Extract / feature contract (Gate 2): `uv run python -m muq_inversion.cli extract --config configs/smoke.yaml`
 - Train / tiny-set overfit (Gate 3): `uv run python -m muq_inversion.cli train --config configs/smoke.yaml`
-- Run/checkpoint output: `runs/<training.run_name>/checkpoints/{latest,step_NNNNNN}.pt` (git-ignored).
-- Reference/reconstruction/difference audio: `artifacts/<training.run_name>/<track_id>_*.wav` (git-ignored).
+- Short pilot (Gate 4): `uv run python -m muq_inversion.cli pilot --config configs/pilot.yaml`
+- Run/checkpoint output: `runs/<run_name>/checkpoints/{latest,step_NNNNNN}.pt` (git-ignored;
+  `run_name` is `training.run_name` for Gate 3 or `pilot.run_name` for Gate 4).
+- Reference/reconstruction/difference audio: `artifacts/<run_name>/<track_id>_*.wav` (git-ignored).
 - Manifest output: `data/manifests/gtzan_manifest_<config-name>.csv` (tracked in git).
 - Raw GTZAN audio lives at `data/raw/gtzan/genres/<genre>/<genre>.NNNNN.wav` (git-ignored).
 - Cache entries live at `data/cache/<key[:2]>/<key>.pt` (git-ignored), each a
@@ -51,7 +53,8 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 ## Validated design choices
 
 - See [[muq-transformers-compat]], [[gtzan-source-and-defects]], [[decoder-upsample-placeholder]],
-  [[gate2-cache-format]], [[gate3-crop-alignment]], [[gate3-loss-configs]].
+  [[gate2-cache-format]], [[gate3-crop-alignment]], [[gate3-loss-configs]],
+  [[gate4-mps-resume-tolerance]], [[gate4-shuffled-time-finding]].
 
 ## Known platform limitations
 
@@ -77,3 +80,11 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   `artifacts/gate3_tiny_overfit/`, all finite and non-silent (reconstruction peak ~0.53 vs.
   reference peak ~1.0 -- expected for an early, short, tiny-model overfit run, not yet
   high-fidelity). See [[gate3-crop-alignment]], [[gate3-loss-configs]].
+- Gate 4 (short pilot): NOT FULLY PASSED on 2026-09-04 (`configs/pilot.yaml`, 6 tracks, 400
+  steps). Checkpoint/resume equivalence PASSED (max relative loss diff 0.063, tolerance 0.08 --
+  see [[gate4-mps-resume-tolerance]] for why MPS needs a scaled, non-bit-exact tolerance).
+  Conditioning controls: `shuffled_across` and `constant_zero` robustly, reproducibly worse than
+  correct conditioning (rules out total conditioning collapse); `shuffled_time` was NOT materially
+  worse (~11-13% vs. the 20% margin, consistent across 2 independent runs) -- see
+  [[gate4-shuffled-time-finding]] for the full evidence table and interpretation. This is an open
+  diagnostic finding to re-check at Gate 5's larger scale, not a blocking implementation bug.

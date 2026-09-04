@@ -1,6 +1,6 @@
 """CLI entry points. `doctor` (Gate 0), `prepare-data` (Gate 1), `extract`
-(Gate 2), and `train` (Gate 3) are implemented so far -- evaluate belongs to
-a later gate."""
+(Gate 2), `train` (Gate 3), and `pilot` (Gate 4) are implemented so far --
+evaluate belongs to a later gate."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ from .logging_utils import (
     select_device,
 )
 from .models.generator import MiniGenerator
+from .pilot import run_gate4
 from .train import run_gate3
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -374,6 +375,9 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser = subparsers.add_parser("train", help="Gate 3: tiny-set overfit")
     train_parser.add_argument("--config", required=True, type=Path)
 
+    pilot_parser = subparsers.add_parser("pilot", help="Gate 4: short pilot")
+    pilot_parser.add_argument("--config", required=True, type=Path)
+
     return parser
 
 
@@ -394,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_extract(config)
     if args.command == "train":
         return run_gate3(config, REPO_ROOT)
+    if args.command == "pilot":
+        return run_gate4(config, REPO_ROOT)
     raise ValueError(f"Unknown command: {args.command}")
 
 

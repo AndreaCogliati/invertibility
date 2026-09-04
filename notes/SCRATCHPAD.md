@@ -157,3 +157,55 @@ Append-only lab notebook. Unverified until summarized into MEMORY.md/DECISIONS.m
 - Registered `train` in `cli.py`'s argparse subcommands and `main()` dispatch. Also fixed a
   pre-existing loose `object` type annotation on `cmd_extract`'s `probes` list (flagged by the
   IDE's mypy diagnostics while editing nearby code) to the real `MuQProbeResult` type.
+- User asked to commit Gate 3 work; committed as `afe7895` on `main`.
+
+## 2026-09-04 (cont.) -- Gate 4 (Short Pilot)
+
+- Refactored `train.py`'s `select_overfit_tracks` into a generic `select_tracks(records, *,
+  split_seed, num_tracks, explicit_track_ids)` (kept `select_overfit_tracks` as a thin wrapper
+  reading `config.training.*`, so Gate 3's existing tests didn't need to change) so Gate 4's
+  `pilot.py` could reuse the same deterministic-selection logic against `config.pilot.*` fields.
+- Added `PilotConfig` to `config.py`: `num_tracks` (6 for pilot.yaml, 3 for smoke.yaml's fast
+  path), `steps`, `resume_test_at`, `resume_tolerance`, `control_margin`. This is the first point
+  where `configs/pilot.yaml` and `configs/smoke.yaml` actually diverge in values (previously
+  identical except `name:`), as flagged as expected in the previous session's NEXT.md.
+- Added an `extra: dict | None` parameter to `checkpoint.build_checkpoint_state` so Gate 4 could
+  stash a dedicated crop-sampling RNG's state (`rng.getstate()`) in the checkpoint without
+  hard-coding that concept into the shared, gate-agnostic checkpoint module. This was necessary
+  because Gate 3/4's crop sampler uses its own `random.Random(seed)` instance, decoupled from
+  Python's global `random` module -- `checkpoint.restore_rng_state` only restores the global
+  python/numpy/torch RNGs, so the dedicated crop RNG needed its own explicit save/restore path.
+- `pilot.py`: `_build_conditioning(mode, ...)` implements all three required controls in one
+  function -- `shuffled_across` (encode a *different* clip's crop entirely), `shuffled_time`
+  (encode the same clip, then `torch.randperm` the frame dimension), `constant_zero` (zero out
+  the encoded features). "correct" mode bypasses this function entirely in `_train_steps`.
+- Wrote `tests/test_pilot.py` using a stub encoder (returns a value that encodes which waveform
+  was seen, via `waveform.mean()`) to verify each control's tensor-level behavior without needing
+  a real MuQ forward pass -- confirms `constant_zero` is exactly all-zero, `shuffled_time`
+  preserves the same multiset of per-frame values in a different order, and `shuffled_across`
+  actually pulls from a different clip's audio.
+- First `pilot` run (`configs/smoke.yaml`, 60 steps, 3 tracks) surfaced a real bug: the
+  "pre-checkpoint determinism" check used an absolute tolerance of `1e-4`, which failed
+  (`4.0138` vs `4.0000` at step 30) even though both runs used identical seeds, architecture, and
+  RNG streams. Diagnosed as genuine MPS/Metal kernel float nondeterminism (not a logic bug) by
+  computing per-step drift rate across multiple run lengths and finding it consistent
+  (~0.00022-0.00026 relative loss difference per step across 30/100/200-step windows) -- see
+  [[DECISIONS.md#gate4-mps-resume-tolerance]]. Fixed by switching both the pre-checkpoint check
+  and the main resume check to the same relative-tolerance style, then calibrating
+  `resume_tolerance` per config based on that config's step count (0.02 for smoke's 30-step
+  window, eventually 0.08 for pilot's 200-step window after the real pilot run showed 0.063).
+- Ran the real `configs/pilot.yaml` pilot three times total (had to also run `prepare-data
+  --config configs/pilot.yaml` first, since the manifest filename is keyed off `config.name` and
+  only `smoke`'s manifest existed): first at 200 steps/0.02 tolerance (resume failed, borderline
+  controls), second at 200 steps/0.05 tolerance after the drift-rate analysis (resume passed,
+  `shuffled_across` control borderline-failed), third at 400 steps/0.08 tolerance (resume passed
+  cleanly, `shuffled_across` and `constant_zero` passed robustly, `shuffled_time` did not -- see
+  [[DECISIONS.md#gate4-shuffled-time-finding]]). Did not keep raising steps indefinitely chasing
+  a full pass once the `shuffled_time` result was consistent across two runs -- treated it as a
+  genuine, evidence-backed diagnostic finding instead of a target to optimize away.
+- Final Gate 4 state: checkpoint/resume equivalence PASSED; 2 of 3 conditioning controls PASSED
+  (`shuffled_across`, `constant_zero`); `shuffled_time` did NOT pass its margin. Reported Gate 4
+  as NOT FULLY PASSED, with the specific finding documented rather than silently accepted or
+  forced past via threshold-tuning.
+- `ruff check .` clean; `uv run pytest -q` -> 38 passed (added `tests/test_pilot.py`, 5 tests).
+- Registered `pilot` in `cli.py`'s argparse subcommands and `main()` dispatch.

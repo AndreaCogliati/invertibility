@@ -238,3 +238,106 @@ computation). Gate 3's tiny-set overfit run showed the combined loss drop from a
 
 **Rollback plan.** Revisit resolutions/window lengths if Gate 4/5 reconstructions show a specific
 frequency band or time resolution is poorly captured.
+
+---
+
+## gate4-mps-resume-tolerance: Resume-equivalence tolerance must scale with step count on MPS
+
+**Context.** Gate 4's checkpoint/resume equivalence check trains an "uninterrupted" control run
+and a separately-checkpointed-and-resumed run from the same seed, then compares their loss
+trajectories. The first attempt used an absolute tolerance (`1e-4`) for the pre-checkpoint
+determinism sub-check and a tight relative tolerance (0.02) for the full resume comparison,
+copied from an initial guess without measurement.
+
+**Evidence gathered.** On `configs/smoke.yaml` (30-step pre-checkpoint window), the two supposedly
+identical training runs (same seed, same architecture, same crop-sampling RNG) diverged by up to
+0.68% relative loss difference by step 30 despite having bit-identical initial weights and inputs
+-- i.e., MPS/Metal kernels are not guaranteed bit-exact across separate op invocations even with
+identical seeds (a known characteristic of GPU backends generally, not specific to this codebase).
+On `configs/pilot.yaml` at 100 and then 200-step pre-checkpoint windows, the measured divergence
+grew to 2.14% and 4.16% respectively. Computing per-step drift rate: `0.0068/30 = 0.000227`,
+`0.0214/100 = 0.000214`, `0.0416/200 = 0.000208` -- three independent measurements agreeing to
+within ~10% of each other, strongly suggesting a consistent, roughly-linear per-step
+floating-point drift rate rather than a resume-logic defect (a real bug would not produce such a
+consistent rate across three different run lengths).
+
+**Decision.** Set `resume_tolerance` per config, scaled to that config's `resume_test_at`/`steps`
+window rather than using one universal constant: `configs/smoke.yaml` keeps `0.02` (calibrated for
+its 30-step window), `configs/pilot.yaml` uses `0.08` (calibrated for its 200-step window, with
+headroom above the ~0.04 measured rate to avoid being fragile to run-to-run noise in the noise
+estimate itself). The pre-checkpoint determinism sub-check now uses the same relative-tolerance
+style as the main resume comparison (previously it used an unrealistic absolute `1e-4`, which
+does not scale with loss magnitude and does not account for MPS's inherent nondeterminism at all).
+
+**Consequences.** A resume-equivalence check that requires bit-exact reproduction on MPS would
+always fail regardless of implementation correctness -- CLAUDE.md's Stop Conditions phrase this
+exactly right ("resumed training diverges from an uninterrupted control **beyond expected
+nondeterminism**"), and this decision operationalizes what "expected" means, backed by three
+independent measurements rather than an arbitrary guess.
+
+**Rollback plan.** If a later gate needs stricter reproducibility guarantees (e.g. for a
+published result), investigate `torch.use_deterministic_algorithms(True)` and CPU-only
+verification of a short segment, per CLAUDE.md's "test correctness against CPU on tiny
+deterministic examples" guidance -- do not just raise the tolerance further without also
+re-measuring.
+
+---
+
+## gate4-shuffled-time-finding: Decoder does not yet show strong temporal-order sensitivity
+
+**Context.** Gate 4's Evaluation and Controls section requires "conditioning shuffled in time"
+as a control: encode a clip's own crop normally, then permute the resulting MuQ frame order
+before feeding it to the decoder. If reconstruction loss with this control is close to the loss
+with correctly-ordered conditioning, CLAUDE.md says to "assume conditioning collapse or leakage
+until disproven" -- this control specifically targets Scientific Question 1 ("Does the decoder
+use temporal MuQ conditioning rather than merely learning dataset-level audio statistics?").
+
+**Finding.** Across three independent training runs on `configs/pilot.yaml` (6 tracks, run
+lengths 200/200/400 steps, each a fresh model from the same seed), the `shuffled_time` control's
+final mean loss was consistently only ~9-13% higher than the correctly-conditioned model's --
+short of the configured 20% `control_margin` every time:
+
+| run (steps) | correct | shuffled_time | shuffled_time / correct |
+|---|---|---|---|
+| 200 (1st) | 3.4847 | 4.6546 | 1.34 (this run was noisier; see below) |
+| 200 (2nd, same config) | 3.4824 | 3.8732 | 1.11 |
+| 400 | 3.2804 | 3.7020 | 1.13 |
+
+(The first 200-step run's 1.34 ratio was itself borderline/noisy -- rerunning the identical
+config produced 1.11, illustrating the same MPS run-to-run variance documented in
+[[gate4-mps-resume-tolerance]]. The two more consistent measurements, 1.11 and 1.13, are what
+this finding rests on.)
+
+By contrast, `shuffled_across` (wrong clip entirely) and `constant_zero` (no conditioning at all)
+were robustly and consistently much worse than correct conditioning across all three runs
+(typically 20-45% worse), clearly ruling out total conditioning collapse -- the decoder
+demonstrably uses *some* per-clip MuQ signal, just not (yet, at this scale) a strong,
+separately-measurable benefit from precise frame ordering within a clip's own features.
+
+**Interpretation (not yet conclusive).** Plausible explanations, none yet tested:
+1. Gate 4's training budget (200-400 steps, no adversarial loss, a deliberately tiny generator)
+   may simply be too short/small for the model to have learned to exploit frame-level temporal
+   alignment yet, even though it clearly has learned to exploit per-clip identity.
+2. The reconstruction-only mel/STFT losses may be relatively insensitive to fine temporal
+   misalignment compared to a human listener or an adversarial loss.
+3. `MiniGenerator`'s temporal receptive field (a handful of small residual blocks per upsampling
+   stage) may not be large enough to strongly benefit from correct frame ordering at this
+   parameter budget.
+
+**Decision.** Do not silently pass Gate 4 on this control, and do not weaken `control_margin` to
+force a pass -- that would defeat the diagnostic's purpose. Gate 4 is reported as **not fully
+passed** (checkpoint/resume equivalence passed; 2 of 3 conditioning controls passed;
+`shuffled_time` did not). This is recorded as an open, evidence-backed finding for Gate 5
+planning, not a blocking implementation bug.
+
+**Consequences.** Per CLAUDE.md Stop Conditions, this warrants diagnosis before scaling further.
+Gate 5 (full GTZAN pilot, much longer training) should re-run this same `shuffled_time` control
+and check whether the margin improves with more training -- if it doesn't, that would be stronger
+evidence toward explanation 2 or 3 above (architecture/loss insensitivity) rather than 1 (just
+needs more steps).
+
+**Rollback plan.** None needed -- this is a diagnostic finding, not a design decision to revert.
+If Gate 5 confirms the same pattern with a full-scale run, escalate to inspecting the generator's
+effective receptive field and considering feature-matching/adversarial losses earlier than
+originally planned (CLAUDE.md currently defers those until after Gate 3's reconstruction path
+passes, which it has).

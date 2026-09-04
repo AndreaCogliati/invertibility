@@ -120,6 +120,24 @@ class TrainingConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class PilotConfig:
+    """Gate 4 (short pilot) parameters: a larger deterministic subset than Gate 3, plus
+    checkpoint/resume equivalence and conditioning-control settings."""
+
+    track_ids: tuple[str, ...] = ()  # empty: pick num_tracks deterministically
+    num_tracks: int = 6
+    crop_frames: int = 50  # crop_samples = crop_frames * decoder.total_upsample
+    steps: int = 200
+    learning_rate: float = 2.0e-4
+    log_every: int = 50
+    checkpoint_every: int = 100
+    resume_test_at: int = 100  # step at which to checkpoint, tear down, and resume
+    resume_tolerance: float = 0.02  # max relative loss difference, resumed vs uninterrupted
+    control_margin: float = 0.2  # correct-conditioning loss must be <= (1 - margin) * control loss
+    run_name: str = "gate4_short_pilot"
+
+
+@dataclasses.dataclass(frozen=True)
 class ExperimentConfig:
     name: str
     environment: EnvironmentConfig
@@ -131,6 +149,7 @@ class ExperimentConfig:
     mel_loss: MelLossConfig
     stft_loss: STFTLossConfig
     training: TrainingConfig
+    pilot: PilotConfig
 
 
 def _dataclass_from_dict(cls: type, payload: dict[str, Any]) -> Any:
@@ -180,6 +199,11 @@ def load_config(path: str | Path) -> ExperimentConfig:
         training_raw["overfit_track_ids"] = tuple(training_raw["overfit_track_ids"])
     training = _dataclass_from_dict(TrainingConfig, training_raw)
 
+    pilot_raw = dict(raw.get("pilot", {}))
+    if "track_ids" in pilot_raw:
+        pilot_raw["track_ids"] = tuple(pilot_raw["track_ids"])
+    pilot = _dataclass_from_dict(PilotConfig, pilot_raw)
+
     return ExperimentConfig(
         name=raw["name"],
         environment=environment,
@@ -191,6 +215,7 @@ def load_config(path: str | Path) -> ExperimentConfig:
         mel_loss=mel_loss,
         stft_loss=stft_loss,
         training=training,
+        pilot=pilot,
     )
 
 

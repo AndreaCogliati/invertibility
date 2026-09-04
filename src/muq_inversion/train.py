@@ -33,19 +33,34 @@ class OverfitClip:
     waveform: torch.Tensor  # (num_samples,) float32 CPU, resampled to target_sample_rate
 
 
-def select_overfit_tracks(config: ExperimentConfig, records: list[TrackRecord]) -> list[TrackRecord]:
+def select_tracks(
+    records: list[TrackRecord],
+    *,
+    split_seed: int,
+    num_tracks: int,
+    explicit_track_ids: tuple[str, ...] = (),
+) -> list[TrackRecord]:
+    """Deterministic (or explicit) selection of usable train-split tracks, shared by Gate 3's
+    tiny-set overfit and Gate 4's short pilot."""
     usable = [r for r in records if not r.corrupted and r.split == "train"]
-    if config.training.overfit_track_ids:
+    if explicit_track_ids:
         by_id = {r.track_id: r for r in usable}
-        missing = [t for t in config.training.overfit_track_ids if t not in by_id]
+        missing = [t for t in explicit_track_ids if t not in by_id]
         if missing:
-            raise ValueError(f"training.overfit_track_ids not found in usable train split: {missing}")
-        return [by_id[t] for t in config.training.overfit_track_ids]
+            raise ValueError(f"track ids not found in usable train split: {missing}")
+        return [by_id[t] for t in explicit_track_ids]
 
-    ordered = sorted(
-        usable, key=lambda r: deterministic_unit_interval(r.track_id, config.data.split_seed)
+    ordered = sorted(usable, key=lambda r: deterministic_unit_interval(r.track_id, split_seed))
+    return ordered[:num_tracks]
+
+
+def select_overfit_tracks(config: ExperimentConfig, records: list[TrackRecord]) -> list[TrackRecord]:
+    return select_tracks(
+        records,
+        split_seed=config.data.split_seed,
+        num_tracks=config.training.num_overfit_tracks,
+        explicit_track_ids=config.training.overfit_track_ids,
     )
-    return ordered[: config.training.num_overfit_tracks]
 
 
 def load_clips(records: list[TrackRecord], raw_dir: Path, target_sample_rate: int) -> list[OverfitClip]:
