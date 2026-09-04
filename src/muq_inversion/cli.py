@@ -1,5 +1,6 @@
-"""CLI entry points. `doctor` (Gate 0), `prepare-data` (Gate 1), and `extract`
-(Gate 2) are implemented so far -- train/evaluate belong to later gates."""
+"""CLI entry points. `doctor` (Gate 0), `prepare-data` (Gate 1), `extract`
+(Gate 2), and `train` (Gate 3) are implemented so far -- evaluate belongs to
+a later gate."""
 
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ from .logging_utils import (
     select_device,
 )
 from .models.generator import MiniGenerator
+from .train import run_gate3
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -209,7 +211,7 @@ def cmd_extract(config: ExperimentConfig) -> int:
 
     _set_seeds(config.environment.seed)
 
-    from .encoder import FrozenMuQEncoder, measure_feature_geometry
+    from .encoder import FrozenMuQEncoder, MuQProbeResult, measure_feature_geometry
 
     encoder = FrozenMuQEncoder(config.muq.model_id, device)
 
@@ -222,7 +224,7 @@ def cmd_extract(config: ExperimentConfig) -> int:
     print(f"probing {len(probe_tracks)} tracks: {[t.track_id for t in probe_tracks]}")
 
     print("\n--- Extracting across several durations ---")
-    probes: list[tuple[str, str, object, torch.Tensor]] = []
+    probes: list[tuple[str, str, MuQProbeResult, torch.Tensor]] = []
     for record in probe_tracks:
         path = raw_dir / record.relative_path
         waveform_np, _orig_sr = load_resample_validate(path, config.data.target_sample_rate)
@@ -369,6 +371,9 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser = subparsers.add_parser("extract", help="Gate 2: feature contract")
     extract_parser.add_argument("--config", required=True, type=Path)
 
+    train_parser = subparsers.add_parser("train", help="Gate 3: tiny-set overfit")
+    train_parser.add_argument("--config", required=True, type=Path)
+
     return parser
 
 
@@ -387,6 +392,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_prepare_data(config)
     if args.command == "extract":
         return cmd_extract(config)
+    if args.command == "train":
+        return run_gate3(config, REPO_ROOT)
     raise ValueError(f"Unknown command: {args.command}")
 
 

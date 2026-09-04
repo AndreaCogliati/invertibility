@@ -32,6 +32,9 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 - Doctor (Gate 0): `uv run python -m muq_inversion.cli doctor --config configs/smoke.yaml`
 - Prepare data (Gate 1): `uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml`
 - Extract / feature contract (Gate 2): `uv run python -m muq_inversion.cli extract --config configs/smoke.yaml`
+- Train / tiny-set overfit (Gate 3): `uv run python -m muq_inversion.cli train --config configs/smoke.yaml`
+- Run/checkpoint output: `runs/<training.run_name>/checkpoints/{latest,step_NNNNNN}.pt` (git-ignored).
+- Reference/reconstruction/difference audio: `artifacts/<training.run_name>/<track_id>_*.wav` (git-ignored).
 - Manifest output: `data/manifests/gtzan_manifest_<config-name>.csv` (tracked in git).
 - Raw GTZAN audio lives at `data/raw/gtzan/genres/<genre>/<genre>.NNNNN.wav` (git-ignored).
 - Cache entries live at `data/cache/<key[:2]>/<key>.pt` (git-ignored), each a
@@ -47,7 +50,8 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 
 ## Validated design choices
 
-- See [[muq-transformers-compat]], [[gtzan-source-and-defects]], [[decoder-upsample-placeholder]].
+- See [[muq-transformers-compat]], [[gtzan-source-and-defects]], [[decoder-upsample-placeholder]],
+  [[gate2-cache-format]], [[gate3-crop-alignment]], [[gate3-loss-configs]].
 
 ## Known platform limitations
 
@@ -65,3 +69,11 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 - Gate 2 (feature contract): PASSED on 2026-09-04 -- 15 probes (3 real GTZAN tracks x 5 durations)
   all finite, frame rate consistent within tolerance, alignment within 1 frame, 30 cache
   (tensor, dtype) round-trips exact, float16 quantization error within documented tolerance.
+- Gate 3 (tiny-set overfit): PASSED on 2026-09-04 -- 2 fixed clips (`pop.00012`, `disco.00049`),
+  500 steps, crop_frames=50 (2.0s / 48000 samples), Adam lr=2e-4. Combined (mel + multi-res STFT)
+  loss: mean 7.51 (first 10 steps) -> 3.18 (last 10 steps), ratio 0.42 (PASS threshold <= 0.5).
+  Checkpoint round-trip verified (`runs/gate3_tiny_overfit/checkpoints/latest.pt`, step 500, all
+  required keys present). Reference/reconstruction/difference WAVs written to
+  `artifacts/gate3_tiny_overfit/`, all finite and non-silent (reconstruction peak ~0.53 vs.
+  reference peak ~1.0 -- expected for an early, short, tiny-model overfit run, not yet
+  high-fidelity). See [[gate3-crop-alignment]], [[gate3-loss-configs]].

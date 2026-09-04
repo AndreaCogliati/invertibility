@@ -106,3 +106,54 @@ Append-only lab notebook. Unverified until summarized into MEMORY.md/DECISIONS.m
   save/load round trip, missing-key returns None, no leftover tmp file after a successful save).
   `ruff check .` clean, `uv run pytest -q` -> 18 passed.
 - Registered `extract` in `cli.py`'s argparse subcommands and `main()` dispatch.
+- User asked to commit Gate 2 work; committed as `78692c0` on `main`.
+
+## 2026-09-04 (cont.) -- Gate 3 (Tiny-Set Overfit)
+
+- Tested `torch.stft` and `torchaudio.transforms.MelSpectrogram` directly on `mps` before writing
+  any loss code -- both ran without error on a synthetic batch, so no CPU fallback needed for the
+  loss computation (would have needed an explicit, non-silent fallback path otherwise per
+  CLAUDE.md rule 10).
+- `models/losses.py`: `MelSpectrogramLoss` (log-mel L1) and `MultiResolutionSTFTLoss`
+  (spectral-convergence + log-magnitude L1, averaged over 3 resolutions). Configs chosen
+  explicitly for 24kHz music, not copied from speech HiFi-GAN -- see
+  [[DECISIONS.md#gate3-loss-configs]].
+- `checkpoint.py`: `build_checkpoint_state` assembles the full CLAUDE.md-required field list
+  (weights, optimizer state, step, RNG states incl. `torch.mps.get_rng_state()` when MPS is
+  available, resolved config, manifest hash, `uv.lock` hash, environment manifest, best metric).
+  `save_checkpoint_atomic` writes via temp-file + `os.replace` (same pattern as `cache.py`), then
+  immediately reloads and checks required keys are present -- deletes and raises if not. Full
+  resume-equivalence testing is explicitly deferred to Gate 4 (CLAUDE.md's own gate ordering
+  already separates "train on tiny set" from "validate checkpoint/resume equivalence").
+- `train.py`: `select_overfit_tracks` reuses the same `deterministic_unit_interval` hash used for
+  Gate 1/2's deterministic sampling, restricted to `split == "train"` and `not corrupted`, so the
+  same 1-4 clips are chosen every run unless `training.overfit_track_ids` is set explicitly.
+  Measured `feature_channels` from a real MuQ forward pass before constructing `MiniGenerator`
+  (never hard-coded 1024) -- caught this mid-write: first draft had a
+  `hasattr(config.muq, "feature_channels")` fallback to a hard-coded 1024, which would have
+  silently assumed the channel count instead of measuring it; replaced with an actual probe call.
+  Training crops are `crop_frames * generator.total_upsample` samples (see
+  [[DECISIONS.md#gate3-crop-alignment]]) so the generator's output length always exactly equals
+  the cropped target waveform -- no padding/trimming logic needed at this stage.
+- Encoder features are computed via `encoder.encode(crop).clone()` -- `encode()` runs under its
+  own `@torch.inference_mode()`; cloning *outside* that context (after the `with` block/decorator
+  scope exits) converts the inference tensor into a normal, autograd-eligible leaf tensor for the
+  generator's input, per PyTorch's documented workaround, without ever requiring gradients
+  through the frozen MuQ encoder.
+- First `train` run on `configs/smoke.yaml`: 2 clips (`pop.00012`, `disco.00049`), crop_frames=50
+  (48000 samples/2.0s), 500 steps, Adam lr=2e-4, alternating clips per step. Loss went
+  10.78 -> ~2.8-3.2 (mean first-10 7.51 -> mean last-10 3.18, ratio 0.42 vs. 0.5 PASS threshold).
+  Checkpoints written to `runs/gate3_tiny_overfit/checkpoints/` (`step_000250.pt`, `step_000500.pt`,
+  `latest.pt`, ~31MB each); reloaded `latest.pt` standalone afterward and confirmed all required
+  keys present, `step == 500`, hashes recorded. Reference/reconstruction/difference WAVs written
+  to `artifacts/gate3_tiny_overfit/`; spot-checked with soundfile -- all finite, reconstruction
+  peak ~0.53 vs. reference peak ~1.0 (expected for a short, tiny-model, non-adversarial overfit
+  run -- amplitude is not yet the point, per-clip loss decrease is).
+- Added `tests/test_losses.py` (zero-loss-for-identical-signal + positive-for-different-signal for
+  both losses, plus a mismatched-lengths rejection test), `tests/test_checkpoint.py` (round trip,
+  no leftover tmp file, rejects a checkpoint missing required keys), `tests/test_train.py`
+  (deterministic/explicit track selection, corrupted/non-train exclusion, crop length/rejection).
+  `ruff check .` clean; `uv run pytest -q` -> 33 passed.
+- Registered `train` in `cli.py`'s argparse subcommands and `main()` dispatch. Also fixed a
+  pre-existing loose `object` type annotation on `cmd_extract`'s `probes` list (flagged by the
+  IDE's mypy diagnostics while editing nearby code) to the real `MuQProbeResult` type.

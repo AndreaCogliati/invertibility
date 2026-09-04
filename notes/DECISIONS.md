@@ -163,3 +163,78 @@ already a hard dependency of this project, so no new cost.
 **Rollback plan.** If cache entries ever need to be inspected/edited by non-Python tooling,
 switch to the two-file `.npy`+`.json` layout and add a manifest-level checksum step to close the
 cross-file atomicity gap.
+
+---
+
+## gate3-crop-alignment: Training crops are exact multiples of the decoder's upsample product
+
+**Context.** [[decoder-upsample-placeholder]]'s Gate 2 update found that real, non-hand-picked-
+length GTZAN clips do not land on an exact 960-samples-per-frame boundary (measured
+`samples_per_frame = 960.0067` for full-length clips vs. exactly `960.0` for crops whose sample
+count is itself a multiple of 960). Decoder Design item 3 requires either an exact match or "an
+explicitly documented alignment/cropping strategy."
+
+**Alternatives considered.**
+
+1. Pad/trim the generator's output to match whatever length the target waveform happens to be --
+   adds a runtime alignment step (and a design decision about which side to pad/trim) that has to
+   be re-justified every time crop length or upsample factors change.
+2. Pad/trim MuQ's *input* so its frame count times 960 exactly equals the input length, accepting
+   a few discarded/zero-padded samples at the tail -- workable, but adds complexity for no benefit
+   at the training-crop scale we're using now.
+3. Choose training crop lengths that are themselves exact multiples of 960 samples, so MuQ (which
+   downsamples by an exact integer factor of 960, confirmed in Gate 2 for any input length that is
+   itself such a multiple) always returns exactly `crop_samples / 960` frames, and the generator's
+   output (`num_frames * total_upsample = num_frames * 960 = crop_samples`) is length-identical to
+   the target waveform with no padding/trimming logic at all.
+
+**Decision.** Option 3. `training.crop_frames` (a frame count, default 50 -> 2.0s) is the single
+source of truth; `crop_samples = crop_frames * generator.total_upsample` is derived in `train.py`,
+never configured directly as a raw sample/second count. This only applies to *training and
+validation crops* -- it says nothing about arbitrary-length inference in later gates, which would
+still need one of alternatives 1/2 if ever required.
+
+**Evidence.** Gate 3's first run (`configs/smoke.yaml`, `crop_frames=50` -> `crop_samples=48000`)
+produced generator output shaped exactly `(1, 48000)` against a `(1, 48000)` target with no
+length mismatch at any of the 500 training steps or the final reference/reconstruction/difference
+export.
+
+**Consequences.** Training/validation crop durations are constrained to multiples of 960 samples
+(40ms at 24kHz) -- a negligible constraint in practice, since any desired crop duration can be
+rounded to the nearest 40ms.
+
+**Rollback plan.** If a later gate needs arbitrary-length reconstruction (not fixed training
+crops), revisit alternatives 1/2 above and document the chosen padding/trimming convention then.
+
+---
+
+## gate3-loss-configs: Reconstruction losses configured explicitly for 24kHz music
+
+**Context.** CLAUDE.md's Decoder Design section explicitly warns against copying speech-specific
+HiFi-GAN constants (originally tuned for 22.05kHz speech) blindly onto 24kHz music.
+
+**Decision.**
+
+- `MelSpectrogramLoss`: `n_fft=2048`, `hop_length=300`, `win_length=1200` (50ms window / 12.5ms
+  hop at 24kHz -- long enough to resolve low musical pitches, short enough hop for rhythmic
+  transients), `n_mels=128`, `fmin=0.0`, `fmax=12000.0` (the true Nyquist frequency at 24kHz, not
+  a speech-band cutoff like 8000Hz).
+- `MultiResolutionSTFTLoss`: three resolutions, `fft_sizes=(512, 1024, 2048)`,
+  `hop_sizes=(50, 120, 240)`, `win_lengths=(240, 600, 1200)` -- the same relative
+  short/medium/long spectral-resolution spread used in Parallel WaveGAN's multi-res STFT loss,
+  which is a universal (not speech-specific) vocoder loss, rescaled proportionally for 24kHz
+  instead of 22.05kHz.
+
+All of these are config fields (`mel_loss`, `stft_loss` in the YAML configs), not hard-coded
+constants, so they can be revisited without a code change.
+
+**Evidence.** `tests/test_losses.py` confirms both losses are exactly zero for identical
+signals and positive for different signals. Verified both `torchaudio.transforms.MelSpectrogram`
+and `torch.stft` run natively on MPS in this environment (no CPU fallback needed for the loss
+computation). Gate 3's tiny-set overfit run showed the combined loss drop from a mean of 7.51
+(first 10 steps) to 3.18 (last 10 steps) -- ratio 0.42, under the 0.5 PASS threshold.
+
+**Consequences.** None yet; these are training-only losses, not part of the frozen MuQ contract.
+
+**Rollback plan.** Revisit resolutions/window lengths if Gate 4/5 reconstructions show a specific
+frequency band or time resolution is poorly captured.

@@ -38,4 +38,28 @@ feature_contract:
 
 decoder:
   base_channels: 256
-  upsample_rates: [5, 4, 4, 3, 2, 2]  # product 960; provisional until Gate 2 measures MuQ's real ratio
+  upsample_rates: [5, 4, 4, 3, 2, 2]  # product 960, confirmed exact in Gate 2 against real GTZAN audio
+
+mel_loss:
+  n_fft: 2048
+  hop_length: 300
+  win_length: 1200
+  n_mels: 128
+  fmin: 0.0
+  fmax: 12000.0
+
+stft_loss:
+  fft_sizes: [512, 1024, 2048]
+  hop_sizes: [50, 120, 240]
+  win_lengths: [240, 600, 1200]
+
+training:
+  overfit_track_ids: []
+  num_overfit_tracks: 2
+  crop_frames: 50
+  steps: 500
+  learning_rate: 0.0002
+  log_every: 50
+  checkpoint_every: 250
+  loss_decrease_ratio: 0.5
+  run_name: gate3_tiny_overfit

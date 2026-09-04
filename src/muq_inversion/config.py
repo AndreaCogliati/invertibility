@@ -75,11 +75,48 @@ class FeatureContractConfig:
 
 @dataclasses.dataclass(frozen=True)
 class DecoderConfig:
-    """Shape-only placeholder for Gate 0. upsample_rates is provisional until
-    Gate 2 measures MuQ's actual samples-per-frame ratio (CLAUDE.md Decoder Design)."""
+    """upsample_rates' product (960) was confirmed against real GTZAN audio in Gate 2
+    (see notes/DECISIONS.md#decoder-upsample-placeholder): MuQ downsamples by an exact
+    integer factor of 960, so training crops must be exact multiples of 960 samples."""
 
     base_channels: int = 256
-    upsample_rates: tuple[int, ...] = (5, 4, 4, 3, 2, 2)  # product 960, provisional
+    upsample_rates: tuple[int, ...] = (5, 4, 4, 3, 2, 2)  # product 960
+
+
+@dataclasses.dataclass(frozen=True)
+class MelLossConfig:
+    """Explicit for 24kHz music -- see notes/DECISIONS.md#gate3-loss-configs."""
+
+    n_fft: int = 2048
+    hop_length: int = 300
+    win_length: int = 1200
+    n_mels: int = 128
+    fmin: float = 0.0
+    fmax: float = 12000.0  # Nyquist at 24kHz
+
+
+@dataclasses.dataclass(frozen=True)
+class STFTLossConfig:
+    """Multi-resolution STFT loss configuration -- see notes/DECISIONS.md#gate3-loss-configs."""
+
+    fft_sizes: tuple[int, ...] = (512, 1024, 2048)
+    hop_sizes: tuple[int, ...] = (50, 120, 240)
+    win_lengths: tuple[int, ...] = (240, 600, 1200)
+
+
+@dataclasses.dataclass(frozen=True)
+class TrainingConfig:
+    """Gate 3 (tiny-set overfit) training loop parameters."""
+
+    overfit_track_ids: tuple[str, ...] = ()  # empty: pick num_overfit_tracks deterministically
+    num_overfit_tracks: int = 2
+    crop_frames: int = 50  # crop_samples = crop_frames * decoder.total_upsample
+    steps: int = 500
+    learning_rate: float = 2.0e-4
+    log_every: int = 50
+    checkpoint_every: int = 250
+    loss_decrease_ratio: float = 0.5  # PASS if final/initial loss <= this
+    run_name: str = "gate3_tiny_overfit"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,6 +128,9 @@ class ExperimentConfig:
     cache: CacheConfig
     feature_contract: FeatureContractConfig
     decoder: DecoderConfig
+    mel_loss: MelLossConfig
+    stft_loss: STFTLossConfig
+    training: TrainingConfig
 
 
 def _dataclass_from_dict(cls: type, payload: dict[str, Any]) -> Any:
@@ -127,6 +167,19 @@ def load_config(path: str | Path) -> ExperimentConfig:
         decoder_raw["upsample_rates"] = tuple(decoder_raw["upsample_rates"])
     decoder = _dataclass_from_dict(DecoderConfig, decoder_raw)
 
+    mel_loss = _dataclass_from_dict(MelLossConfig, raw.get("mel_loss", {}))
+
+    stft_loss_raw = dict(raw.get("stft_loss", {}))
+    for key in ("fft_sizes", "hop_sizes", "win_lengths"):
+        if key in stft_loss_raw:
+            stft_loss_raw[key] = tuple(stft_loss_raw[key])
+    stft_loss = _dataclass_from_dict(STFTLossConfig, stft_loss_raw)
+
+    training_raw = dict(raw.get("training", {}))
+    if "overfit_track_ids" in training_raw:
+        training_raw["overfit_track_ids"] = tuple(training_raw["overfit_track_ids"])
+    training = _dataclass_from_dict(TrainingConfig, training_raw)
+
     return ExperimentConfig(
         name=raw["name"],
         environment=environment,
@@ -135,6 +188,9 @@ def load_config(path: str | Path) -> ExperimentConfig:
         cache=cache,
         feature_contract=feature_contract,
         decoder=decoder,
+        mel_loss=mel_loss,
+        stft_loss=stft_loss,
+        training=training,
     )
 
 

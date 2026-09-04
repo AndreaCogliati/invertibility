@@ -2,8 +2,8 @@
 
 ## Current gate
 
-Gate 0 (Environment Doctor), Gate 1 (Data Integrity), and Gate 2 (Feature Contract) complete.
-Gate 3 (Tiny-Set Overfit) not started.
+Gates 0-3 complete (Environment Doctor, Data Integrity, Feature Contract, Tiny-Set Overfit).
+Gate 4 (Short Pilot) not started.
 
 ## Exact last successful commands
 
@@ -11,66 +11,76 @@ Gate 3 (Tiny-Set Overfit) not started.
 uv run python -m muq_inversion.cli doctor --config configs/smoke.yaml
 uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml
 uv run python -m muq_inversion.cli extract --config configs/smoke.yaml
-uv run pytest -q       # 18 passed
+uv run python -m muq_inversion.cli train --config configs/smoke.yaml
+uv run pytest -q       # 33 passed
 uv run ruff check .    # all checks passed
 ```
 
-All passed on 2026-09-04 (macOS 26.6.2, M4 Max, device=mps). `extract` was run twice to confirm
-idempotent/resumable cache writes.
+All passed on 2026-09-04 (macOS 26.6.2, M4 Max, device=mps).
 
 ## Run/checkpoint path
 
-No `runs/` directories yet -- Gates 0-2 don't train anything. Data artifacts:
-
-- `data/raw/gtzan/` (git-ignored, extracted GTZAN audio, marker file `.extracted`)
-- `data/manifests/gtzan_manifest_smoke.csv` (tracked, 1000 rows, 793/94/113 train/val/test)
-- `data/cache/<key[:2]>/<key>.pt` (git-ignored, 30 entries from the Gate 2 probe: 3 tracks x 5
-  durations x {float32, float16})
+- `runs/gate3_tiny_overfit/checkpoints/{latest,step_000250,step_000500}.pt` (git-ignored) --
+  step 500, 2 fixed clips, loss ratio 0.42 (PASS threshold 0.5).
+- `artifacts/gate3_tiny_overfit/{pop.00012,disco.00049}_{reference,reconstruction,difference}.wav`
+  (git-ignored).
+- `data/cache/<key[:2]>/<key>.pt` (git-ignored, Gate 2's 30 probe entries; Gate 3 does NOT read
+  from this cache -- it re-encodes each training crop live through frozen MuQ, since crop offsets
+  are randomized per step and the Gate 2 cache only holds a few fixed-duration prefix crops).
 
 ## Next command
 
-Implement Gate 3 (Tiny-Set Overfit): train on 1-4 fixed clips and confirm reconstruction loss
-decreases substantially. This does not exist yet -- `cli.py` currently only has `doctor`,
-`prepare-data`, and `extract` subcommands. Building it requires, per CLAUDE.md:
+Implement Gate 4 (Short Pilot): train on a small deterministic subset (more than 4 clips),
+validate checkpoint/resume equivalence, and run shuffled/constant-conditioning controls. Per
+CLAUDE.md this requires:
 
-- `train.py`: a training loop, reconstruction-only (mel + multi-resolution STFT losses per
-  Decoder Design -- no adversarial/discriminator losses yet, those come after Gate 3 passes).
-- `checkpoint.py`: atomic checkpointing with the full state list from CLAUDE.md's Checkpointing
-  section (generator/optimizer/scheduler state, RNG states, epoch/step counters, resolved config,
-  manifest hash, `uv.lock` hash, git commit + dirty status).
-- Resolving [[DECISIONS.md#decoder-upsample-placeholder]]'s open question: real audio does not
-  land on an exact samples-per-frame multiple (measured 960.0067 for full-length clips vs. an
-  exact 960 for hand-picked crop lengths) -- Gate 3's data loader needs an explicit crop/pad
-  alignment strategy between the waveform target and `num_frames * upsample_product`, not an
-  assumption that they already match.
-- Decide on a fixed segment/crop length for the "short aligned random crops" CLAUDE.md's Data
-  Pipeline section calls for -- not chosen yet, no config field exists for it.
-- Mel and multi-resolution STFT loss implementations belong in `models/losses.py` (currently
-  doesn't exist).
+- A `--resume auto` path in `cli.py`'s `train` command (or a new flag) that finds the newest
+  valid checkpoint, quarantines a corrupt partial one if found, and restores optimizer/RNG state
+  via `checkpoint.restore_rng_state` (already written, not yet wired into `train.py`'s loop) --
+  then a resumed run's next N steps must be compared against an uninterrupted control run for
+  numerical equivalence (CLAUDE.md Stop Conditions: "resumed training diverges from an
+  uninterrupted control beyond expected nondeterminism").
+- Real batching/dataset iteration over a subset of the train split (Gate 3 only ever alternates
+  between 1-4 fixed clips) -- needs an actual `DataLoader`/sampler with a resumable cursor
+  (CLAUDE.md Checkpointing: "data-sampler state or equivalent deterministic cursor").
+  `sample_training_crop`/`fixed_validation_crop` in `train.py` generalize to this without changes,
+  but track selection/iteration order does not yet.
+- Shuffled-conditioning and constant/zero-conditioning controls (CLAUDE.md Evaluation and
+  Controls) -- not implemented at all yet. These are Gate 4 requirements, deliberately not built
+  during Gate 3 since Gate 3 only needed to prove the reconstruction path works at all.
+- A validation split subset and validation-loss tracking (Gate 3 has no val/test evaluation --
+  it only trains and reconstructs the same fixed clips it trained on, which is correct for an
+  overfit test but not for a pilot).
 
 ## Blockers
 
-None currently. `configs/pilot.yaml` is presently identical to `configs/smoke.yaml` except for
-`name:` -- it should probably diverge (e.g. subset size, crop length) once Gate 3/4 introduce
-training-specific config fields; not needed yet.
+None currently. `configs/pilot.yaml` is still identical to `configs/smoke.yaml` except `name:` --
+Gate 4 should give it a real distinct identity (larger `training.num_overfit_tracks`-equivalent
+subset size, `steps`, etc.) since it's meant for a larger, non-toy run.
 
-## Expected verification criteria for Gate 3
+## Expected verification criteria for Gate 4
 
-Per CLAUDE.md: train on 1-4 fixed clips, confirm reconstruction losses decrease substantially,
-save reference/reconstruction/difference audio. If this gate fails, do not launch a full run
-(i.e. do not proceed to Gate 4).
+Per CLAUDE.md: checkpoint/resume equivalence validated, real conditioning materially
+outperforms shuffled/constant-conditioning controls (if controls sound similar to correctly-
+conditioned output, assume conditioning collapse/leakage until disproven). Do not proceed to
+Gate 5 until this passes.
 
 ## Notes for whoever resumes this
 
 - The `transformers==4.55.0` pin in `pyproject.toml`/`uv.lock` is load-bearing -- see
   [[DECISIONS.md#muq-transformers-compat]]. Do not let a routine `uv add` bump it past `<5.0`
   without re-running Gate 0.
-- `decoder.upsample_rates` in the configs is still a placeholder, now with an important caveat
-  from Gate 2 (non-integral samples-per-frame on real audio) -- see
-  [[DECISIONS.md#decoder-upsample-placeholder]].
+- Training/validation crop lengths must stay in units of `training.crop_frames` (multiples of the
+  decoder's `total_upsample`, currently 960 samples/frame) -- see
+  [[DECISIONS.md#gate3-crop-alignment]]. Do not introduce a raw-seconds crop-length config field
+  without also handling the non-integral alignment case it would reintroduce.
+- Mel/STFT loss configs are explicit, not copied from speech HiFi-GAN -- see
+  [[DECISIONS.md#gate3-loss-configs]]; revisit if Gate 4/5 reconstructions show a specific
+  frequency band or time resolution captured poorly.
 - The GTZAN split is checksum-deduplicated but not artist-aware -- see
   [[DECISIONS.md#gtzan-source-and-defects]].
 - Cache entries are single `.pt` files (`torch.save`), not `.npy`/`.npz` -- see
-  [[DECISIONS.md#gate2-cache-format]]. `feature_contract.lowprecision_max_abs_error` (0.05) is a
-  round conservative bound, not derived from data in advance; measured float16 error so far is
-  0.0074, well under it.
+  [[DECISIONS.md#gate2-cache-format]]. Gate 3 training does not use this cache (see "Run/
+  checkpoint path" above) -- only `extract` (Gate 2) populates/reads it so far.
+- `checkpoint.restore_rng_state` exists but is not called anywhere yet -- it's for Gate 4's
+  resume path.
