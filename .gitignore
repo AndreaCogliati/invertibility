@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Ignored per CLAUDE.md repository layout
+data/raw/
+data/processed/
+data/cache/
+runs/
+artifacts/
+
+.DS_Store

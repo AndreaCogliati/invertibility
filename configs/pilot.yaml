@@ -1,0 +1,28 @@
+name: pilot
+
+environment:
+  seed: 0
+  device: auto
+  allow_cpu_fallback: false
+  dtype: float32
+
+muq:
+  model_id: OpenMuQ/MuQ-large-msd-iter
+  sample_rate: 24000
+
+data:
+  raw_dir: data/raw/gtzan
+  processed_dir: data/processed
+  manifests_dir: data/manifests
+  source: "hf:marsyas/gtzan"
+  expected_track_count: 1000
+  original_sample_rate: 22050
+  target_sample_rate: 24000
+  split_seed: 1234
+  train_fraction: 0.8
+  val_fraction: 0.1
+  test_fraction: 0.1
+
+decoder:
+  base_channels: 256
+  upsample_rates: [5, 4, 4, 3, 2, 2]  # product 960; provisional until Gate 2 measures MuQ's real ratio
