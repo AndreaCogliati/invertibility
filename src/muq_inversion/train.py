@@ -1,10 +1,16 @@
 """Gate 3: tiny-set overfit training loop (CLAUDE.md Required Validation Gates).
 
 Trains the small HiFi-GAN-style generator, conditioned on frozen MuQ
-features, to reconstruct 1-4 fixed clips. Reconstruction-only losses (mel +
-multi-resolution STFT) per CLAUDE.md's Decoder Design -- no discriminators
-yet. If reconstruction loss does not decrease substantially, this reports
-FAIL and the caller must not proceed to Gate 4.
+features, to reconstruct 1-4 fixed clips. Reconstruction losses (mel +
+multi-resolution STFT) run from step 1; multi-period/multi-scale
+discriminators and adversarial + feature-matching losses are added after
+`training.adversarial_warmup_steps`, per CLAUDE.md's Decoder Design
+ordering ("add adversarial ... losses only after the model can overfit a
+tiny subset and produce time-aligned audio") -- see
+notes/DECISIONS.md#gate3-adversarial-losses for why this was added (the
+purely reconstruction-only path converged but produced perceptually buzzy,
+phase-incoherent audio). If reconstruction loss does not decrease
+substantially, this reports FAIL and the caller must not proceed to Gate 4.
 """
 
 from __future__ import annotations
@@ -23,8 +29,15 @@ from .checkpoint import build_checkpoint_state, save_checkpoint_atomic
 from .config import ExperimentConfig
 from .data import TrackRecord, deterministic_unit_interval, read_manifest
 from .encoder import FrozenMuQEncoder
+from .models.discriminators import MultiPeriodDiscriminator, MultiScaleDiscriminator
 from .models.generator import MiniGenerator
-from .models.losses import MelSpectrogramLoss, MultiResolutionSTFTLoss
+from .models.losses import (
+    MelSpectrogramLoss,
+    MultiResolutionSTFTLoss,
+    discriminator_loss,
+    feature_matching_loss,
+    generator_adversarial_loss,
+)
 
 
 @dataclasses.dataclass
@@ -144,6 +157,8 @@ def run_gate3(config: ExperimentConfig, repo_root: Path) -> int:
         input_channels=probe_result.feature_channels,
         base_channels=config.decoder.base_channels,
         upsample_rates=config.decoder.upsample_rates,
+        resblock_kernel_sizes=config.decoder.resblock_kernel_sizes,
+        resblock_dilation_sizes=config.decoder.resblock_dilation_sizes,
     ).to(device)
     crop_samples = config.training.crop_frames * generator.total_upsample
     print(f"crop_samples: {crop_samples} ({crop_samples / config.data.target_sample_rate:.2f}s)")
@@ -172,15 +187,41 @@ def run_gate3(config: ExperimentConfig, repo_root: Path) -> int:
         win_lengths=config.stft_loss.win_lengths,
     ).to(device)
 
-    optimizer = torch.optim.Adam(generator.parameters(), lr=config.training.learning_rate)
+    optimizer = torch.optim.Adam(
+        generator.parameters(),
+        lr=config.training.learning_rate,
+        betas=config.training.generator_betas,
+    )
+
+    mpd = MultiPeriodDiscriminator(
+        periods=config.discriminator.period_periods,
+        channels=config.discriminator.period_channels,
+        kernel_size=config.discriminator.period_kernel_size,
+        stride=config.discriminator.period_stride,
+    ).to(device)
+    msd = MultiScaleDiscriminator(
+        num_scales=config.discriminator.num_scales,
+        channels=config.discriminator.scale_channels,
+    ).to(device)
+    discriminators = torch.nn.ModuleDict({"mpd": mpd, "msd": msd})
+    disc_optimizer = torch.optim.Adam(
+        discriminators.parameters(),
+        lr=config.training.discriminator_learning_rate,
+        betas=config.training.discriminator_betas,
+    )
 
     run_dir = repo_root / "runs" / config.training.run_name
     checkpoint_dir = run_dir / "checkpoints"
 
     print("\n--- Training (Gate 3 tiny-set overfit) ---")
+    print(f"adversarial training starts at step {config.training.adversarial_warmup_steps + 1}")
     loss_history: list[float] = []
+    recon_loss_history: list[float] = []
     generator.train()
+    mpd.train()
+    msd.train()
     for step in range(1, config.training.steps + 1):
+        adversarial_active = step > config.training.adversarial_warmup_steps
         clip = clips[step % len(clips)]
         crop = sample_training_crop(clip, crop_samples, rng).unsqueeze(0).to(device)
 
@@ -192,17 +233,50 @@ def run_gate3(config: ExperimentConfig, repo_root: Path) -> int:
         prediction = generator(features)
         mel_l = mel_loss_fn(prediction, crop)
         stft_total, stft_sc, stft_mag = stft_loss_fn(prediction, crop)
-        loss = mel_l + stft_total
+        recon_loss = mel_l + stft_total
+
+        adv_loss_value = 0.0
+        fm_loss_value = 0.0
+        disc_loss_value = 0.0
+        if adversarial_active:
+            # Discriminator step: real vs. generator output detached (no generator gradients).
+            mpd_real, mpd_fake, _, _ = mpd(crop, prediction.detach())
+            msd_real, msd_fake, _, _ = msd(crop, prediction.detach())
+            d_loss = discriminator_loss(mpd_real, mpd_fake) + discriminator_loss(msd_real, msd_fake)
+            disc_optimizer.zero_grad()
+            d_loss.backward()
+            disc_optimizer.step()
+            disc_loss_value = d_loss.item()
+
+            # Generator step: re-run discriminators (now updated) with gradients flowing back
+            # through the generator's output only, not through the discriminators' own weights.
+            _mpd_real2, mpd_fake2, mpd_fmap_real, mpd_fmap_fake = mpd(crop, prediction)
+            _msd_real2, msd_fake2, msd_fmap_real, msd_fmap_fake = msd(crop, prediction)
+            adv_loss = generator_adversarial_loss(mpd_fake2) + generator_adversarial_loss(msd_fake2)
+            fm_loss = feature_matching_loss(mpd_fmap_real, mpd_fmap_fake) + feature_matching_loss(
+                msd_fmap_real, msd_fmap_fake
+            )
+            loss = (
+                config.training.reconstruction_loss_weight * recon_loss
+                + config.training.adversarial_loss_weight * adv_loss
+                + config.training.feature_matching_loss_weight * fm_loss
+            )
+            adv_loss_value = adv_loss.item()
+            fm_loss_value = fm_loss.item()
+        else:
+            loss = recon_loss
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         loss_history.append(loss.item())
+        recon_loss_history.append(recon_loss.item())
         if step == 1 or step % config.training.log_every == 0 or step == config.training.steps:
             print(
                 f"step {step}/{config.training.steps}: loss={loss.item():.4f} "
                 f"mel={mel_l.item():.4f} stft_sc={stft_sc.item():.4f} stft_mag={stft_mag.item():.4f} "
+                f"adv={adv_loss_value:.4f} fm={fm_loss_value:.4f} disc={disc_loss_value:.4f} "
                 f"clip={clip.track_id}"
             )
 
@@ -215,16 +289,23 @@ def run_gate3(config: ExperimentConfig, repo_root: Path) -> int:
                 optimizer=optimizer,
                 step=step,
                 samples_seen=step * crop_samples,
-                best_metric=min(loss_history),
+                best_metric=min(recon_loss_history),
+                discriminator=discriminators,
+                discriminator_optimizer=disc_optimizer,
             )
             save_checkpoint_atomic(checkpoint_dir / f"step_{step:06d}.pt", state)
             save_checkpoint_atomic(checkpoint_dir / "latest.pt", state)
 
-    initial_loss = sum(loss_history[:10]) / min(10, len(loss_history))
-    final_loss = sum(loss_history[-10:]) / min(10, len(loss_history))
+    # Gate on the reconstruction loss (mel + STFT) specifically, not the combined training
+    # objective: once adversarial training starts, the combined loss includes a generator-vs-
+    # discriminator minimax term that oscillates by design rather than monotonically decreasing
+    # -- that's healthy GAN training, not a Gate 3 failure. See
+    # notes/DECISIONS.md#gate3-adversarial-losses.
+    initial_loss = sum(recon_loss_history[:10]) / min(10, len(recon_loss_history))
+    final_loss = sum(recon_loss_history[-10:]) / min(10, len(recon_loss_history))
     ratio = final_loss / initial_loss if initial_loss > 0 else float("inf")
-    print(f"\nmean loss (first 10 steps): {initial_loss:.4f}")
-    print(f"mean loss (last 10 steps): {final_loss:.4f}")
+    print(f"\nmean reconstruction loss (first 10 steps): {initial_loss:.4f}")
+    print(f"mean reconstruction loss (last 10 steps): {final_loss:.4f}")
     print(f"final/initial ratio: {ratio:.4f} (PASS threshold: <= {config.training.loss_decrease_ratio})")
 
     print("\n--- Saving reference/reconstruction/difference audio ---")

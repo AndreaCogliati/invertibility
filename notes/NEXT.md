@@ -2,90 +2,133 @@
 
 ## Current gate
 
-Gates 0-3 complete and passed. Gate 4 (Short Pilot) implemented and run, but **NOT FULLY
-PASSED**: checkpoint/resume equivalence passed; 2 of 3 conditioning controls
-(`shuffled_across`, `constant_zero`) passed; `shuffled_time` did not (see
-[[DECISIONS.md#gate4-shuffled-time-finding]]). Per CLAUDE.md Stop Conditions, do not proceed to
-Gate 5 (full GTZAN pilot) until this is investigated further -- this is the single blocker.
+Still investigating Gate 3 (Tiny-Set Overfit) -- explicitly not proceeding to Gate 4/5. The
+capacity-scaling line of investigation is **closed** (see conclusions below); the audio-quality
+question that started it is still open, now reframed around training depth vs. representation
+limits rather than decoder size.
+
+**Conclusions reached this session (full reasoning in
+[[DECISIONS.md#gate3-capacity-ruled-out]]):**
+
+1. Capacity is not the bottleneck. Tested twice (512 vs 1024 `base_channels`, everything else
+   held fixed): once confounded by a training collapse, once cleanly after fixing the optimizer.
+   In the clean comparison, 1024 channels won on every objective metric (mel correlation
+   0.97/0.98 vs 0.92/0.93, waveform correlation positive vs. near-zero/negative) yet the user
+   heard **no perceptible difference** -- "equally mediocre: recognizable but still plagued by
+   artifacts." Do not pursue further capacity scaling (e.g. 2048 channels) without first changing
+   something else, or expect the same "metrics improve, ears don't" pattern to repeat.
+2. Mel/waveform correlation are demonstrably poor proxies for the artifact that matters
+   perceptually here (almost certainly phase/fine-temporal structure, which magnitude-domain
+   losses and simple correlation metrics are both largely blind to). Do not use metric deltas
+   alone to decide whether a change helped, in either direction.
+3. Content survives decoding (rhythm, harmony, coarse identity -- recognizable across all
+   listening rounds and both capacity levels) but clean phase/fine structure does not. This is
+   progress on CLAUDE.md's Scientific Question 3: it rules out "decoder too small" as the
+   implementation-side explanation. Two explanations remain open and undistinguished:
+   - **(1) Adversarial training is too shallow** -- 15,000 steps on 2 overfit clips is small by
+     vocoder-GAN standards. Cheap-ish and directly actionable to test.
+   - **(2) MuQ's representation (confirmed 25 Hz / 960 samples-per-frame = 40ms) may impose a
+     hard ceiling** on recoverable fine time-domain detail, independent of decoder/training.
+     Harder to test; would need either explanation (1) to be ruled out first (train much longer/
+     broader and see if the gap closes) or a more targeted diagnostic (error concentration by
+     frequency band, transient region, or track/genre).
 
 ## Exact last successful commands
 
 ```bash
-uv run python -m muq_inversion.cli doctor --config configs/smoke.yaml
-uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml
-uv run python -m muq_inversion.cli prepare-data --config configs/pilot.yaml   # separate manifest, same split
-uv run python -m muq_inversion.cli extract --config configs/smoke.yaml
-uv run python -m muq_inversion.cli train --config configs/smoke.yaml
-uv run python -m muq_inversion.cli pilot --config configs/pilot.yaml         # Gate 4 -- see caveat above
-uv run pytest -q       # 38 passed
+uv run python -m muq_inversion.cli train --config configs/smoke.yaml        # 512, betas fixed, PASSED, no collapse
+uv run python -m muq_inversion.cli train --config configs/smoke_1024.yaml   # 1024, betas fixed, PASSED, no collapse
+uv run pytest -q       # 47 passed
 uv run ruff check .    # all checks passed
 ```
 
-All ran successfully (exit code 1 for `pilot` is expected/correct given the finding above -- the
-command itself works, the *result* is the thing not yet resolved). 2026-09-04, macOS 26.6.2,
-M4 Max, device=mps.
+2026-09-06, macOS, M4 Max, device=mps. No source/config changes since these runs -- this session's
+final activity was documentation consolidation only (this file, MEMORY.md, DECISIONS.md,
+SCRATCHPAD.md), no new experiments.
 
 ## Run/checkpoint path
 
-- `runs/gate4_short_pilot/checkpoints/{latest,resume_test_checkpoint}.pt` (git-ignored) -- final
-  run: 6 tracks, 400 steps, resume equivalence PASSED (max relative diff 0.063, tolerance 0.08).
-- `artifacts/gate4_short_pilot/<track_id>_{reference,reconstruction}.wav` (git-ignored, 6 tracks).
-- `runs/gate3_tiny_overfit/`, `artifacts/gate3_tiny_overfit/` still present from Gate 3.
-- `data/manifests/gtzan_manifest_{smoke,pilot}.csv` both tracked (identical split, since both use
-  `split_seed: 1234` -- separate files only because the manifest filename is keyed by config name).
+- `runs/gate3_tiny_overfit/checkpoints/{latest,step_015000}.pt` (git-ignored) -- MRF-512, betas
+  `(0.8, 0.99)`, converged cleanly, mel correlation 0.924/0.932. Current "official" working config.
+- `runs/gate3_tiny_overfit_mrf1024/checkpoints/{latest,step_001000..step_015000}.pt`
+  (git-ignored) -- MRF-1024, betas `(0.8, 0.99)`, converged cleanly, mel correlation 0.965/0.976
+  (best objective result of the investigation, not perceptually distinguishable from 512).
+- `artifacts/gate3_tiny_overfit/` and `artifacts/gate3_tiny_overfit_mrf1024/` hold the
+  reference/reconstruction/difference WAVs for the final (betas-fixed) versions of both configs.
+- `configs/smoke_1024.yaml` and `data/manifests/gtzan_manifest_smoke_1024.csv` tracked, retained
+  as a documented negative-for-perception (positive-for-metrics) result, not deleted.
+- `configs/smoke.yaml` carries this session's two changes: the MRF/1024-vs-512 capacity work and
+  the `generator_betas`/`discriminator_betas` optimizer fix (both `(0.8, 0.99)`, replacing
+  PyTorch's default `(0.9, 0.999)` which was the root cause of the original 1024-channel collapse).
 
 ## Next command
 
-**Before Gate 5:** investigate the `shuffled_time` finding from
-[[DECISIONS.md#gate4-shuffled-time-finding]]. Concretely, in order of cost:
+**Blocked on a decision, not a technical step.** Proposed to the user (not yet answered): test
+explanation (1) above with a much longer and/or broader adversarial training run before drawing
+any conclusion about explanation (2). Concretely, if greenlit, that would mean either:
 
-1. Re-run `uv run python -m muq_inversion.cli pilot --config configs/pilot.yaml` with
-   `pilot.steps` increased further (e.g. 800-1000) to see whether the `shuffled_time` margin
-   improves with more training -- if it doesn't, that points away from "just needs more steps."
-2. Listen to `artifacts/gate4_short_pilot/*_reconstruction.wav` vs `*_reference.wav` directly --
-   objective loss numbers are diagnostics, not proof, per CLAUDE.md's Evaluation and Controls
-   section ("Do not claim successful inversion solely from a low training loss").
-3. If the pattern persists, consider whether `MiniGenerator`'s receptive field (currently just a
-   couple of small residual blocks per upsampling stage, sized for a Gate-0 shape test, not
-   tuned since) is large enough to exploit frame-level temporal alignment at all.
+- Extending `training.steps` substantially beyond 15,000 (e.g. 50,000-100,000) on the same 2
+  fixed clips, to see if the adversarial phase eventually resolves the phase/ringing artifact
+  given much more time, or
+- Moving to a broader training regime (more than 2 clips, i.e. edging toward Gate 4/5 territory)
+  since a GAN discriminator trained on only 2 examples may simply not have enough signal to learn
+  a general notion of "natural phase" vs. overfitting to two specific clips' spectra.
 
-Once resolved (or explicitly accepted as a documented, re-checked-at-Gate-5 open question),
-implement Gate 5 (GTZAN Pilot): train on the full committed split, save periodic fixed validation
-reconstructions, report objective metrics. Requires:
+Do not start either without the user's go-ahead -- this is a real fork (more steps on the tiny set
+vs. more data) and the choice affects how to interpret the result afterward.
 
-- Batching beyond the current 1-clip-per-step rotation -- Gate 5 trains on the full train split,
-  not a hand-picked handful of tracks.
-- A real validation loop against the `val` split (Gates 3/4 only ever reconstruct clips they
-  trained on).
-- Periodic checkpointing/sample-saving on a schedule appropriate for a longer run (current
-  `checkpoint_every`/`log_every` values are tuned for Gate 3/4's short runs).
+**Alternative if the user wants to stop here:** treat "recognizable content, capacity-independent
+artifacts" as the documented Gate 3 finding, and move toward writing up the interpretability
+result as-is, or pivot to the still-open Gate 4 `shuffled_time` finding
+([[DECISIONS.md#gate4-shuffled-time-finding]]) instead.
+
+Once Gate 3's audio-quality investigation reaches a stopping point the user is satisfied with,
+remaining follow-up work before Gate 5:
+
+1. Port the final Gate 3 architecture/optimizer settings into `pilot.py` (Gate 4 currently has
+   none of the MRF/discriminator/adversarial-loss/beta work from this session).
+2. Re-investigate [[DECISIONS.md#gate4-shuffled-time-finding]] with the updated decoder.
+3. Implement Gate 5 (GTZAN Pilot): batching beyond 1-clip-per-step, a real validation loop, and a
+   longer-run-appropriate checkpoint/logging schedule.
 
 ## Blockers
 
-The `shuffled_time` finding above. Not a code defect (implementation verified via
-`tests/test_pilot.py`'s stub-encoder tests and three independent full pilot runs) -- an open
-scientific question this project's Gate 4 was specifically designed to surface.
+1. **Decision needed from the user**: longer-training experiment on the tiny set, broader-data
+   experiment, or stop the Gate 3 audio-quality investigation here. Nothing else is blocked on
+   anything technical.
+2. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
+   dormant while Gate 3 is being investigated with a decoder Gate 4 hasn't seen yet.
 
 ## Expected verification criteria for Gate 5
 
-Per CLAUDE.md: train on the committed GTZAN split, save periodic fixed validation
-reconstructions, report objective metrics and qualitative caveats.
+Not yet reached. Per CLAUDE.md: train on the committed GTZAN split, save periodic fixed
+validation reconstructions, report objective metrics and qualitative caveats -- blocked behind
+Gate 3/4 resolution above.
 
 ## Notes for whoever resumes this
 
+- **Read [[DECISIONS.md#gate3-capacity-ruled-out]] first** -- it's the load-bearing conclusion of
+  this entire session's Gate 3 work and directly determines what the next experiment should be.
 - The `transformers==4.55.0` pin in `pyproject.toml`/`uv.lock` is load-bearing -- see
   [[DECISIONS.md#muq-transformers-compat]]. Do not let a routine `uv add` bump it past `<5.0`
   without re-running Gate 0.
 - Training/validation crop lengths must stay in units of `crop_frames` (multiples of 960 samples)
   -- see [[DECISIONS.md#gate3-crop-alignment]].
 - Mel/STFT loss configs are explicit, not copied from speech HiFi-GAN -- see
-  [[DECISIONS.md#gate3-loss-configs]].
+  [[DECISIONS.md#gate3-loss-configs]]. They are also now known to be poor proxies for the
+  perceptual artifact that matters here -- see [[DECISIONS.md#gate3-capacity-ruled-out]] Finding 2.
 - MPS training is not bit-exact reproducible even with identical seeds; resume-equivalence
-  tolerances must be calibrated per run length, not copy-pasted -- see
-  [[DECISIONS.md#gate4-mps-resume-tolerance]]. If `pilot.steps` changes, re-measure and adjust
-  `pilot.resume_tolerance` rather than assuming the current 0.08 still holds.
+  tolerances must be calibrated per run length -- see [[DECISIONS.md#gate4-mps-resume-tolerance]].
 - The GTZAN split is checksum-deduplicated but not artist-aware -- see
   [[DECISIONS.md#gtzan-source-and-defects]].
 - Cache entries are single `.pt` files (`torch.save`), not `.npy`/`.npz` -- see
-  [[DECISIONS.md#gate2-cache-format]]. Neither Gate 3 nor Gate 4 training reads this cache --
-  only `extract` (Gate 2) populates/reads it so far; both training loops re-encode crops live.
+  [[DECISIONS.md#gate2-cache-format]]. Neither Gate 3 nor Gate 4 training reads this cache.
+- The generator uses a proper MRF (multi-receptive-field) design -- `upsample_rates=(8,6,5,4)`,
+  see [[DECISIONS.md#gate3-generator-capacity]]. Do not increase `base_channels` further as a
+  first move -- see the capacity conclusions above.
+- **Adam betas for both optimizers are `(0.8, 0.99)`, not PyTorch's default `(0.9, 0.999)`** --
+  fixed a real, reproducible GAN training collapse. Do not revert without re-testing for collapse
+  (see [[DECISIONS.md#gate3-capacity-1024]] "Update (optimizer-beta fix applied)").
+- MuQ's frame rate (25 Hz / 960 samples per frame / 40ms) is a measured, confirmed fact (Gate 2)
+  now suspected -- not confirmed -- to be a possible hard ceiling on reconstruction fidelity. See
+  [[DECISIONS.md#gate3-capacity-ruled-out]] Finding 3, explanation 2.

@@ -37,8 +37,11 @@ feature_contract:
   lowprecision_max_abs_error: 0.05
 
 decoder:
-  base_channels: 256
-  upsample_rates: [5, 4, 4, 3, 2, 2]  # product 960, confirmed exact in Gate 2 against real GTZAN audio
+  base_channels: 512
+  upsample_rates: [8, 6, 5, 4]  # product 960 (confirmed exact in Gate 2); 4 stages, not 6, to
+                                 # preserve channel width longer through the network
+  resblock_kernel_sizes: [3, 7, 11]
+  resblock_dilation_sizes: [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
 
 mel_loss:
   n_fft: 2048

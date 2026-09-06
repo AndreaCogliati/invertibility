@@ -86,6 +86,8 @@ def _make_generator_and_optimizer(
         input_channels=feature_channels,
         base_channels=config.decoder.base_channels,
         upsample_rates=config.decoder.upsample_rates,
+        resblock_kernel_sizes=config.decoder.resblock_kernel_sizes,
+        resblock_dilation_sizes=config.decoder.resblock_dilation_sizes,
     ).to(device)
     optimizer = torch.optim.Adam(generator.parameters(), lr=learning_rate)
     return generator, optimizer

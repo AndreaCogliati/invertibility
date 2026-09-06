@@ -90,6 +90,8 @@ def cmd_doctor(config: ExperimentConfig) -> int:
         input_channels=probe.feature_channels,
         base_channels=config.decoder.base_channels,
         upsample_rates=config.decoder.upsample_rates,
+        resblock_kernel_sizes=config.decoder.resblock_kernel_sizes,
+        resblock_dilation_sizes=config.decoder.resblock_dilation_sizes,
     ).to(device)
     generator.eval()
 

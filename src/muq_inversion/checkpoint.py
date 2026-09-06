@@ -43,9 +43,15 @@ def build_checkpoint_state(
     step: int,
     samples_seen: int,
     best_metric: float | None,
+    discriminator: torch.nn.Module | None = None,
+    discriminator_optimizer: torch.optim.Optimizer | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the full checkpoint payload required by CLAUDE.md's Checkpointing section.
+
+    `discriminator`/`discriminator_optimizer` are optional: CLAUDE.md requires "generator and
+    discriminator weights" once discriminators exist (Decoder Design item 6), but earlier
+    reconstruction-only checkpoints have no discriminator to save.
 
     `extra` carries any additional state a specific training loop needs restored on resume
     (e.g. a dedicated crop-sampling RNG's state) without hard-coding it into this shared module.
@@ -56,6 +62,10 @@ def build_checkpoint_state(
     return {
         "generator_state_dict": generator.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
+        "discriminator_state_dict": discriminator.state_dict() if discriminator is not None else None,
+        "discriminator_optimizer_state_dict": (
+            discriminator_optimizer.state_dict() if discriminator_optimizer is not None else None
+        ),
         "step": step,
         "samples_seen": samples_seen,
         "python_rng_state": random.getstate(),

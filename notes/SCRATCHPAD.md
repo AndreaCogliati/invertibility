@@ -209,3 +209,251 @@ Append-only lab notebook. Unverified until summarized into MEMORY.md/DECISIONS.m
   forced past via threshold-tuning.
 - `ruff check .` clean; `uv run pytest -q` -> 38 passed (added `tests/test_pilot.py`, 5 tests).
 - Registered `pilot` in `cli.py`'s argparse subcommands and `main()` dispatch.
+- User asked to commit Gate 4 work; committed as `95f333e` on `main`.
+
+## 2026-09-04 (cont.) -- User feedback: Gate 3 audio is "buzzing noise", add discriminators
+
+- User listened to Gate 3's artifacts and reported them as unrecognizable buzzing noise. Before
+  changing anything, tried the user's literal suggestion first (more steps): reran at 5000 steps
+  (10x). Loss barely moved (2.78 at step 500 -> 2.64 at step 5000), confirming a plateau, not an
+  undertraining problem.
+- Diagnosed with quantitative checks (not just guessing): log-mel spectrogram correlation
+  reference vs. reconstruction was 0.89-0.91, frame-energy-contour correlation 0.98 (both good --
+  the model *is* learning spectral envelope/dynamics), but raw waveform sample correlation was
+  ~0. Concluded: classic phase-incoherence symptom of magnitude-only losses (mel + multi-res STFT
+  never constrain phase) -- doesn't improve with more steps because the loss has no phase
+  gradient at all. This matches CLAUDE.md's own plan: add discriminators "only after the
+  reconstruction path passes smoke tests" -- which it had (good spectral match, converged loss).
+- Asked the user how to proceed (bigger model vs. discriminators vs. revert steps) rather than
+  silently picking one -- they chose discriminators.
+- Implemented `models/discriminators.py`: `PeriodDiscriminator`/`MultiPeriodDiscriminator`
+  (reshapes waveform into 2D frames by period, 2D convs) and `ScaleDiscriminator`/
+  `MultiScaleDiscriminator` (1D convs on raw + avg-pooled waveform, grouped convs). Kept channel
+  widths <=256 (vs. original HiFi-GAN's 1024) to match this project's "deliberately small"
+  philosophy. Used `torch.nn.utils.parametrizations.weight_norm` (non-deprecated) rather than the
+  deprecated `torch.nn.utils.weight_norm`.
+- Initially wrote `ScaleDiscriminator`'s grouped-conv channel counts with a defensive
+  `min(g, c_in, c_out)` clamp meant to avoid invalid group counts -- realized this doesn't
+  actually guarantee `groups` divides both channel counts evenly (Conv2d/Conv1d's real
+  requirement), so replaced it with an explicit divisibility assertion instead of silently
+  producing a possibly-still-invalid value.
+- Added `discriminator_loss`, `generator_adversarial_loss`, `feature_matching_loss` (LSGAN-style)
+  to `models/losses.py`. Added `DiscriminatorConfig` and adversarial fields
+  (`adversarial_warmup_steps=500`, `discriminator_learning_rate`, `adversarial_loss_weight`,
+  `feature_matching_loss_weight`) to `TrainingConfig`. `configs/pilot.yaml` didn't need any edits
+  -- dataclass defaults cover it, confirmed by loading both configs and checking the new fields.
+- Extended `checkpoint.build_checkpoint_state` with optional `discriminator`/
+  `discriminator_optimizer` params (backward-compatible via `None` defaults) -- wrapped MPD+MSD
+  in a single `nn.ModuleDict` so they share one `discriminator_state_dict` entry rather than
+  inventing a second ad-hoc state field.
+- Updated `train.py`'s training loop: reconstruction-only for `adversarial_warmup_steps`, then
+  each step does a discriminator update (real vs. `prediction.detach()`) followed by a generator
+  update (re-running the now-updated discriminators, this time with gradients flowing through the
+  generator's output) combining reconstruction + weighted adversarial + weighted feature-matching
+  losses.
+- Ran a cheap 20-step smoke test first (own scratch config in `/tmp`, deleted after) with
+  `adversarial_warmup_steps=5` to exercise both the warmup and post-warmup code paths cheaply
+  before committing to a full run -- caught nothing broken, but this is exactly the kind of check
+  that would have caught a shape mismatch cheaply if one existed.
+- Added `tests/test_discriminators.py` (9 tests: MPD/MSD output shapes, invalid-groups rejection,
+  all three GAN loss functions' zero/positive cases, and a gradient-flow check confirming
+  `generator_adversarial_loss` actually backprops into a fake input tensor).
+- First full run (8000 steps, `configs/smoke.yaml`) technically succeeded but Gate 3's own
+  pass/fail check then reported FAILED (ratio 0.57 vs. 0.5 threshold) despite mel loss clearly
+  still converging (5.15 -> 0.76). Root-caused: the ratio was computed on the *combined* loss,
+  which after warmup includes the adversarial minimax term -- oscillates by design in healthy GAN
+  training, doesn't monotonically shrink. Fixed by tracking `recon_loss_history` (mel + STFT only)
+  separately and gating on that instead -- this is actually a more faithful implementation of
+  CLAUDE.md's literal wording ("confirm that **reconstruction** losses decrease substantially")
+  than the pre-discriminator code was.
+- Made the classic backgrounding mistake while re-running: used both the Bash tool's
+  `run_in_background: true` AND a trailing `&` in the same command. The trailing `&` caused the
+  wrapped shell to return immediately (job orphaned in the background), so the harness reported
+  "completed" almost instantly while the real `python` process (verified via `ps aux`) kept
+  running for several more minutes, and the redirected log file sat at 4 lines the whole time due
+  to stdio block-buffering on a non-tty destination. Recovered by using Monitor with an
+  until-loop waiting on the actual PID (`kill -0 $PID`) rather than trusting the harness's
+  (in this case wrong) "completed" signal. Lesson: never combine `run_in_background: true` with a
+  trailing `&`; the tool parameter already does the backgrounding.
+- Re-ran cleanly: reconstruction loss ratio 0.40 (PASS). Reconstruction peak amplitude moved
+  closer to the reference's (`disco.00049`: 0.76 -> 0.92-0.99 across the two post-fix runs, ref
+  peak 1.0) -- consistent with a discriminator teaching the generator to use realistic dynamic
+  range, though not proof of reduced buzziness by itself. Mel correlation stayed similar
+  (0.82-0.84, not obviously improved -- consistent with the known GAN-vocoder tradeoff of
+  spectral-distance metrics for perceptual naturalness). Sent reference + reconstruction WAVs for
+  both clips directly to the user via SendUserFile rather than declaring the buzzing fixed from
+  metrics alone -- per CLAUDE.md's explicit instruction not to claim successful inversion from
+  loss numbers, and because waveform/mel correlation genuinely can't settle a perceptual question.
+- `ruff check .` clean; `uv run pytest -q` -> 47 passed.
+
+## 2026-09-04 (cont.) -- Gate 3 iterations 2-3 (brief backfill; full detail in DECISIONS.md)
+
+Detailed reasoning for both iterations went straight into DECISIONS.md/MEMORY.md at the time;
+backfilling a short pointer here per CLAUDE.md's protocol (SCRATCHPAD should log as things happen).
+
+- Iteration 2: user's verdict on iteration 1 was disco.00049 partially recognizable, pop.00012
+  worse. Added `training.reconstruction_loss_weight=10.0` (mel+STFT weighted 10x during the
+  adversarial phase only) and extended 8000 -> 15000 steps. Result: mel loss 0.77 -> 0.59, mel
+  correlation pop 0.82 -> 0.90, disco 0.84 -> 0.94. See [[DECISIONS.md#gate3-adversarial-losses]]
+  "Update" + "Decision (iteration 2)" sections.
+- Iteration 3: user's verdict on iteration 2 -- "still very poor: noise, buzzing, ringing."
+  Diagnosed as generator capacity (ringing after two rounds of loss tuning points at architecture).
+  Rewrote `models/generator.py` with a proper MRF fusion (3 parallel `ResBlock`s, kernel sizes
+  3/7/11, each with dilations 1/3/5 -- previously a sequential 2-block chain), refactored
+  `upsample_rates` from 6 stages `(5,4,4,3,2,2)` to 4 stages `(8,6,5,4)` (same product 960) so
+  channel width isn't halved away as aggressively, and doubled `base_channels` 256 -> 512. Timed
+  a 100-step run first (~0.095s/step) before the full 15000-step retrain. Result: mel loss
+  0.59 -> 0.48, mel correlation pop 0.90 -> 0.94, disco 0.94 -> 0.94 (held). Sent to user for a
+  third listening pass. See [[DECISIONS.md#gate3-generator-capacity]].
+
+## 2026-09-06 -- Capacity-isolation experiment: MRF-512 vs MRF-1024
+
+User's verdict on iteration 3 (MRF-512): "both excerpts have improved... disco.00049 is now
+recognizable... pop.00012 still contains substantial buzzing/noise, although rhythm and harmony
+are present." Given a prior finding that more training steps alone didn't help the smaller model,
+user asked for a controlled experiment isolating generator capacity specifically: 512 -> 1024
+base_channels, everything else held fixed, to distinguish "still too small" from "large enough,
+remaining limits are the objective/representation." Re-read CLAUDE.md and all notes files first
+per user's explicit instruction (also standard practice at session start per CLAUDE.md's own
+Memory and Scratchpad Protocol).
+
+- Created `configs/smoke_1024.yaml` as a full copy of `configs/smoke.yaml` (the current MRF-512
+  working config) with exactly two differences: `decoder.base_channels: 1024` and
+  `training.run_name: gate3_tiny_overfit_mrf1024` (distinct run name so this experiment's
+  checkpoints/artifacts don't overwrite the MRF-512 run's, per CLAUDE.md rule 8). Did not touch
+  `configs/smoke.yaml` (confirmed via `git diff --stat` before and after -- no changes to it from
+  this work). `upsample_rates`, `resblock_kernel_sizes`, `resblock_dilation_sizes`, all loss
+  configs, and all training schedule fields (steps, warmup, learning rates, loss weights) are
+  byte-identical to `smoke.yaml`, to isolate capacity as the only variable.
+- Ran `prepare-data --config configs/smoke_1024.yaml` to generate its manifest (same split,
+  `split_seed: 1234` unchanged, so identical train/val/test assignment -- just re-indexed under
+  the new config name since manifest filenames are keyed by `config.name`).
+- Ran `doctor --config configs/smoke_1024.yaml`: Gate 0 PASSED, decoder shape-only pass produces
+  `(1, 48000)` from `(1, 50, 1024)` input, same as the 512 config (upsample_rates/total_upsample
+  unchanged, only channel width differs).
+- Computed parameter counts directly (fresh `MiniGenerator` instances, not from a checkpoint):
+  base_channels=512 -> 17,235,585 params (68.9MB fp32); base_channels=1024 -> 61,582,593 params
+  (246.3MB fp32) -- a 3.57x increase (sub-4x because the input projection and output head scale
+  linearly with channels, not quadratically like the interior conv layers).
+- Measured MPS memory directly (`torch.mps.current_allocated_memory()`/`driver_allocated_memory()`
+  after a few forward+backward steps on a fresh generator + Adam optimizer, batch 1, no encoder or
+  discriminators loaded): 512 -> 279.5MB current / 1271.9MB driver; 1024 -> 1007.0MB current /
+  2496.7MB driver. Comfortably within the M4 Max's 64GB unified memory; no swap risk anticipated.
+- Timed 100 steps end-to-end (own scratch config in `/tmp`, deleted after, plus a throwaway
+  manifest copy and run/artifacts dirs, all cleaned up) before committing to the full retrain:
+  ~19.8s total (100 steps, 50 warmup + 50 adversarial) vs. ~15.5s for the same test on the 512
+  config -- per-step cost ~0.128s vs. ~0.095s (~1.35x slower per step, well under the 3.57x
+  parameter-count increase, consistent with MPS/Metal having compute headroom on the M4 Max for
+  this workload rather than being purely parameter-count-bound). Projected full 15000-step run:
+  ~32 minutes.
+- Launched the real 15000-step run. Result: healthy and comparable to the 512-channel run through
+  step 3500 (mel=0.4873 @ 3500 for 1024 vs. 0.5770 @ 3500 for 512 -- 1024 was tracking *better*),
+  then between step 3500 and step 3750 `disc` crashed 0.68 -> 0.04 and kept falling toward 0.0000,
+  `adv` jumped to ~2.0 (LSGAN generator-loss theoretical max) and stayed saturated for the
+  remaining ~11,250 steps. Checked the final audio directly: both clips are a constant +1.0
+  signal (`std=0.0`, 100% of samples `|x|>0.999`) -- total generator collapse, `tanh` head fully
+  saturated. Final mel loss 8.08 (vs. 0.48 for 512), mel correlation 0.31/0.23 (vs. 0.94/0.94) --
+  these numbers describe the collapse, not a capacity comparison.
+- To get a fair comparison anyway, loaded `step_003000.pt` (last checkpoint before the collapse
+  window; `checkpoint_every=1000` so this was the closest available save) with a one-off inference
+  script (not part of `run_gate3` -- built inline, not saved as a repo script) and ran the fixed
+  validation crops through it: mel correlation 0.9448 (`pop.00012`) / 0.9496 (`disco.00049`) --
+  matching or slightly *exceeding* the fully-converged 512-channel model's 0.937/0.944, at only
+  3000/15000 steps. Waveform correlation also mildly positive (0.10/0.09) vs. 512's near-zero/
+  negative (-0.05/-0.11) -- small effect, not conclusive alone, but consistent with "not obviously
+  worse." This is the most useful data point from the whole experiment.
+- Estimated training wall time from checkpoint file timestamps (didn't wrap the actual
+  `uv run ... train` invocations in `time` since they ran via `run_in_background`): 512 -> ~32 min
+  (1000->15000 in 29m14s, extrapolated), 1024 -> ~45 min (1000->15000 in 41m33s) -- ~1.4x slower,
+  consistent with the ~1.35x measured in the 100-step timing test.
+- Diagnosed the likely root cause of the collapse: both the generator and discriminator optimizers
+  in `train.py` use plain `torch.optim.Adam(..., lr=...)` with PyTorch's *default* betas
+  `(0.9, 0.999)` -- never explicitly set anywhere. GAN training literature consistently avoids
+  `beta1=0.9` for exactly this failure mode (too much momentum in a minimax game lets the
+  discriminator pull decisively ahead); the original HiFi-GAN paper's own published optimizer
+  config uses `betas=(0.8, 0.99)`. This is a real, previously-unnoticed gap from established
+  practice, not something inherent to the capacity increase -- plausible mechanism: a larger
+  generator reaches the discriminator-fooling regime faster (matches the pre-collapse data showing
+  faster early convergence), which may have reached the instability threshold sooner in step-count
+  terms than the smaller model happened to, but wasn't tested directly.
+- Sent 4 audio files to the user: the two pre-collapse (step 3000) reconstructions and the two
+  final (collapsed, garbage) reconstructions, with a caption explaining which is which and why the
+  final ones aren't worth listening to closely.
+- Wrote up the full comparison table, four-question analysis, and recommendation in
+  [[DECISIONS.md#gate3-capacity-1024]]. No source code was changed this session -- purely a new
+  config file (`configs/smoke_1024.yaml`) plus its generated manifest; `configs/smoke.yaml` was
+  never touched (verified via `git diff --stat` at multiple points). `ruff check .`/`pytest -q`
+  re-confirmed clean/passing (47 tests, unaffected since no source changed).
+- Did not proceed to Gate 4/5, per explicit instruction -- still investigating Gate 3.
+
+## 2026-09-06 (cont.) -- Optimizer-beta fix, clean capacity comparison
+
+User said "go ahead with your suggestions" (the recommendation from the previous write-up: fix
+Adam betas, regression-check 512, then re-run 1024).
+
+- Added `training.generator_betas`/`discriminator_betas` config fields (both default
+  `(0.8, 0.99)`), wired into `train.py`'s two `torch.optim.Adam(...)` calls via `betas=`. Added
+  YAML tuple-parsing for the two new fields in `config.py`. Set explicitly in both
+  `configs/smoke.yaml` and `configs/smoke_1024.yaml` (not left as a hidden dataclass default).
+  `ruff check .`/`pytest -q` clean (47 tests, unaffected -- pure additive config change).
+- Regression check: re-ran `configs/smoke.yaml` (512, same run_name -- supersedes the previous
+  checkpoint, consistent with how this config has been treated all session). No collapse; `disc`
+  oscillated healthily ~0.4-0.7 throughout (vs. crashing to 0 in the failed 1024 attempt). Mel
+  loss trended to 0.32-0.45 near the end (vs. 0.478 with old betas -- a real improvement from the
+  fix alone, on top of just not breaking anything). Mel correlation 0.924/0.932 (comparable to the
+  prior 0.937/0.944 -- the exact final-step snapshot caught a slightly-off point in an otherwise
+  healthier training curve, not a regression).
+- Re-ran `configs/smoke_1024.yaml` (1024, same run_name -- supersedes the collapsed run) with the
+  same fix. Result: **no collapse** -- `disc` stayed in the same healthy ~0.4-0.7 band for all
+  15000 steps. Final mel loss 0.319 (best of any run this session), mel correlation
+  **0.9646/0.9755** (best of any run this session), waveform correlation positive for both tracks
+  for the first time (0.073/0.104) -- previously always near-zero or negative.
+- This is now a valid, clean capacity comparison (both runs stable, same optimizer settings,
+  same everything except `base_channels`): 1024 beats 512 on every objective metric measured.
+  Checkpoint/timing: 512 -> 250.6MB, ~31 min; 1024 -> 782.8MB, ~52 min (~1.7x wall time for
+  3.57x params -- sub-linear, consistent with earlier per-step timing measurements).
+- Sent 4 reconstruction WAVs to the user (512 pop/disco, 1024 pop/disco) for a direct A/B
+  listening comparison, with the metric summary in the caption.
+- Wrote up the full "Update (optimizer-beta fix applied)" section in
+  [[DECISIONS.md#gate3-capacity-1024]], including a revised comparison table and revised answers
+  to the four diagnostic questions now that the comparison is uncomplicated by instability.
+- Did not proceed to Gate 4/5. `configs/smoke.yaml` remains the nominal "working" config; whether
+  to promote the 1024-channel settings as the new default is left to the user's listening
+  judgment, not decided unilaterally from the metric improvements alone (per CLAUDE.md's
+  repeated instruction not to claim success from objective metrics without a listening check).
+
+## 2026-09-06 (cont.) -- Final listening verdict and synthesis; capacity line of investigation closed
+
+User's verdict on the clean 512-vs-1024 (betas-fixed) comparison: "I can't hear any noticeable
+improvement in the audio. They are equally mediocre: recognizable but still plagued by artifacts."
+Then asked directly: "What conclusions can we make?"
+
+- This confirms the predicted-but-unconfirmed alternative outcome flagged in the prior write-up
+  ("if the user's listening judgment says 1024 isn't perceptually better despite the metric
+  gains, that would itself be an interesting finding"). It happened.
+- Talked through the interpretation before writing anything down (this section is the write-up of
+  that reasoning, not a new investigation): capacity has now been tested twice (once confounded by
+  the optimizer collapse, once cleanly) and both times increasing it produced measurable metric
+  gains with no perceptible gain -- strong evidence capacity is not the active bottleneck, and
+  that mel/waveform correlation are not good proxies for whatever the human ear is actually
+  reacting to (almost certainly phase/fine-temporal structure, which magnitude-domain losses and
+  correlation metrics are both largely blind to).
+- Framed this as genuine, positive progress on CLAUDE.md's Scientific Question 3 ("is failure
+  caused by implementation/optimization problems, or by insufficient information in the
+  representation?") rather than a dead end: it rules out "decoder too small" specifically. Two
+  candidate explanations remain, not yet distinguished by anything run so far: (1) adversarial
+  training is still too shallow (15k steps on 2 overfit clips is small by vocoder-GAN standards),
+  or (2) MuQ's measured 25Hz/40ms-per-frame representation is a hard information ceiling
+  independent of decoder/training. Recommended testing (1) first since it's cheaper/more
+  actionable, but did not execute anything -- presented as a recommendation and asked the user
+  whether to proceed with a longer-training experiment or stop here.
+- Wrote up the full three-finding synthesis in `notes/DECISIONS.md` as a new entry
+  ([[DECISIONS.md#gate3-capacity-ruled-out]]), and appended the verbatim listening verdict to the
+  end of [[DECISIONS.md#gate3-capacity-1024]] (had to fix a section-ordering mistake from the
+  first edit attempt -- the verdict paragraph landed after the new synthesis section instead of
+  before it; caught by re-reading the file and moved it to the correct place).
+- User then asked to "summarize all the findings appropriately in the note files, so that the
+  task can be resumed later" -- this pass is that consolidation: added the synthesis to
+  DECISIONS.md, MEMORY.md (durable conclusion), this SCRATCHPAD.md entry (as-it-happened log),
+  and NEXT.md (resumability: current status, next command options, blockers) all in the same
+  pass, no new code or experiments run.

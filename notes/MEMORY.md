@@ -43,6 +43,20 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   `torch.save({"features": tensor, "metadata": dict})`, content-addressed by
   (audio checksum, MuQ model id, preprocessing dict, representation name, dtype).
 
+## Generator parameter counts (measured, 2026-09-06)
+
+For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(3,7,11)`,
+`resblock_dilation_sizes=((1,3,5),(1,3,5),(1,3,5))`, `input_channels=1024`):
+
+- `base_channels=512`: 17,235,585 params (68.9MB fp32), checkpoint file ~250.6MB (includes Adam
+  optimizer state + discriminators + discriminator optimizer state).
+- `base_channels=1024`: 61,582,593 params (246.3MB fp32, 3.57x), checkpoint file ~782.8MB.
+- MPS memory (generator + Adam only, no encoder/discriminators, batch 1): 512 ->
+  279.5MB current / 1271.9MB driver-allocated; 1024 -> 1007.0MB / 2496.7MB. Both comfortably
+  within the M4 Max's 64GB unified memory.
+- Per-step training time (100-step timed sample, 2 clips, discriminators active after warmup):
+  512 -> ~0.095s/step; 1024 -> ~0.128s/step (~1.35x, sub-linear vs. the 3.57x parameter increase).
+
 ## Cache size (measured, Gate 2, 2026-09-04)
 
 - float32: ~102,399 bytes/audio-second at 1024 channels, 25 fps.
@@ -54,7 +68,8 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
 
 - See [[muq-transformers-compat]], [[gtzan-source-and-defects]], [[decoder-upsample-placeholder]],
   [[gate2-cache-format]], [[gate3-crop-alignment]], [[gate3-loss-configs]],
-  [[gate4-mps-resume-tolerance]], [[gate4-shuffled-time-finding]].
+  [[gate4-mps-resume-tolerance]], [[gate4-shuffled-time-finding]], [[gate3-adversarial-losses]],
+  [[gate3-generator-capacity]], [[gate3-capacity-1024]], [[gate3-capacity-ruled-out]].
 
 ## Known platform limitations
 
@@ -88,3 +103,73 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   worse (~11-13% vs. the 20% margin, consistent across 2 independent runs) -- see
   [[gate4-shuffled-time-finding]] for the full evidence table and interpretation. This is an open
   diagnostic finding to re-check at Gate 5's larger scale, not a blocking implementation bug.
+- Gate 3 revisited (2026-09-04, same day): user listened to the reconstruction-only artifacts and
+  reported "buzzing noise... nothing remotely recognizable." Diagnosed as a phase-incoherence
+  symptom of magnitude-only losses (log-mel correlation 0.89-0.91 and frame-energy correlation
+  0.98 were both good; raw waveform correlation was ~0). Confirmed more steps alone don't help
+  (500->5000 steps only moved loss 2.78->2.64). Added multi-period/multi-scale discriminators +
+  adversarial/feature-matching losses (starting after a 500-step reconstruction-only warmup,
+  8000 steps total) per CLAUDE.md's own Decoder Design item 6. Re-ran: reconstruction loss ratio
+  0.40 (PASS), reconstruction peak amplitude closer to reference's across repeated runs (0.76 ->
+  0.92-0.99 for `disco.00049`, ref peak 1.0). Whether this actually fixed the perceptual buzziness
+  is a listening judgment pending user feedback -- audio sent directly rather than declared fixed
+  from metrics alone. See [[gate3-adversarial-losses]] for full evidence and the pass/fail-metric
+  bug this surfaced and fixed (gating on combined loss instead of reconstruction-only loss).
+- Gate 3, iteration 2 (2026-09-04, same day): user's listening verdict on iteration 1 was
+  "disco.00049 starts to resemble the original... rhythm and drum hits can be heard" but
+  "pop.00012 is worse" -- percussive content partially recovering, melodic/harmonic content not.
+  Added `training.reconstruction_loss_weight=10.0` (applied to mel+STFT during the adversarial
+  phase only) so content fidelity stays dominant over adversarial/feature-matching pressure;
+  extended training 8000 -> 15000 steps. Result: final mel loss 0.77 -> 0.59, log-mel correlation
+  improved for both tracks (pop 0.82 -> 0.90, disco 0.84 -> 0.94). Second listening pass pending.
+  See [[gate3-adversarial-losses]] "Update" section for full reasoning.
+- Gate 3, iteration 3 (2026-09-04, same day): user's verdict on iteration 2 -- "both excerpts have
+  improved, but they are still very poor: a lot of noise, buzzing, and ringing." Diagnosed as a
+  generator-capacity problem (ringing after two rounds of loss/schedule tuning points at
+  architecture, not training dynamics): rewrote `MiniGenerator` with a proper multi-receptive-
+  field (MRF) design (3 parallel `ResBlock`s, kernel sizes 3/7/11, each with 3 dilated-conv pairs,
+  averaged -- not the prior sequential 2-block chain), doubled `base_channels` 256->512, and
+  re-factored `upsample_rates` from 6 stages `(5,4,4,3,2,2)` to 4 stages `(8,6,5,4)` (same
+  product, 960) so channel width isn't halved away as aggressively. Result: final mel loss
+  0.59 -> 0.48 (continuing the trend 0.77 -> 0.59 -> 0.48 across all three iterations), log-mel
+  correlation pop.00012 0.90 -> 0.94. Third listening pass pending. See
+  [[gate3-generator-capacity]].
+- Gate 3, capacity-isolation experiment (2026-09-06): user's verdict on MRF-512 -- disco.00049
+  "now recognizable", pop.00012 "still contains substantial buzzing/noise" though rhythm/harmony
+  present. Ran a controlled 512-vs-1024-channel experiment (`configs/smoke_1024.yaml`, identical
+  in every other respect to `configs/smoke.yaml`). Result: **training collapsed** between step
+  3500-3750 (discriminator loss -> 0, generator adversarial loss saturated at its LSGAN maximum
+  ~2.0, generator output degenerated to a constant +1.0 signal for the rest of the 15000-step run)
+  -- not a clean capacity comparison. Recovered the last pre-collapse checkpoint (step 3000):
+  mel correlation 0.945/0.950, matching/exceeding the fully-converged 512-channel model's
+  0.937/0.944 in only 20% of the training budget -- suggesting capacity was NOT the bottleneck at
+  that point. Diagnosed likely root cause: both optimizers use plain Adam's default betas
+  `(0.9, 0.999)`, known in GAN literature to cause exactly this discriminator-overpowers-generator
+  collapse (HiFi-GAN's own published config uses `betas=(0.8, 0.99)`). Parameter counts: 512 ->
+  17,235,585; 1024 -> 61,582,593 (3.57x). Full comparison table and reasoning in
+  [[gate3-capacity-1024]]. Recommendation: fix optimizer betas before any further capacity
+  experiments; do not conclude either way on 512-vs-1024 quality from this run. Not proceeding to
+  Gate 4/5 -- still investigating Gate 3, per explicit instruction.
+- Gate 3, optimizer-beta fix + clean capacity re-test (2026-09-06, same day): applied the
+  recommended fix (`training.generator_betas`/`discriminator_betas`, both `(0.8, 0.99)`, HiFi-GAN's
+  published config, replacing PyTorch's default `(0.9, 0.999)`). Regression check on MRF-512:
+  no collapse, mel correlation 0.924/0.932 (comparable to before). Re-ran MRF-1024 with the fix:
+  **no collapse this time** -- clean capacity comparison. Result: mel correlation **0.965/0.976**
+  (best of the entire investigation), waveform correlation positive for the first time
+  (0.073/0.104). 1024 now strictly dominates 512 on every objective metric under matched
+  conditions (3.57x params, ~1.7x wall time, ~52 min for 15000 steps). Adopted `(0.8, 0.99)` betas
+  as the new standard for both optimizers. `configs/smoke.yaml` (512) remains the official working
+  config pending the user's listening judgment on whether 1024's cost is worth adopting. Full
+  comparison table in [[gate3-capacity-1024]] "Final comparison table" section.
+- Gate 3, capacity investigation CONCLUDED (2026-09-06, same day): user's final listening verdict
+  on the clean 512-vs-1024 comparison -- "I can't hear any noticeable improvement... equally
+  mediocre: recognizable but still plagued by artifacts." Despite 1024 winning on every objective
+  metric (mel correlation 0.97/0.98 vs 0.92/0.93, waveform correlation positive vs near-zero),
+  there was zero perceptible difference. **Conclusion: capacity is not the bottleneck** -- ruled
+  out by two independent tests (collapse-confounded, then clean). The gap between improving
+  metrics and unchanged perception implicates the training objective (adversarial training likely
+  too shallow at 15k steps on 2 clips) or, less testably so far, a hard information ceiling in
+  MuQ's 25Hz/40ms-per-frame representation. Neither has been distinguished yet. Recommended next
+  step (proposed to user, not yet executed): test much longer/broader adversarial training before
+  drawing conclusions about the representation itself. See [[gate3-capacity-ruled-out]] for the
+  full three-finding synthesis and reasoning.

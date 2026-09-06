@@ -1,15 +1,18 @@
-"""Deliberately small HiFi-GAN-style generator (CLAUDE.md Decoder Design).
+"""HiFi-GAN-style generator with a proper multi-receptive-field (MRF) fusion block
+(CLAUDE.md Decoder Design).
 
-Only reconstruction-path components 1-5 are implemented: input projection,
-temporal conditioning, upsampling, residual blocks, waveform head. Multi-
-period/multi-scale discriminators (component 6) are deferred until the
-reconstruction path passes its own smoke tests (Gate 3), per CLAUDE.md.
+Revised after listening feedback on Gate 3's output (ringing/buzzing persisting even after
+adversarial training and loss rebalancing -- see notes/DECISIONS.md#gate3-generator-capacity).
+The original generator ran each upsampling stage's output through only two small residual blocks
+*in sequence* (kernel sizes 3 and 7, one dilation each) -- a thin receptive field, especially
+right after a strided transpose-conv, which is exactly the situation prone to comb-filter/ringing
+artifacts. This version follows the original HiFi-GAN's MRF design: several residual blocks with
+different kernel sizes run *in parallel* on the same input and their outputs are averaged, each
+block itself containing multiple dilated-conv pairs (not just one).
 
-The upsample_rates product is a provisional placeholder for the Gate 0
-shape-only forward pass. It must be replaced with the exact measured
-MuQ samples-per-frame ratio (or a documented alignment/cropping strategy)
-before any real training, per CLAUDE.md's MuQ Feature Contract and Decoder
-Design sections.
+Only reconstruction-path components 1-5 are implemented here: input projection, temporal
+conditioning, upsampling, residual blocks, waveform head. Multi-period/multi-scale discriminators
+(component 6) live in `discriminators.py`.
 """
 
 from __future__ import annotations
@@ -18,34 +21,66 @@ import torch
 from torch import nn
 
 
-class ResidualBlock(nn.Module):
-    """A single multi-receptive-field residual block: two dilated convs + skip."""
+class ResBlock(nn.Module):
+    """Multiple (dilated, dilation=1) conv pairs applied sequentially, each with its own
+    residual connection -- one "kernel size" branch of the multi-receptive-field fusion."""
 
-    def __init__(self, channels: int, kernel_size: int, dilation: int):
+    def __init__(self, channels: int, kernel_size: int, dilations: tuple[int, ...]):
         super().__init__()
-        padding = (kernel_size - 1) * dilation // 2
-        self.conv1 = nn.Conv1d(channels, channels, kernel_size, dilation=dilation, padding=padding)
-        self.conv2 = nn.Conv1d(channels, channels, kernel_size, dilation=1, padding=(kernel_size - 1) // 2)
+        self.convs1 = nn.ModuleList(
+            nn.Conv1d(
+                channels, channels, kernel_size, dilation=d, padding=(kernel_size - 1) * d // 2
+            )
+            for d in dilations
+        )
+        self.convs2 = nn.ModuleList(
+            nn.Conv1d(channels, channels, kernel_size, dilation=1, padding=(kernel_size - 1) // 2)
+            for _ in dilations
+        )
         self.activation = nn.LeakyReLU(0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (batch, channels, time) -> (batch, channels, time)"""
-        residual = x
-        x = self.conv1(self.activation(x))
-        x = self.conv2(self.activation(x))
-        return x + residual
+        for conv1, conv2 in zip(self.convs1, self.convs2, strict=True):
+            residual = x
+            x = conv1(self.activation(x))
+            x = conv2(self.activation(x))
+            x = x + residual
+        return x
+
+
+class MultiReceptiveFieldFusion(nn.Module):
+    """Runs several ResBlocks (different kernel sizes) in parallel on the same input and
+    averages their outputs -- the actual "multi-receptive-field" mechanism."""
+
+    def __init__(
+        self, channels: int, kernel_sizes: tuple[int, ...], dilation_sizes: tuple[tuple[int, ...], ...]
+    ):
+        super().__init__()
+        if len(kernel_sizes) != len(dilation_sizes):
+            raise ValueError("kernel_sizes and dilation_sizes must have equal length")
+        self.blocks = nn.ModuleList(
+            ResBlock(channels, k, d) for k, d in zip(kernel_sizes, dilation_sizes, strict=True)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        total = None
+        for block in self.blocks:
+            y = block(x)
+            total = y if total is None else total + y
+        return total / len(self.blocks)
 
 
 class MiniGenerator(nn.Module):
-    """Small MuQ-conditioned waveform generator for shape-validation smoke tests."""
+    """Small MuQ-conditioned waveform generator with HiFi-GAN-style MRF residual fusion."""
 
     def __init__(
         self,
         input_channels: int,
         base_channels: int,
         upsample_rates: tuple[int, ...],
-        residual_kernel_sizes: tuple[int, ...] = (3, 7),
-        residual_dilations: tuple[int, ...] = (1, 3),
+        resblock_kernel_sizes: tuple[int, ...] = (3, 7, 11),
+        resblock_dilation_sizes: tuple[tuple[int, ...], ...] = ((1, 3, 5), (1, 3, 5), (1, 3, 5)),
     ):
         super().__init__()
         self.upsample_rates = upsample_rates
@@ -55,12 +90,12 @@ class MiniGenerator(nn.Module):
 
         self.input_projection = nn.Conv1d(input_channels, base_channels, kernel_size=7, padding=3)
 
-        self.upsample_stages = nn.ModuleList()
+        self.upsample_convs = nn.ModuleList()
+        self.mrf_blocks = nn.ModuleList()
         channels = base_channels
         for rate in upsample_rates:
             out_channels = max(channels // 2, 1)
-            stage = nn.Sequential(
-                nn.LeakyReLU(0.1),
+            self.upsample_convs.append(
                 nn.ConvTranspose1d(
                     channels,
                     out_channels,
@@ -68,15 +103,14 @@ class MiniGenerator(nn.Module):
                     stride=rate,
                     padding=rate // 2 + rate % 2,
                     output_padding=rate % 2,
-                ),
-                *(
-                    ResidualBlock(out_channels, k, d)
-                    for k, d in zip(residual_kernel_sizes, residual_dilations)
-                ),
+                )
             )
-            self.upsample_stages.append(stage)
+            self.mrf_blocks.append(
+                MultiReceptiveFieldFusion(out_channels, resblock_kernel_sizes, resblock_dilation_sizes)
+            )
             channels = out_channels
 
+        self.activation = nn.LeakyReLU(0.1)
         self.output_head = nn.Sequential(
             nn.LeakyReLU(0.1),
             nn.Conv1d(channels, 1, kernel_size=7, padding=3),
@@ -87,7 +121,8 @@ class MiniGenerator(nn.Module):
         """features: (batch, num_frames, input_channels) -> waveform (batch, num_samples)"""
         x = features.transpose(1, 2)  # (batch, input_channels, num_frames)
         x = self.input_projection(x)
-        for stage in self.upsample_stages:
-            x = stage(x)
+        for upsample_conv, mrf in zip(self.upsample_convs, self.mrf_blocks, strict=True):
+            x = upsample_conv(self.activation(x))
+            x = mrf(x)
         waveform = self.output_head(x)
         return waveform.squeeze(1)
