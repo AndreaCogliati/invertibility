@@ -28,6 +28,7 @@ from .audio import load_resample_validate
 from .checkpoint import build_checkpoint_state, save_checkpoint_atomic
 from .config import ExperimentConfig
 from .data import TrackRecord, deterministic_unit_interval, read_manifest
+from .encodec_encoder import FrozenEncodecEncoder
 from .encoder import FrozenMuQEncoder
 from .models.discriminators import MultiPeriodDiscriminator, MultiScaleDiscriminator
 from .models.generator import MiniGenerator
@@ -134,10 +135,22 @@ def run_gate3(config: ExperimentConfig, repo_root: Path) -> int:
 
     clips = load_clips(overfit_records, raw_dir, config.data.target_sample_rate)
 
-    encoder = FrozenMuQEncoder(config.muq.model_id, device)
+    # Representation source: "muq" (the project baseline) or "encodec" (encodec-hifigan-experiment
+    # branch only -- see notes/DECISIONS.md#encodec-hifigan). Defaults to "muq" so every existing
+    # config's behavior is unaffected.
+    if config.encoder_type == "muq":
+        print(f"encoder_type: muq ({config.muq.model_id})")
+        encoder = FrozenMuQEncoder(config.muq.model_id, device)
+    elif config.encoder_type == "encodec":
+        print(f"encoder_type: encodec ({config.encodec.model_id})")
+        encoder = FrozenEncodecEncoder(config.encodec.model_id, device)
+    else:
+        print(f"Unknown encoder_type: {config.encoder_type!r} (expected 'muq' or 'encodec')", file=sys.stderr)
+        return 1
 
-    # Never assume MuQ's channel count (CLAUDE.md MuQ Feature Contract) -- measure it from a
-    # real forward pass before building the generator's input projection.
+    # Never assume the encoder's channel count or frame rate (CLAUDE.md MuQ Feature Contract,
+    # generalized to whichever encoder is selected) -- measure them from a real forward pass
+    # before building the generator's input projection.
     total_upsample = 1
     for rate in config.decoder.upsample_rates:
         total_upsample *= rate
@@ -151,7 +164,16 @@ def run_gate3(config: ExperimentConfig, repo_root: Path) -> int:
         return 1
     probe_waveform = fixed_validation_crop(clips[0], probe_crop_samples).unsqueeze(0).to(device)
     probe_result = encoder.probe(probe_waveform, config.data.target_sample_rate)
-    print(f"measured feature_channels: {probe_result.feature_channels}")
+    print("--- Gate-0-style representation diagnostics ---")
+    print(f"latent shape: {probe_result.feature_shape}")
+    print(f"latent dimensionality (channels): {probe_result.feature_channels}")
+    print(f"num_frames: {probe_result.num_frames}")
+    print(f"frames_per_second: {probe_result.frames_per_second:.4f}")
+    print(f"samples_per_frame: {probe_result.samples_per_frame:.4f}")
+    print(f"is_finite: {probe_result.is_finite}")
+    if not probe_result.is_finite:
+        print("Encoder produced non-finite output on the probe crop. Stopping.", file=sys.stderr)
+        return 1
 
     generator = MiniGenerator(
         input_channels=probe_result.feature_channels,

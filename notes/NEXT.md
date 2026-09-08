@@ -1,134 +1,105 @@
 # NEXT
 
-## Current gate
+## Current branch and gate
 
-Still investigating Gate 3 (Tiny-Set Overfit) -- explicitly not proceeding to Gate 4/5. The
-capacity-scaling line of investigation is **closed** (see conclusions below); the audio-quality
-question that started it is still open, now reframed around training depth vs. representation
-limits rather than decoder size.
+Branch: `encodec-hifigan-experiment` (off `main` at `38d9507`). Testing whether HiFi-GAN itself
+is the bottleneck, or MuQ's representation specifically, by swapping only the representation
+source and keeping the exact same decoder/training recipe. Still Gate 3 scope -- not proceeding
+to Gate 4/5 on either representation, and not starting BigVGAN work, per explicit instruction.
 
-**Conclusions reached this session (full reasoning in
-[[DECISIONS.md#gate3-capacity-ruled-out]]):**
-
-1. Capacity is not the bottleneck. Tested twice (512 vs 1024 `base_channels`, everything else
-   held fixed): once confounded by a training collapse, once cleanly after fixing the optimizer.
-   In the clean comparison, 1024 channels won on every objective metric (mel correlation
-   0.97/0.98 vs 0.92/0.93, waveform correlation positive vs. near-zero/negative) yet the user
-   heard **no perceptible difference** -- "equally mediocre: recognizable but still plagued by
-   artifacts." Do not pursue further capacity scaling (e.g. 2048 channels) without first changing
-   something else, or expect the same "metrics improve, ears don't" pattern to repeat.
-2. Mel/waveform correlation are demonstrably poor proxies for the artifact that matters
-   perceptually here (almost certainly phase/fine-temporal structure, which magnitude-domain
-   losses and simple correlation metrics are both largely blind to). Do not use metric deltas
-   alone to decide whether a change helped, in either direction.
-3. Content survives decoding (rhythm, harmony, coarse identity -- recognizable across all
-   listening rounds and both capacity levels) but clean phase/fine structure does not. This is
-   progress on CLAUDE.md's Scientific Question 3: it rules out "decoder too small" as the
-   implementation-side explanation. Two explanations remain open and undistinguished:
-   - **(1) Adversarial training is too shallow** -- 15,000 steps on 2 overfit clips is small by
-     vocoder-GAN standards. Cheap-ish and directly actionable to test.
-   - **(2) MuQ's representation (confirmed 25 Hz / 960 samples-per-frame = 40ms) may impose a
-     hard ceiling** on recoverable fine time-domain detail, independent of decoder/training.
-     Harder to test; would need either explanation (1) to be ruled out first (train much longer/
-     broader and see if the gap closes) or a more targeted diagnostic (error concentration by
-     frequency band, transient region, or track/genre).
+**Headline result, UPDATED with listening verdict (full reasoning in
+[[DECISIONS.md#encodec-mediocrity-across-all-variants]]):** EnCodec + HiFi-GAN produced
+**waveform correlation 0.682/0.602 -- a 6-9x jump over MuQ's best-ever 0.073/0.104**, the largest
+objective-metric effect size of any experiment in this project. But the user's listening
+comparison across the tiny baseline, MuQ+MRF-1024, and EnCodec+MRF-1024 found **no audible
+difference among any of them** -- "all similarly mediocre." Combined with
+[[DECISIONS.md#gate3-capacity-ruled-out]] (capacity also produced a large metric gain with zero
+perceptual gain), **two major technical axes are now ruled out**: neither decoder capacity nor
+representation source (MuQ vs. EnCodec) explains what's limiting perceived audio quality here.
+This is a decision point, not a technical blocker -- see "Next command" below.
 
 ## Exact last successful commands
 
 ```bash
-uv run python -m muq_inversion.cli train --config configs/smoke.yaml        # 512, betas fixed, PASSED, no collapse
-uv run python -m muq_inversion.cli train --config configs/smoke_1024.yaml   # 1024, betas fixed, PASSED, no collapse
+uv run python -m muq_inversion.cli prepare-data --config configs/encodec_1024.yaml
+uv run python -m muq_inversion.cli train --config configs/encodec_1024.yaml   # PASSED, no collapse
 uv run pytest -q       # 47 passed
 uv run ruff check .    # all checks passed
 ```
 
-2026-09-06, macOS, M4 Max, device=mps. No source/config changes since these runs -- this session's
-final activity was documentation consolidation only (this file, MEMORY.md, DECISIONS.md,
-SCRATCHPAD.md), no new experiments.
+2026-09-08, macOS, M4 Max, device=mps. `configs/smoke.yaml`/`smoke_1024.yaml` (MuQ baseline) were
+not touched -- confirmed via `git diff` and by the unaffected 47-test suite throughout.
 
 ## Run/checkpoint path
 
-- `runs/gate3_tiny_overfit/checkpoints/{latest,step_015000}.pt` (git-ignored) -- MRF-512, betas
-  `(0.8, 0.99)`, converged cleanly, mel correlation 0.924/0.932. Current "official" working config.
-- `runs/gate3_tiny_overfit_mrf1024/checkpoints/{latest,step_001000..step_015000}.pt`
-  (git-ignored) -- MRF-1024, betas `(0.8, 0.99)`, converged cleanly, mel correlation 0.965/0.976
-  (best objective result of the investigation, not perceptually distinguishable from 512).
-- `artifacts/gate3_tiny_overfit/` and `artifacts/gate3_tiny_overfit_mrf1024/` hold the
-  reference/reconstruction/difference WAVs for the final (betas-fixed) versions of both configs.
-- `configs/smoke_1024.yaml` and `data/manifests/gtzan_manifest_smoke_1024.csv` tracked, retained
-  as a documented negative-for-perception (positive-for-metrics) result, not deleted.
-- `configs/smoke.yaml` carries this session's two changes: the MRF/1024-vs-512 capacity work and
-  the `generator_betas`/`discriminator_betas` optimizer fix (both `(0.8, 0.99)`, replacing
-  PyTorch's default `(0.9, 0.999)` which was the root cause of the original 1024-channel collapse).
+- `runs/gate3_tiny_overfit_encodec/checkpoints/{latest,step_001000..step_015000}.pt`
+  (git-ignored) -- EnCodec + MRF-1024, betas `(0.8, 0.99)`, converged cleanly, 15000 steps.
+- `artifacts/gate3_tiny_overfit_encodec/<track_id>_{reference,reconstruction,difference}.wav`
+  (git-ignored) -- sent to the user for listening comparison against the MuQ+MRF-1024 audio.
+- `configs/encodec_1024.yaml` and `data/manifests/gtzan_manifest_encodec_1024.csv` tracked (new).
+- New/modified source: `src/muq_inversion/encodec_encoder.py` (new),
+  `src/muq_inversion/config.py` (added `EncodecConfig` + `encoder_type` field, default-preserving),
+  `src/muq_inversion/train.py` (added the encoder-selection branch + expanded probe diagnostics).
+- MuQ-path runs from the prior session (`runs/gate3_tiny_overfit/`,
+  `runs/gate3_tiny_overfit_mrf1024/` and their `artifacts/`) are untouched and still the
+  comparison baseline for this branch's work.
 
 ## Next command
 
-**Blocked on a decision, not a technical step.** Proposed to the user (not yet answered): test
-explanation (1) above with a much longer and/or broader adversarial training run before drawing
-any conclusion about explanation (2). Concretely, if greenlit, that would mean either:
+**Blocked on a strategic decision, not a technical step.** The listening verdict came back
+negative on the perceptual question (no difference from any variant), which resolves the
+technical uncertainty but opens a fork proposed to the user, not yet decided:
 
-- Extending `training.steps` substantially beyond 15,000 (e.g. 50,000-100,000) on the same 2
-  fixed clips, to see if the adversarial phase eventually resolves the phase/ringing artifact
-  given much more time, or
-- Moving to a broader training regime (more than 2 clips, i.e. edging toward Gate 4/5 territory)
-  since a GAN discriminator trained on only 2 examples may simply not have enough signal to learn
-  a general notion of "natural phase" vs. overfitting to two specific clips' spectra.
+1. **Change the shared training paradigm.** Every variant tested so far shares: 2 fixed clips, a
+   short training budget (500-15,000 steps), and the same generator/discriminator/loss *design*
+   (only width or representation varied). Testing whether more data (moving toward Gate 4/5
+   scale) or much longer training resolves the mediocrity would tell us whether the paradigm
+   itself -- not capacity, not representation -- was the missing ingredient. This is a real
+   scope escalation, not a quick config tweak.
+2. **Improve the evaluation method before changing anything else.** A quick, unblinded listening
+   pass on 2-second clips may not be resolving real (if subtle) differences the metrics are
+   picking up on. A more careful comparison (blinded A/B, longer excerpts, repeated listening)
+   could either confirm the "truly no difference" finding more rigorously or overturn it.
+3. **Stop here and document the finding.** Treat "recognizable content, mediocre quality, robust
+   to both capacity and representation choice" as the interpretability result for this phase --
+   consistent with CLAUDE.md's own "fail early" mission framing -- and write up accordingly rather
+   than continuing to spend compute on this specific paradigm.
 
-Do not start either without the user's go-ahead -- this is a real fork (more steps on the tiny set
-vs. more data) and the choice affects how to interpret the result afterward.
-
-**Alternative if the user wants to stop here:** treat "recognizable content, capacity-independent
-artifacts" as the documented Gate 3 finding, and move toward writing up the interpretability
-result as-is, or pivot to the still-open Gate 4 `shuffled_time` finding
-([[DECISIONS.md#gate4-shuffled-time-finding]]) instead.
-
-Once Gate 3's audio-quality investigation reaches a stopping point the user is satisfied with,
-remaining follow-up work before Gate 5:
-
-1. Port the final Gate 3 architecture/optimizer settings into `pilot.py` (Gate 4 currently has
-   none of the MRF/discriminator/adversarial-loss/beta work from this session).
-2. Re-investigate [[DECISIONS.md#gate4-shuffled-time-finding]] with the updated decoder.
-3. Implement Gate 5 (GTZAN Pilot): batching beyond 1-clip-per-step, a real validation loop, and a
-   longer-run-appropriate checkpoint/logging schedule.
+Do not start any of these unilaterally -- they imply different amounts of further work and
+different interpretations of everything done so far. Whatever is decided, do not merge this
+branch into `main` without an explicit decision about what (if anything) from it should inform
+the main MuQ-only investigation.
 
 ## Blockers
 
-1. **Decision needed from the user**: longer-training experiment on the tiny set, broader-data
-   experiment, or stop the Gate 3 audio-quality investigation here. Nothing else is blocked on
-   anything technical.
-2. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
-   dormant while Gate 3 is being investigated with a decoder Gate 4 hasn't seen yet.
-
-## Expected verification criteria for Gate 5
-
-Not yet reached. Per CLAUDE.md: train on the committed GTZAN split, save periodic fixed
-validation reconstructions, report objective metrics and qualitative caveats -- blocked behind
-Gate 3/4 resolution above.
+1. **Strategic decision needed from the user**: escalate the training paradigm (more data/longer
+   training), revisit the evaluation method, or stop and document the current finding. Nothing
+   else is blocked on anything technical -- every experiment run so far completed cleanly.
 
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#gate3-capacity-ruled-out]] first** -- it's the load-bearing conclusion of
-  this entire session's Gate 3 work and directly determines what the next experiment should be.
-- The `transformers==4.55.0` pin in `pyproject.toml`/`uv.lock` is load-bearing -- see
-  [[DECISIONS.md#muq-transformers-compat]]. Do not let a routine `uv add` bump it past `<5.0`
-  without re-running Gate 0.
-- Training/validation crop lengths must stay in units of `crop_frames` (multiples of 960 samples)
-  -- see [[DECISIONS.md#gate3-crop-alignment]].
-- Mel/STFT loss configs are explicit, not copied from speech HiFi-GAN -- see
-  [[DECISIONS.md#gate3-loss-configs]]. They are also now known to be poor proxies for the
-  perceptual artifact that matters here -- see [[DECISIONS.md#gate3-capacity-ruled-out]] Finding 2.
-- MPS training is not bit-exact reproducible even with identical seeds; resume-equivalence
-  tolerances must be calibrated per run length -- see [[DECISIONS.md#gate4-mps-resume-tolerance]].
-- The GTZAN split is checksum-deduplicated but not artist-aware -- see
-  [[DECISIONS.md#gtzan-source-and-defects]].
-- Cache entries are single `.pt` files (`torch.save`), not `.npy`/`.npz` -- see
-  [[DECISIONS.md#gate2-cache-format]]. Neither Gate 3 nor Gate 4 training reads this cache.
-- The generator uses a proper MRF (multi-receptive-field) design -- `upsample_rates=(8,6,5,4)`,
-  see [[DECISIONS.md#gate3-generator-capacity]]. Do not increase `base_channels` further as a
-  first move -- see the capacity conclusions above.
-- **Adam betas for both optimizers are `(0.8, 0.99)`, not PyTorch's default `(0.9, 0.999)`** --
-  fixed a real, reproducible GAN training collapse. Do not revert without re-testing for collapse
-  (see [[DECISIONS.md#gate3-capacity-1024]] "Update (optimizer-beta fix applied)").
-- MuQ's frame rate (25 Hz / 960 samples per frame / 40ms) is a measured, confirmed fact (Gate 2)
-  now suspected -- not confirmed -- to be a possible hard ceiling on reconstruction fidelity. See
-  [[DECISIONS.md#gate3-capacity-ruled-out]] Finding 3, explanation 2.
+- **Read [[DECISIONS.md#encodec-mediocrity-across-all-variants]] first** -- it's the load-bearing
+  conclusion of this branch's work and directly determines what the next experiment should be.
+  [[DECISIONS.md#encodec-hifigan]] has the underlying comparison table, the one forced
+  architectural adaptation (upsample_rates/crop_frames, required by EnCodec's different measured
+  frame rate, not a design choice), and the original four-question analysis (now superseded by
+  the generalized synthesis once the listening verdict came back).
+- This branch's changes are additive and default-preserving: `encoder_type` defaults to `"muq"`,
+  so nothing here should ever affect a config that doesn't explicitly set `encoder_type: encodec`.
+  If that invariant ever breaks (e.g. a MuQ config's behavior changes), that's a regression to fix
+  immediately, not a design tradeoff to accept.
+- EnCodec's continuous latent is obtained via `model.encoder(input_values)` (an internal
+  submodule call, not the public `.encode()` API, which returns quantized codes) -- this was
+  deliberate, not an oversight; see [[DECISIONS.md#encodec-hifigan]] for why.
+- If more EnCodec experiments are needed, remember the crop-alignment invariant: crop_samples
+  must equal `training.crop_frames * generator.total_upsample`, and `generator.total_upsample`
+  must equal EnCodec's actual measured samples-per-frame ratio (320 for `facebook/encodec_24khz`),
+  not MuQ's (960). Don't copy MuQ's `upsample_rates`/`crop_frames` values without re-deriving them
+  for whatever encoder is in use.
+- All MuQ-branch findings from `main` still apply and are unaffected: capacity is not the
+  bottleneck for MuQ+HiFi-GAN ([[DECISIONS.md#gate3-capacity-ruled-out]]), Adam betas must be
+  `(0.8, 0.99)` not PyTorch's default ([[DECISIONS.md#gate3-capacity-1024]]), and the generator
+  uses a proper MRF design ([[DECISIONS.md#gate3-generator-capacity]]).
+- The `transformers==4.55.0` pin remains load-bearing for MuQ ([[DECISIONS.md#muq-transformers-compat]])
+  -- EnCodec support happens to already be compatible with this same pinned version, so no
+  additional dependency-compatibility work was needed for this branch.

@@ -457,3 +457,121 @@ Then asked directly: "What conclusions can we make?"
   DECISIONS.md, MEMORY.md (durable conclusion), this SCRATCHPAD.md entry (as-it-happened log),
   and NEXT.md (resumability: current status, next command options, blockers) all in the same
   pass, no new code or experiments run.
+- Committed the entire session's Gate 3 work (adversarial training, MRF generator, capacity
+  experiments, optimizer fix, this synthesis) to `main` as an explicit WIP/intermediate-state
+  commit (`38d9507`), per user's request.
+
+## 2026-09-08 -- New branch: encodec-hifigan-experiment
+
+User: "I'm starting to think that HiFi-GAN may not be the best decoder for music. However,
+before replacing that with BigVGAN, I'd like to test HiFi-GAN starting from EnCodec embeddings.
+Let's start by creating a new branch for these experiments." Created and switched to
+`encodec-hifigan-experiment` off `main` at `38d9507`. Flagged (once, briefly) that CLAUDE.md
+explicitly says not to broaden into multi-model comparisons until the primary MuQ question is
+answered -- noted as a deliberate, informed choice by the user (isolating it to its own branch
+is itself a reasonable way to do this without disrupting the main MuQ investigation), not blocked.
+
+Next message gave a fully-specified task: run the exact same Gate 3 tiny-set overfit experiment
+with EnCodec latents instead of MuQ, keeping everything else identical, with explicit
+instructions not to modify the MuQ baseline, not to start BigVGAN work, and not to proceed past
+Gate 3. Re-read CLAUDE.md and all notes files first, per the user's explicit instruction.
+
+- Investigated `transformers.EncodecModel` (already available via the pinned `transformers==
+  4.55.0` -- no new dependency needed) to find the continuous pre-quantization latent, since the
+  task requires "EnCodec latent representations" analogous to MuQ's continuous `last_hidden_state`,
+  not the quantized RVQ codes that `.encode()` returns by default. Found it via
+  `model.encoder(input_values)` (an `EncodecEncoder` submodule, called directly rather than
+  through the public `encode()` API) by reading the actual `EncodecModel` source
+  (`_encode_frame`'s `embeddings = self.encoder(input_values)` line) rather than guessing from
+  docs.
+- Fetched `facebook/encodec_24khz`'s real config before designing anything:
+  `upsampling_ratios: [8, 5, 4, 2]` (product 320), `hidden_size: 128`. Confirmed live with a
+  local forward pass: 48000-sample input -> `(1, 128, 150)` embeddings, i.e. samples_per_frame =
+  320 exactly, frame rate 75 Hz -- 3x MuQ's 25 Hz, matching the config-implied ratio exactly.
+  Also tested directly on MPS (EnCodec's encoder has 2 LSTM layers, a historically MPS-flaky op)
+  before relying on it -- finite, deterministic, no CPU fallback needed.
+- Worked out the crop-alignment consequence before writing any config: CLAUDE.md's Decoder
+  Design item 3 requires the generator's upsample-stage product to exactly match the encoder's
+  measured ratio. Since 320 != 960, the *same* `upsample_rates=(8,6,5,4)` generator literally
+  cannot be reused (would produce a 144000-sample output against a 48000-sample target -- a
+  fatal shape mismatch, not just a suboptimal choice). Resolved by using `upsample_rates=
+  (8,5,4,2)` (product 320, deliberately mirroring EnCodec's own published decoder upsampling
+  ratios) and changing `training.crop_frames` from 50 to 150 -- this keeps the crop length at
+  the same 48000 samples / 2.0 seconds as the MuQ config, just counted in the new encoder's
+  frame units. Documented this reasoning explicitly (in the new config's own header comment and
+  in DECISIONS.md) so it reads as a forced, principled adaptation, not an unexplained parameter
+  change that would undermine the "same generator" framing.
+- Implementation, all additive / default-preserving (confirmed via `git diff` and by re-running
+  the full 47-test suite after each change, checking existing configs still resolve to
+  `encoder_type: "muq"` by default):
+  - `encodec_encoder.py` (new): `FrozenEncodecEncoder` with the same `encode()`/`probe()`
+    interface as `FrozenMuQEncoder`, reusing `MuQProbeResult`/`measure_feature_geometry` from
+    `encoder.py` unmodified (both were already fully generic, no MuQ-specific logic in them).
+  - `config.py`: added `EncodecConfig` and an `encoder_type: str = "muq"` field on
+    `ExperimentConfig` (plus YAML parsing) -- default preserves every existing config's behavior.
+  - `train.py`: a single ~10-line encoder-selection branch (muq / encodec / else-error), plus
+    expanded probe-result printing (latent shape, dimensionality, frames_per_second,
+    samples_per_frame, is_finite) satisfying the "Gate-0-style diagnostics" requirement without
+    touching the actual `doctor` CLI command (which stays MuQ-specific, per CLAUDE.md's Gate 0
+    definition -- didn't want to conflate "the project's Gate 0" with "a diagnostic probe for a
+    side-experiment encoder").
+- Created `configs/encodec_1024.yaml`: exact copy of `configs/smoke_1024.yaml` with only
+  `encoder_type`/`encodec:` added and the two forced changes (`upsample_rates`,
+  `training.crop_frames`) above; also set `training.overfit_track_ids` explicitly to
+  `[pop.00012, disco.00049]` (rather than relying on deterministic selection) to guarantee the
+  literal same two tracks the task specified. Ran `prepare-data` for its manifest (fast, GTZAN
+  already downloaded).
+- Verified the invalid-`encoder_type` error path explicitly (a real new code branch) by writing
+  a throwaway config with `encoder_type: bogus` and confirming it exits 1 with a clear message,
+  rather than trusting the branch would work without checking.
+- Timed a 100-step smoke run before the full 15000-step commitment (own scratch config in `/tmp`,
+  deleted after): ~0.19s/step (vs. ~0.128s/step for the MuQ MRF-1024 config) -- slower, consistent
+  with the 3x longer feature sequence (150 vs 50 frames) costing more compute in every MRF block
+  despite the encoder itself being cheaper. Projected ~48 min for the full run; actual came in at
+  ~62 min (est. from checkpoint timestamps), a bit longer than projected but not alarmingly so.
+- Ran the full 15000-step EnCodec experiment. Training converged cleanly with no instability
+  (`disc` stayed in a healthy ~0.3-0.9 band throughout, same qualitative pattern as the successful
+  MuQ runs) -- final mel loss 0.381 (vs. MuQ+MRF-1024's 0.319, comparable), mel correlation
+  0.950/0.970 (vs. 0.965/0.976, comparable). But **waveform correlation came out at 0.682/0.602**
+  -- vs. MuQ's best-ever 0.073/0.104. This is a 6-9x jump on a metric that had never moved more
+  than a few hundredths across every previous experiment in this project (capacity, loss
+  reweighting, optimizer fix). Double-checked this wasn't a fluke of the specific metric
+  computation by re-running the same correlation script used throughout this whole
+  investigation, unmodified, against the new audio -- same code, dramatically different number.
+- Parameter count: 54,799,617 (vs. MuQ's 61,582,593 for the 1024-channel generator) -- fewer,
+  because the input projection layer is `Conv1d(128, 1024, ...)` instead of
+  `Conv1d(1024, 1024, ...)`; every other layer is identical given `base_channels=1024` is shared.
+  Checkpoint size 701.4MB (vs. 782.8MB), consistent with the smaller input projection.
+- Sent reference + reconstruction audio for both clips to the user via SendUserFile with the
+  waveform-correlation numbers in the caption, explicitly asking for a listening comparison
+  against the earlier MuQ+MRF-1024 audio -- per this project's now well-established rule (learned
+  the hard way across three MuQ iterations) that a metric improvement is not evidence of
+  perceptual improvement until confirmed by ear.
+- Wrote up the full comparison table and four-question critical evaluation in
+  [[DECISIONS.md#encodec-hifigan]], being explicit that questions 3/4 (what this implies about
+  MuQ invertibility vs. the decoder family) are answered *conditionally* on question 2 (perceptual
+  confirmation), which is still pending -- did not declare victory over MuQ's representation from
+  the correlation number alone, consistent with this project's own hard-won lesson from the
+  capacity investigation.
+- `ruff check .`/`pytest -q` clean (47 tests) throughout; did not touch `configs/smoke.yaml`,
+  `configs/smoke_1024.yaml`, or any MuQ-specific code path (confirmed via `git status`/`git diff`
+  at each step). Did not start BigVGAN work. Did not proceed to Gate 4/5.
+
+## 2026-09-08 (cont.) -- Listening verdict: no difference across any variant
+
+User's quick listening comparison across three variants (tiny reconstruction-only baseline,
+MuQ+MRF-1024, EnCodec+MRF-1024): "I can't tell any difference... they are all similarly
+mediocre." This is a bigger deal than a single negative result -- it means the *second* major
+axis tested (representation source, after capacity) also failed to produce an audible
+improvement, despite producing the single largest objective-metric jump of the whole project
+(waveform correlation 0.07 -> 0.68). Wrote up the generalized synthesis in
+[[DECISIONS.md#encodec-mediocrity-across-all-variants]]: laid out all four variants in one table
+(intervention, metric moved, perceptual verdict) to make the repeating pattern visible at a
+glance, then reasoned about what's left once capacity and representation are both ruled out --
+either something shared by every variant (2-clip-overfit paradigm, shared MRF/discriminator/loss
+design, capped training budget) or the evaluation method itself (quick listening test on 2s
+clips, no blinding) not resolving real differences. Recommended, but did not decide unilaterally:
+either change the training paradigm (more data/longer training) or stop tuning capacity/
+representation and document the current state as the finding. Updated MEMORY.md and NEXT.md to
+match. Did not run any new experiments this pass -- pure synthesis and documentation, awaiting
+the user's direction on which fork to take next.

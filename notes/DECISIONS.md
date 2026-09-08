@@ -788,3 +788,224 @@ without first changing something on the training-depth or diagnostic axis, or th
 config change to revert. If a future experiment (longer training, different loss, or otherwise)
 does produce an audible improvement, revisit whether capacity interacts with that fix (e.g. maybe
 capacity matters once training is deep enough) before assuming this finding generalizes forever.
+
+---
+
+## encodec-hifigan: EnCodec-conditioned HiFi-GAN experiment (encodec-hifigan-experiment branch)
+
+**Context.** After the MuQ capacity investigation concluded that scaling the decoder doesn't fix
+the residual buzzing/ringing, the user hypothesized that HiFi-GAN itself might not be the right
+decoder family for music, and proposed testing that hypothesis indirectly before committing to a
+BigVGAN rewrite: keep the exact same HiFi-GAN decoder/training recipe, but swap the representation
+source from MuQ to EnCodec. If EnCodec conditioning produces a much better reconstruction with the
+*identical* decoder, that argues the MuQ representation (not HiFi-GAN) is the bottleneck. If
+EnCodec is similarly mediocre, that argues for the decoder family itself, supporting a move to
+BigVGAN. This work was deliberately isolated to a new git branch
+(`encodec-hifigan-experiment`) rather than done on `main`, and CLAUDE.md's rule against
+multi-model comparisons "until the primary question is answered" was flagged to the user before
+starting (they proceeded deliberately).
+
+**Representation source.** Used `transformers.EncodecModel` (`facebook/encodec_24khz`) via the
+continuous pre-quantization embedding (`model.encoder(input_values)`), not the quantized RVQ
+codes -- this is the correct analog of MuQ's continuous `last_hidden_state` (temporal, no
+pooling, per the task's explicit requirement). No new PyPI dependency was needed: EnCodec support
+already ships in the pinned `transformers==4.55.0`. Verified it runs natively on MPS (EnCodec's
+encoder includes 2 LSTM layers, which have had spotty MPS support historically in other contexts;
+tested directly and confirmed finite, deterministic output before building anything on top of it).
+
+**Measured EnCodec feature geometry (Gate-0-style diagnostics, implemented as
+`FrozenEncodecEncoder.probe()`, printed at the start of any `train` run using
+`encoder_type: encodec`):** for a 48000-sample (2.0s) input crop, latent shape `(1, 150, 128)` --
+128-dim continuous embedding, 150 frames, **75.0 Hz frame rate, 320.0 samples/frame** exactly
+(matches `facebook/encodec_24khz`'s published `upsampling_ratios: [8, 5, 4, 2]`, product 320).
+This is a fundamentally different frame rate from MuQ's measured 25 Hz / 960 samples/frame (Gate
+2) -- 3x denser in time, ~8x smaller in channel width.
+
+**The one unavoidable architectural adaptation.** CLAUDE.md's Decoder Design item 3 requires the
+generator's upsample-stage product to exactly match the encoder's measured samples-per-frame
+ratio. Since EnCodec's ratio (320) differs from MuQ's (960), the *exact* `upsample_rates=(8,6,5,4)`
+generator (product 960) cannot be reused verbatim without breaking basic tensor-length alignment
+(feeding it EnCodec's 150-frame latent for a 48000-sample crop would produce a
+150*960=144000-sample output against a 48000-sample target). The generator's `upsample_rates` was
+changed to `(8, 5, 4, 2)` (product 320, mirroring EnCodec's own published decoder upsampling
+ratios) and `training.crop_frames` was changed from 50 to 150 -- both changes exist purely to
+preserve the same 2.0-second (48000-sample) crop length in the new encoder's frame-counting units,
+not to alter the generator "design." `base_channels=1024`, `resblock_kernel_sizes=(3,7,11)`,
+`resblock_dilation_sizes=((1,3,5),(1,3,5),(1,3,5))`, discriminator architecture, all losses, both
+Adam betas `(0.8, 0.99)`, `adversarial_warmup_steps=500`, and `training.steps=15000` are
+byte-identical to `configs/smoke_1024.yaml` (the MuQ+MRF-1024 baseline). Verified via `git diff`
+that `configs/smoke.yaml`/`configs/smoke_1024.yaml` and all MuQ-path source code were never
+touched -- confirmed by re-running the full test suite (47 tests, unaffected) after every change.
+
+**Implementation.** Added `encodec_encoder.py` (`FrozenEncodecEncoder`, mirroring
+`FrozenMuQEncoder`'s `encode()`/`probe()` interface exactly, reusing the already-generic
+`MuQProbeResult`/`measure_feature_geometry` from `encoder.py` without modifying that file). Added
+`EncodecConfig` and an `encoder_type: "muq" | "encodec"` field to `ExperimentConfig`, defaulting to
+`"muq"` so every existing config's resolved behavior is provably unchanged (confirmed by loading
+`smoke.yaml`/`smoke_1024.yaml`/`pilot.yaml` and checking the new fields default correctly). The
+only change to `train.py` is a 10-line encoder-selection branch (`if config.encoder_type ==
+"muq"/"encodec"/else: error`) plus expanded diagnostic printing (latent shape, dimensionality,
+fps, samples/frame -- satisfying the Gate-0-style diagnostics requirement without touching the
+actual `doctor` CLI command, which stays MuQ-specific per CLAUDE.md's Gate 0 definition).
+
+**Comparison table** (both runs: same 2 tracks `pop.00012`/`disco.00049`, same 2.0s crop, same
+MRF-1024 generator design, same discriminator, same losses, same Adam betas `(0.8, 0.99)`, same
+15000-step schedule):
+
+| metric | MuQ + HiFi-GAN (MRF-1024) | EnCodec + HiFi-GAN |
+|---|---|---|
+| representation frame rate | 25 Hz (960 samples/frame) | 75 Hz (320 samples/frame) |
+| representation channels | 1024 | 128 |
+| generator parameters | 61,582,593 | 54,799,617 |
+| checkpoint size | 782.8 MB | 701.4 MB |
+| training wall time (15000 steps) | ~52 min | ~62 min (3x longer feature sequence) |
+| training stability | stable (no collapse) | stable (no collapse) |
+| final mel loss | 0.319 | 0.381 |
+| mel correlation (pop.00012 / disco.00049) | 0.965 / 0.976 | 0.950 / 0.970 |
+| waveform correlation (pop.00012 / disco.00049) | 0.073 / 0.104 | **0.682 / 0.602** |
+
+**The headline result:** mel correlation is comparable between the two (MuQ marginally higher),
+but **waveform-sample correlation is 6-9x higher for EnCodec** -- 0.68/0.60 vs. 0.07/0.10. This is
+the largest, cleanest effect size of any experiment in this project so far, and it moves a
+completely different metric than every previous intervention did (capacity, loss reweighting, and
+optimizer fixes all moved mel correlation while waveform correlation stayed near zero; this one
+variable -- representation source -- moved waveform correlation dramatically while leaving mel
+correlation roughly where it was).
+
+**Answering the four required questions:**
+
+1. *Can HiFi-GAN memorize two clips when conditioned on EnCodec latents?* Yes, unambiguously.
+   Training converged cleanly (reconstruction loss ratio 0.36, well under the 0.5 pass threshold),
+   with no instability of any kind across the full 15000 steps -- the same clean convergence
+   pattern as the successful MuQ runs, not the collapse pattern seen in the pre-optimizer-fix
+   1024-channel MuQ attempt.
+2. *Is EnCodec reconstruction perceptually better than MuQ reconstruction?* The objective signal
+   (waveform correlation 6-9x higher) is consistent with better time-domain/phase fidelity, but
+   per CLAUDE.md's repeated instruction not to claim perceptual success from metrics alone, this
+   is pending the user's listening judgment -- audio sent via SendUserFile, not yet confirmed.
+3. *If EnCodec is substantially better, what does that imply about MuQ invertibility?* It would
+   mean MuQ's own bottleneck representation -- a 25 Hz, self-supervised embedding trained for
+   downstream music-understanding tasks, not reconstruction -- discards or entangles phase/fine-
+   temporal information more thoroughly than a representation whose entire training objective is
+   accurate reconstruction (EnCodec, a neural codec). Critically, since every other variable was
+   held fixed (identical decoder, discriminator, losses, optimizer, schedule), this result would
+   favor explanation (2) from [[gate3-capacity-ruled-out]] (a genuine MuQ representation ceiling)
+   over explanation (1) (merely needing longer adversarial training) -- because the same limited
+   adversarial budget (15000 steps, 2 clips) was clearly *sufficient* to unlock much better
+   waveform fidelity once the representation changed, suggesting the MuQ runs weren't simply
+   undertrained.
+4. *If EnCodec were similarly mediocre, what would that imply about the decoder family?* Would
+   have supported the user's original hypothesis (HiFi-GAN unsuited to music) and justified moving
+   to BigVGAN. **This did not happen** -- the same decoder produced a qualitatively different
+   result with a different representation, which is evidence *against* "the decoder family is the
+   bottleneck" and *for* "the representation matters a lot," at least provisionally pending the
+   listening confirmation in (2).
+
+**Decision.** Do not start BigVGAN work (per explicit instruction, and now also because this
+result argues against the decoder family being the primary bottleneck). Do not modify the MuQ
+baseline (`configs/smoke.yaml`/`smoke_1024.yaml`, confirmed untouched). Do not proceed to Gate
+4/5 on either representation (per explicit instruction). Await the user's listening verdict on
+this run's audio before drawing final conclusions -- the waveform-correlation gap is compelling
+but this project's own rules (and this session's own repeated experience with the
+metrics-vs-perception gap in [[gate3-capacity-ruled-out]]) require a listening check before
+treating any objective-metric win as a real one.
+
+**Consequences.** `configs/encodec_1024.yaml`, `src/muq_inversion/encodec_encoder.py`, and the
+`encoder_type` config field now exist on this branch. None of it affects the MuQ baseline on
+`main` or on this branch when `encoder_type` is left at its default. If the listening verdict
+confirms EnCodec is genuinely better, the natural next question becomes whether MuQ's specific
+information loss is frame-rate-driven (75 Hz vs 25 Hz -- 3x denser temporal sampling) or
+channel/training-objective-driven (128-dim codec-trained vs. 1024-dim self-supervised) -- this
+single experiment changed both at once and cannot separate them.
+
+**Rollback plan.** This entire line of work lives on `encodec-hifigan-experiment`, isolated from
+`main` by construction. If it needs to be abandoned, simply do not merge the branch; no baseline
+files were touched.
+
+---
+
+## encodec-mediocrity-across-all-variants: Neither capacity nor representation explains the audio quality ceiling
+
+**Context.** Across this project's Gate 3 investigation, three substantially different technical
+interventions have now been tried, each producing a large, measurable change in objective
+metrics:
+
+| variant | change vs. previous | metric that moved | perceptual verdict |
+|---|---|---|---|
+| tiny reconstruction-only baseline | (original Gate 3 implementation) | -- | "buzzing noise... nothing remotely recognizable" |
+| MuQ + MRF-512, adversarial training | added discriminators, MRF generator | mel correlation 0 -> 0.92-0.94 | "recognizable... still plagued by artifacts" |
+| MuQ + MRF-1024 | 3.57x generator capacity | mel correlation 0.92 -> 0.97 | **no perceptible difference from MRF-512** |
+| EnCodec + MRF-1024 | swapped representation source entirely | waveform correlation 0.07 -> 0.68 (6-9x) | **no perceptible difference from either MuQ variant** |
+
+The final row is the new information: the user's quick listening comparison across the tiny
+baseline, MuQ+MRF-1024, and EnCodec+MRF-1024 found them "all similarly mediocre" -- no audible
+difference despite EnCodec producing the single largest metric movement of any experiment in this
+project.
+
+**Finding: this generalizes [[gate3-capacity-ruled-out]] from "capacity doesn't explain it" to
+"capacity *and* representation source don't explain it."** Two independent, large-effect-size
+technical axes have now been varied -- decoder capacity (512 -> 1024 channels) and representation
+source (MuQ -> EnCodec, a different model family with a different training objective, a 3x
+different frame rate, and an 8x different channel width) -- and neither produced an audible
+change, even though both produced their era's largest objective-metric improvement. This is
+strong evidence that whatever sets the perceptual ceiling here is **not** decoder size and is
+**not** which of these two specific representations is used.
+
+**What's left, now that two major axes are ruled out:**
+
+1. **Something shared by every variant tested.** All four rows in the table above share: the
+   same two 2-second fixed clips, the same HiFi-GAN-style MRF generator *design* (even MRF-512 and
+   MRF-1024 share the same block structure, just width), the same multi-period/multi-scale
+   discriminator design, the same mel+STFT+adversarial+feature-matching loss combination, the
+   same Adam betas, and a training budget capped in the same rough range (500-15,000 steps) on
+   only 2 examples. Any of these could be the actual ceiling. The 2-clip-overfit paradigm itself
+   is a strong suspect: a discriminator trained on only 2 real examples may only ever learn to
+   push the generator toward a generic "plausible timbre" rather than a precise match to either
+   specific clip, regardless of how large the generator is or how information-rich its
+   conditioning is -- capacity and representation improvements would still show up in
+   correlation-style metrics (which reward getting *closer* on average) without necessarily
+   crossing whatever threshold separates "closer" from "audibly better."
+2. **The evaluation methodology itself may not be resolving what actually differs.** A "quick
+   listening test" on 2-second excerpts, without a blinded A/B setup or repeated careful
+   listening, may not detect real but subtle differences -- especially if all variants share a
+   dominant, perceptually loud artifact (e.g. a characteristic buzzy/ringing texture common to
+   under-trained HiFi-GAN-style adversarial decoders) that masks whatever finer differences the
+   metrics are picking up on.
+3. **Both of the above could be true simultaneously** -- the paradigm ceiling could be real *and*
+   a more careful evaluation could still surface a real, smaller difference between variants.
+
+**Decision.** Do not run another capacity or representation variant inside this same 2-clip,
+short-training paradigm expecting a different perceptual outcome -- the pattern (big metric move,
+zero audible move) has now repeated three times across two different metrics (mel correlation,
+waveform correlation) and two different technical axes (capacity, representation). Continuing to
+iterate on generator/encoder choices without changing the shared training paradigm is unlikely to
+be a good use of further compute. This was proposed to the user as a recommendation, not decided
+unilaterally: the two live options are (a) change something about the shared paradigm itself
+(more/different training data beyond 2 clips, i.e. moving toward Gate 4/5 scale, and/or a much
+longer training budget) to see if that -- not capacity or representation -- is what's been
+missing, or (b) treat "recognizable content, mediocre quality, robust to both capacity and
+representation choice" as the documented finding for this phase of the interpretability
+experiment and stop tuning this specific axis.
+
+**Consequences.** This is a genuinely useful negative result for CLAUDE.md's own Scientific
+Question 3 ("is failure caused by implementation/optimization problems, or by insufficient
+information in the representation?") -- the answer increasingly looks like neither, specifically:
+it's not an implementation-capacity problem (ruled out), and it's not specific to MuQ's
+information content (ruled out by EnCodec performing metrically much better with zero perceptual
+gain, which would be a strange result if MuQ's information content were the binding constraint).
+That leaves the training paradigm/recipe itself, or the evaluation method, as the most likely
+remaining explanations.
+
+**Rollback plan.** None needed -- this is a synthesis, not a code change. If a future, more
+careful listening evaluation (blinded A/B, longer excerpts, multiple listeners) does reveal real
+differences between these variants that a quick pass missed, revisit whether the metrics were
+right all along and the evaluation method was the actual limitation. (2026-09-08) -- no perceptible difference across any variant tested.**
+User's quick listening comparison across all three of this project's major reconstruction
+variants: the original tiny reconstruction-only overfit baseline, the MuQ+MRF-1024
+adversarially-trained model, and this EnCodec+MRF-1024 model -- "I can't tell any difference...
+they are all similarly mediocre." This is a stronger and more general version of
+[[gate3-capacity-ruled-out]]'s finding: not only did a 3.57x capacity increase fail to produce an
+audible difference despite moving mel correlation substantially, but swapping the entire
+representation source (with a completely different, measured frame rate and channel width) and
+producing a 6-9x jump in waveform correlation *also* failed to produce an audible difference. See
+[[encodec-mediocrity-across-all-variants]] for the full synthesis this triggered.

@@ -28,6 +28,16 @@ class MuQConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class EncodecConfig:
+    """EnCodec representation-source experiment -- see notes/DECISIONS.md#encodec-hifigan.
+    Uses the continuous pre-quantization encoder embedding (`model.encoder(...)`), not the
+    quantized RVQ codes, to stay analogous to MuQ's continuous last_hidden_state."""
+
+    model_id: str = "facebook/encodec_24khz"
+    sample_rate: int = 24000
+
+
+@dataclasses.dataclass(frozen=True)
 class DataConfig:
     raw_dir: str = "data/raw/gtzan"
     processed_dir: str = "data/processed"
@@ -193,6 +203,11 @@ class ExperimentConfig:
     discriminator: DiscriminatorConfig
     training: TrainingConfig
     pilot: PilotConfig
+    # Representation-source selector for the encodec-hifigan-experiment branch (see
+    # notes/DECISIONS.md#encodec-hifigan). Defaults to "muq" so every existing config's resolved
+    # behavior is unchanged unless a config explicitly opts into "encodec".
+    encoder_type: str = "muq"
+    encodec: EncodecConfig = dataclasses.field(default_factory=EncodecConfig)
 
 
 def _dataclass_from_dict(cls: type, payload: dict[str, Any]) -> Any:
@@ -262,6 +277,8 @@ def load_config(path: str | Path) -> ExperimentConfig:
         pilot_raw["track_ids"] = tuple(pilot_raw["track_ids"])
     pilot = _dataclass_from_dict(PilotConfig, pilot_raw)
 
+    encodec = _dataclass_from_dict(EncodecConfig, raw.get("encodec", {}))
+
     return ExperimentConfig(
         name=raw["name"],
         environment=environment,
@@ -275,6 +292,8 @@ def load_config(path: str | Path) -> ExperimentConfig:
         discriminator=discriminator,
         training=training,
         pilot=pilot,
+        encoder_type=raw.get("encoder_type", "muq"),
+        encodec=encodec,
     )
 
 
