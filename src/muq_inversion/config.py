@@ -28,6 +28,24 @@ class MuQConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class GroundTruthMelConfig:
+    """Ground-truth-mel sanity check (experiment/mel-hifigan-sanity branch) -- see
+    notes/DECISIONS.md#mel-hifigan-sanity. Computes a log-mel spectrogram directly from the
+    target waveform crop itself (no learned upstream encoder, nothing to freeze) and feeds it to
+    the decoder as conditioning -- the classic "copy synthesis" vocoder sanity check. Defaults
+    match the project's own already-justified `mel_loss` config (see
+    notes/DECISIONS.md#gate3-loss-configs) so the conditioning representation isn't a new,
+    unjustified choice."""
+
+    n_fft: int = 2048
+    hop_length: int = 300
+    win_length: int = 1200
+    n_mels: int = 128
+    fmin: float = 0.0
+    fmax: float = 12000.0
+
+
+@dataclasses.dataclass(frozen=True)
 class DataConfig:
     raw_dir: str = "data/raw/gtzan"
     processed_dir: str = "data/processed"
@@ -193,6 +211,11 @@ class ExperimentConfig:
     discriminator: DiscriminatorConfig
     training: TrainingConfig
     pilot: PilotConfig
+    # Representation-source selector for the experiment/mel-hifigan-sanity branch (see
+    # notes/DECISIONS.md#mel-hifigan-sanity). Defaults to "muq" so every existing config's
+    # resolved behavior is unchanged unless a config explicitly opts into "ground_truth_mel".
+    encoder_type: str = "muq"
+    ground_truth_mel: GroundTruthMelConfig = dataclasses.field(default_factory=GroundTruthMelConfig)
 
 
 def _dataclass_from_dict(cls: type, payload: dict[str, Any]) -> Any:
@@ -262,6 +285,8 @@ def load_config(path: str | Path) -> ExperimentConfig:
         pilot_raw["track_ids"] = tuple(pilot_raw["track_ids"])
     pilot = _dataclass_from_dict(PilotConfig, pilot_raw)
 
+    ground_truth_mel = _dataclass_from_dict(GroundTruthMelConfig, raw.get("ground_truth_mel", {}))
+
     return ExperimentConfig(
         name=raw["name"],
         environment=environment,
@@ -275,6 +300,8 @@ def load_config(path: str | Path) -> ExperimentConfig:
         discriminator=discriminator,
         training=training,
         pilot=pilot,
+        encoder_type=raw.get("encoder_type", "muq"),
+        ground_truth_mel=ground_truth_mel,
     )
 
 

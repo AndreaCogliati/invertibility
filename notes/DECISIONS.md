@@ -788,3 +788,168 @@ without first changing something on the training-depth or diagnostic axis, or th
 config change to revert. If a future experiment (longer training, different loss, or otherwise)
 does produce an audible improvement, revisit whether capacity interacts with that fix (e.g. maybe
 capacity matters once training is deep enough) before assuming this finding generalizes forever.
+
+---
+
+## mel-hifigan-sanity: Ground-truth mel spectrogram sanity check (experiment/mel-hifigan-sanity branch)
+
+**Context.** After the (sibling, not-merged) `encodec-hifigan-experiment` branch found that
+EnCodec conditioning produced a 6-9x jump in waveform correlation over MuQ with an identical
+decoder, the user wanted the most direct possible sanity check before drawing conclusions from
+either representation-swap result: condition the exact same HiFi-GAN pipeline on the ground-truth
+mel spectrogram of the target itself -- the literal representation HiFi-GAN was originally
+designed to consume (mel spectrogram -> HiFi-GAN -> waveform, the classic "copy synthesis" test).
+If the current pipeline can't even reproduce audio from its own designed input, that would
+implicate the training recipe/decoder pipeline itself, independent of MuQ or EnCodec. This branch
+was created off `main` (not off `encodec-hifigan-experiment`), so it carries the MuQ+MRF-1024
+infrastructure but none of the EnCodec-specific code -- an intentional choice to keep this a
+clean, independent sibling experiment.
+
+**Representation source.** No learned upstream model at all: a deterministic log-mel-spectrogram
+transform (`torchaudio.transforms.MelSpectrogram`) applied directly to the target waveform crop
+itself. Reused this project's own already-justified `mel_loss` parameters (`n_fft=2048,
+hop_length=300, win_length=1200, n_mels=128, fmin=0.0, fmax=12000.0`, see
+[[gate3-loss-configs]]) as the conditioning transform too, so the "ground truth" representation
+isn't a new, separately-justified choice.
+
+**A real implementation subtlety caught before training.** `torchaudio`'s default
+`center=True` framing pads the signal internally and yields `1 + num_samples // hop_length`
+frames (161 for a 48000-sample crop at hop=300) -- one frame more than the clean
+`num_samples // hop_length` (160) needed for this project's crop-alignment invariant
+(`crop_samples == num_frames * generator.total_upsample`, [[gate3-crop-alignment]]). Fixed by
+adopting HiFi-GAN's own standard mel-extraction convention: manually reflect-pad the waveform by
+`(n_fft - hop_length) // 2` on each side, then run the STFT with `center=False`. Verified directly
+(a real forward pass, not just arithmetic) that this produces exactly `(1, 160, 128)` for a
+48000-sample crop -- samples_per_frame = 300.0 exactly, frames_per_second = 80.0.
+
+**The one unavoidable architectural adaptation** (same pattern as the EnCodec branch): since the
+mel representation's measured ratio (300) differs from MuQ's (960), `decoder.upsample_rates` was
+changed to `(5, 5, 4, 3)` (product 300) and `training.crop_frames` from 50 to 160 -- preserving
+the identical 2.0-second (48000-sample) crop length in the new frame-counting units. Every other
+field (`base_channels=1024`, resblock design, discriminator, all losses, both Adam betas
+`(0.8, 0.99)`, `adversarial_warmup_steps=500`, `training.steps=15000`, the same two fixed clips
+`pop.00012`/`disco.00049`) is byte-identical to `configs/smoke_1024.yaml`.
+
+**Implementation.** Added `mel_encoder.py` (`GroundTruthMelEncoder`, same `encode()`/`probe()`
+interface as `FrozenMuQEncoder`), a `GroundTruthMelConfig`, and an `encoder_type: "muq" |
+"ground_truth_mel"` field on `ExperimentConfig` (defaulting to `"muq"`, confirmed by re-running
+the full 47-test suite and checking `smoke.yaml`/`smoke_1024.yaml`/`pilot.yaml` still resolve to
+`encoder_type: "muq"` by default). The only change to `train.py` is the same small
+encoder-selection branch pattern used on the EnCodec branch, built independently here since the
+two experiment branches don't share commits.
+
+**Comparison table** (all three: same 2 tracks, same 2.0s crop, same MRF-1024 generator design,
+same discriminator, same losses, same Adam betas `(0.8, 0.99)`, same 15000-step schedule; MuQ and
+EnCodec numbers carried over from the sibling `encodec-hifigan-experiment` branch's results,
+established earlier this session):
+
+| metric | MuQ + HiFi-GAN | EnCodec + HiFi-GAN | Ground-truth mel + HiFi-GAN |
+|---|---|---|---|
+| representation frame rate | 25 Hz | 75 Hz | 80 Hz |
+| representation channels | 1024 | 128 | 128 |
+| generator parameters | 61,582,593 | 54,799,617 | 51,670,273 |
+| checkpoint size | 782.8 MB | 701.4 MB | 663.8 MB |
+| training wall time (15000 steps) | ~52 min | ~62 min | ~48 min |
+| training stability | stable | stable | stable |
+| final mel loss | 0.319 | 0.381 | 0.379 |
+| mel correlation (pop.00012 / disco.00049) | 0.965 / 0.976 | 0.950 / 0.970 | 0.944 / 0.966 |
+| waveform correlation (pop.00012 / disco.00049) | 0.073 / 0.104 | **0.682 / 0.602** | 0.059 / -0.010 |
+
+**The critical result: ground-truth mel behaves like MuQ, not like EnCodec.** Mel correlation is
+comparable across all three (0.94-0.98 range) -- expected, since all three are being pushed
+toward the same mel-loss target regardless of conditioning source. But waveform correlation for
+ground-truth mel (0.06 / -0.01) is close to MuQ's (0.07 / 0.10) and nowhere near EnCodec's
+(0.68 / 0.60), **despite ground-truth mel being, by construction, at least as information-rich
+about the target as any other representation could be for matching its own magnitude spectrum.**
+
+**Answering the three required questions:**
+
+1. *Can the current HiFi-GAN setup memorize two clips when conditioned on ground-truth mel
+   spectrograms?* Yes, in the same sense MuQ did: clean convergence (reconstruction loss ratio
+   0.36, no instability, `disc` stayed healthy throughout), strong mel-domain correlation
+   (0.94-0.97). But *not* in the stronger sense EnCodec demonstrated -- waveform-domain fidelity
+   stayed low.
+2. *If not [fully], what is the most likely bottleneck?* Given that even the literal ground-truth
+   mel spectrogram -- the exact representation the mel/STFT losses are already targeting, and the
+   representation HiFi-GAN was originally designed around -- does not produce high waveform
+   correlation with this training recipe, the bottleneck is most likely **the same one classical
+   vocoder research exists to solve**: reconstructing time-domain phase from a magnitude-only
+   spectral representation is a genuinely underdetermined problem, and this project's adversarial
+   training budget (15,000 steps, 2 overfit clips, no dataset-scale discriminator training) is
+   small relative to what published HiFi-GAN results use to solve it. This result does not
+   distinguish between "the training paradigm needs to scale up" and "mel-like magnitude
+   representations are fundamentally capped at this budget" -- but it does now make the *shared
+   training recipe* (not any specific representation) the leading suspect for the mediocre
+   perceptual results on both MuQ and ground-truth mel.
+3. *What does this imply about the MuQ and EnCodec results?* This substantially refines, rather
+   than contradicts, the EnCodec branch's finding. MuQ's own published architecture consumes
+   `melspec_2048` (a mel spectrogram) as its *input* feature (confirmed from the model's public
+   config) -- so MuQ's `last_hidden_state` is itself downstream of a magnitude-only, phase-
+   discarding representation, learned for a self-supervised music-understanding objective, not
+   reconstruction. Ground-truth mel scoring similarly to MuQ on waveform correlation is consistent
+   with **both being magnitude-domain representations that never encoded phase to begin with** --
+   whereas EnCodec is a full neural *codec*, trained end-to-end with a paired decoder whose
+   objective is literally accurate waveform reconstruction, so its encoder had explicit pressure
+   to retain whatever information (very plausibly including phase/timing cues) its own decoder
+   needs. This reframes the MuQ-vs-EnCodec question: it's less "EnCodec's information is richer"
+   in a generic sense, and more "EnCodec's representation was trained to preserve reconstruction-
+   relevant information that magnitude-spectrum-derived representations (ground-truth mel, and by
+   inheritance MuQ) do not carry at all, regardless of how well-trained the decoder is."
+
+**Decision.** Do not conclude the mel-hifigan-sanity result is a decoder-family indictment
+(explicitly out of scope; no BigVGAN work started) -- the ground-truth mel result is directionally
+consistent with the *training recipe* being under-scaled for full phase recovery from any
+magnitude-only source, not with HiFi-GAN being incapable in principle (published HiFi-GAN results
+on full datasets with much longer training do recover phase well from mel spectrograms). Recorded
+this as a refinement of [[encodec-mediocrity-across-all-variants]]'s open question: the
+"representation vs. training paradigm" fork now has a plausible resolution -- **it is likely
+both**, with the specific distinction being magnitude-only vs. reconstruction-trained
+representations, not "MuQ vs. EnCodec" as arbitrary alternatives. Awaiting the user's listening
+verdict before treating any of this as confirmed (per this project's now-consistent practice of
+never declaring a perceptual result from correlation metrics alone).
+
+**Consequences.** Three representation-source branches now exist (`main`'s MuQ baseline,
+`encodec-hifigan-experiment`, `experiment/mel-hifigan-sanity`), each isolated, each additive to
+its own base commit, none merged. If the user wants to test the refined hypothesis directly, the
+natural next experiment is a representation that is reconstruction-trained but *not* MuQ or
+EnCodec specifically (to check the magnitude-vs-reconstruction-objective distinction generalizes)
+-- or, cheaper, extending training substantially on the ground-truth-mel config specifically,
+since classical vocoder literature would predict *that* representation should improve the most
+with more/broader training if the "training paradigm is under-scaled" explanation is correct.
+
+**Rollback plan.** This entire line of work lives on `experiment/mel-hifigan-sanity`, isolated
+from `main` and from `encodec-hifigan-experiment` by construction. If abandoned, simply do not
+merge; no baseline files were touched (confirmed via `git diff main` showing zero differences on
+`configs/smoke.yaml`/`configs/smoke_1024.yaml` and all MuQ-path source files).
+
+**Final listening verdict (2026-09-08) -- mediocre again, indistinguishable from every other
+variant.** User's judgment: "The reconstructed audio sounds mediocre again. Almost identical to
+the other experiments. There must [be] something wrong with the training pipeline." This extends
+[[encodec-mediocrity-across-all-variants]]'s pattern to a fourth variant, but with an added twist:
+ground-truth mel and EnCodec have wildly different waveform correlation (0.06/-0.01 vs. 0.68/0.60)
+yet reportedly sound the same to the user, and MuQ (waveform correlation 0.07/0.10, similar to
+ground-truth mel) also sounds the same. If EnCodec's waveform correlation gap were real and
+perceptually meaningful, an audible difference between EnCodec and the other two would be
+expected; hearing none raises a legitimate, more serious hypothesis than "training paradigm is
+under-scaled": that the generator may not be using its conditioning input in a perceptually
+meaningful way at all across every variant tested (a conditioning-collapse-style issue, per
+CLAUDE.md's Evaluation and Controls section: "If the controls sound similar to the correctly
+conditioned model, assume conditioning collapse or leakage until disproven") -- consistent with,
+and possibly explaining, Gate 4's earlier unresolved `shuffled_time` finding
+([[gate4-shuffled-time-finding]]), where shuffled-in-time conditioning was already found to be
+only marginally worse than correct conditioning for the original MuQ setup.
+
+**Status: this hypothesis is proposed but NOT yet tested.** A concrete, cheap diagnostic was
+identified but not run (interrupted by the user, who asked to summarize and commit instead of
+continuing): load each of the three already-trained checkpoints (MuQ, EnCodec, ground-truth-mel
++ MRF-1024 -- all still present on disk in the gitignored `runs/` directory, unaffected by branch
+switches) and directly compare generator output under correct vs. zero vs. shuffled-in-time vs.
+cross-track conditioning, without retraining anything. If the outputs barely change across these
+conditioning variants, that would be direct, decisive evidence of conditioning collapse -- a
+genuine pipeline issue, not a representation or training-depth limitation. If outputs do change
+substantially with conditioning, that would argue against a collapse bug and back toward the
+training-paradigm/phase-reconstruction-difficulty explanation already on record. **This is the
+right next diagnostic step and should be run before any further training experiments** -- it is
+cheap (no GPU training required, just forward passes on existing checkpoints) and would
+directly confirm or rule out the user's hypothesis rather than continuing to guess from
+correlation metrics and listening impressions alone.

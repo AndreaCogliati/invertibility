@@ -69,7 +69,8 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
 - See [[muq-transformers-compat]], [[gtzan-source-and-defects]], [[decoder-upsample-placeholder]],
   [[gate2-cache-format]], [[gate3-crop-alignment]], [[gate3-loss-configs]],
   [[gate4-mps-resume-tolerance]], [[gate4-shuffled-time-finding]], [[gate3-adversarial-losses]],
-  [[gate3-generator-capacity]], [[gate3-capacity-1024]], [[gate3-capacity-ruled-out]].
+  [[gate3-generator-capacity]], [[gate3-capacity-1024]], [[gate3-capacity-ruled-out]],
+  [[mel-hifigan-sanity]].
 
 ## Known platform limitations
 
@@ -173,3 +174,37 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   step (proposed to user, not yet executed): test much longer/broader adversarial training before
   drawing conclusions about the representation itself. See [[gate3-capacity-ruled-out]] for the
   full three-finding synthesis and reasoning.
+- Ground-truth mel sanity check (2026-09-08, `experiment/mel-hifigan-sanity` branch, created off
+  `main` rather than the sibling EnCodec branch): tested whether the exact same HiFi-GAN pipeline
+  can reconstruct audio from the literal representation HiFi-GAN was designed for (ground-truth
+  log-mel spectrogram of the target itself, no learned upstream model), using the identical
+  MRF-1024 generator/discriminator/losses/betas/15000-step schedule as the MuQ and EnCodec
+  experiments. Measured geometry: 80 Hz, 300 samples/frame, 128 channels (n_fft=2048, hop=300) --
+  required adopting HiFi-GAN's own manual-pad + `center=False` mel-extraction convention (not
+  torchaudio's default `center=True`) to get an exact `num_samples // hop_length` frame count
+  instead of an off-by-one `1 + num_samples // hop_length`. Training converged cleanly (no
+  collapse). Result: mel correlation 0.944/0.966 (comparable to MuQ's 0.965/0.976 and EnCodec's
+  0.950/0.970), but **waveform correlation 0.059/-0.010 -- close to MuQ's 0.073/0.104, nowhere
+  near EnCodec's 0.682/0.602**, despite this being provably at least as information-rich about the
+  target as any representation could be for the mel/STFT loss's own objective. **Key implication:**
+  MuQ's own published architecture consumes a mel spectrogram (`melspec_2048`) as its input
+  feature, so MuQ's `last_hidden_state` is itself downstream of a magnitude-only, phase-discarding
+  representation -- ground-truth mel scoring like MuQ (not like EnCodec) on waveform correlation is
+  consistent with both being magnitude-domain representations that never encoded phase, while
+  EnCodec (a full neural codec trained end-to-end with a reconstruction-objective decoder) had
+  explicit pressure to retain phase/timing-relevant information. Refines (does not contradict) the
+  EnCodec branch's finding: the distinction driving the waveform-correlation gap looks like
+  "magnitude-only vs. reconstruction-trained representation," not "MuQ vs. EnCodec" as arbitrary
+  alternatives. Full comparison table and reasoning in [[mel-hifigan-sanity]]. Perceptual
+  confirmation from the user is pending -- audio sent via SendUserFile, not yet judged.
+- Listening verdict (2026-09-08, same day): "mediocre again... almost identical to the other
+  experiments. There must [be] something wrong with the training pipeline." Since ground-truth
+  mel and EnCodec have wildly different waveform correlation (0.06/-0.01 vs. 0.68/0.60) yet
+  reportedly sound the same, this raises a more serious hypothesis than "training paradigm is
+  under-scaled": possible conditioning collapse (the generator not meaningfully using its
+  conditioning input across any variant), consistent with Gate 4's previously unresolved
+  `shuffled_time` finding ([[gate4-shuffled-time-finding]]). **Not yet tested** -- a direct,
+  cheap diagnostic (compare generator output under correct vs. zero vs. shuffled vs. cross-track
+  conditioning, using already-trained checkpoints, no retraining needed) was identified but not
+  run before the user asked to stop and summarize. See [[mel-hifigan-sanity]] "Final listening
+  verdict" for the proposed next step.

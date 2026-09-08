@@ -457,3 +457,101 @@ Then asked directly: "What conclusions can we make?"
   DECISIONS.md, MEMORY.md (durable conclusion), this SCRATCHPAD.md entry (as-it-happened log),
   and NEXT.md (resumability: current status, next command options, blockers) all in the same
   pass, no new code or experiments run.
+
+## 2026-09-08 -- New branch: experiment/mel-hifigan-sanity
+
+User asked for a new branch `experiment/mel-hifigan-sanity`, off `main` (deliberately chosen over
+branching from `encodec-hifigan-experiment`, since this test doesn't need any EnCodec code and
+keeping it a clean sibling avoids conflating the two lines of investigation). Re-read CLAUDE.md
+and all notes files first, per explicit instruction -- confirmed this branch's notes files are
+at the pre-EnCodec ("capacity ruled out") state, since `main` never received the EnCodec branch's
+commits. Since I already had the exact MuQ/EnCodec comparison numbers verified earlier this same
+session, referenced them directly in this branch's write-up rather than needing the other
+branch's files.
+
+Task: run the identical Gate 3 setup with ground-truth mel-spectrogram conditioning instead of
+MuQ or EnCodec -- the classic vocoder "copy synthesis" sanity check (mel of the target itself ->
+HiFi-GAN -> waveform). Same 2 clips, crop length, MRF-1024 generator, discriminators, losses,
+betas, 15000 steps. Explicit instructions: don't touch Gate 4/5, don't start BigVGAN.
+
+- Reused this project's own already-justified `mel_loss` parameters (n_fft=2048, hop=300,
+  win=1200, n_mels=128, fmin=0, fmax=12000) as the conditioning transform too, rather than
+  picking new numbers -- the "ground truth" representation shouldn't be a fresh unjustified
+  choice when a good one already exists in this codebase.
+- Caught a real implementation subtlety before training: torchaudio's default `center=True`
+  mel framing gives `1 + num_samples // hop_length` frames (161 for a 48000-sample/hop=300 crop),
+  not the clean `num_samples // hop_length` (160) this project's crop-alignment invariant needs.
+  Verified this with an actual forward pass, not just reading docs. Fixed by implementing
+  HiFi-GAN's own standard convention: manually reflect-pad the waveform by
+  `(n_fft - hop_length) // 2` on each side, then use `center=False` -- verified this gives
+  exactly `(1, 160, 128)` for a 48000-sample crop before writing anything depending on it.
+- `decoder.upsample_rates` -> `(5, 5, 4, 3)` (product 300, matching the mel's measured
+  samples-per-frame ratio) and `training.crop_frames` -> 160 (same forced-adaptation pattern as
+  the EnCodec branch) -- preserves the identical 2.0s/48000-sample crop length.
+- Implementation: `mel_encoder.py` (`GroundTruthMelEncoder`, no learned parameters at all --
+  just a deterministic transform, kept behind the same `encode()`/`probe()` interface as the
+  other encoders for polymorphism in `train.py`), `GroundTruthMelConfig`, and a fresh
+  `encoder_type` field on `ExperimentConfig` (built independently here, not shared with the
+  EnCodec branch, since the two branches don't share commits) -- default-preserving, confirmed
+  via the full 47-test suite and by checking `smoke.yaml`/`smoke_1024.yaml`/`pilot.yaml` still
+  resolve to `encoder_type: "muq"`.
+- Timed a 100-step run first (~0.19s/step, similar to EnCodec's per-step cost, both having
+  ~150-160 frame sequences vs. MuQ's 50) before the full 15000-step commitment.
+- Ran the full experiment. Training converged cleanly, `disc` stayed healthy (~0.2-0.9) the whole
+  time, final mel loss 0.379 -- essentially identical to EnCodec's 0.381, both slightly higher
+  than MuQ's 0.319. Mel correlation 0.944/0.966, again comparable to the other two.
+- The interesting result: **waveform correlation came out at 0.059/-0.010** -- nowhere near
+  EnCodec's 0.682/0.602, much closer to MuQ's 0.073/0.104. This was not the expected outcome if
+  "representation information richness" were the whole story (ground-truth mel should be an
+  upper bound on how well a magnitude-domain representation can inform reconstruction, since it
+  literally *is* the loss's own target signal). Re-derived why: MuQ's own published model config
+  lists `melspec_2048` as its input feature -- MuQ is itself downstream of a mel spectrogram, so
+  its representation never had phase information to begin with, any more than a raw mel
+  spectrogram does. EnCodec is a full neural codec with a paired reconstruction-objective decoder,
+  which is a categorically different kind of representation (trained to retain what its own
+  decoder needs, likely including phase/timing cues). This reframes the earlier "MuQ vs EnCodec"
+  framing as really being about magnitude-only vs. reconstruction-trained representations.
+- Computed parameter count (51,670,273, smallest of the three -- input projection is
+  `Conv1d(128, 1024, ...)` like EnCodec's, plus a slightly different overall upsample structure),
+  checkpoint size (663.8MB), and wall time (~48 min, fastest of the three despite a similar
+  150-160 frame sequence length -- plausibly just run-to-run system noise, not investigated
+  further since it's not the point of this experiment).
+- Sent reference/reconstruction audio for both clips to the user via SendUserFile, again
+  explicitly asking for a listening comparison rather than declaring anything from the metrics
+  alone -- same discipline as every prior perceptual claim this session.
+- Wrote up the full comparison table (MuQ / EnCodec / ground-truth-mel side by side) and the
+  three required questions in [[DECISIONS.md#mel-hifigan-sanity]], being explicit that the MuQ/
+  EnCodec numbers were carried over from the sibling branch's already-established results (not
+  re-derived here) since the two branches don't share history.
+- `ruff check .`/`pytest -q` clean (47 tests) throughout; confirmed via `git diff main` that no
+  MuQ-baseline file was touched. Did not start BigVGAN work. Did not touch Gate 4/5.
+
+## 2026-09-08 (cont.) -- Listening verdict + interrupted conditioning-collapse diagnostic
+
+User's verdict: "The reconstructed audio sounds mediocre again. Almost identical to the other
+experiments. There must [be] something wrong with the training pipeline." Took this seriously as
+a testable hypothesis rather than debating it: if EnCodec's 6-9x higher waveform correlation were
+perceptually real, EnCodec should sound at least somewhat different from MuQ/ground-truth-mel --
+reportedly it doesn't. Recalled that Gate 4's `shuffled_time` finding
+([[DECISIONS.md#gate4-shuffled-time-finding]]) already showed a *smaller* version of this same
+pattern (shuffled-in-time conditioning only marginally worse than correct conditioning) and was
+never fully resolved -- this new report could be the same underlying issue showing up more
+starkly now that representations differ by more than just frame ordering.
+
+Started designing a direct, cheap diagnostic (no retraining): confirmed all three checkpoints
+(MuQ, EnCodec, ground-truth-mel + MRF-1024) are still physically present in `runs/` (gitignored,
+so untouched by branch switches -- verified with `ls`). Confirmed `muq`/`transformers`/
+`torchaudio` are all importable in this branch's venv (shared `.venv`, not branch-specific, so no
+dependency issue running an EnCodec or MuQ checkpoint from the mel-sanity branch). Looked up the
+exact GTZAN relative paths for both fixed clips from the manifest
+(`genres/disco/disco.00049.wav`, `genres/pop/pop.00012.wav`) as the next step toward loading real
+audio for the "correct conditioning" case.
+
+**Interrupted by the user before running anything** -- asked to summarize and commit instead,
+explicitly "don't do anything else for now." Did not execute the diagnostic. Recorded the full
+plan in [[DECISIONS.md#mel-hifigan-sanity]] ("Final listening verdict" addendum) and
+[[NEXT.md]] ("Next command") so it can be picked up exactly where it was left off: load each
+checkpoint's `resolved_config` (already embedded in the checkpoint file) to reconstruct the
+generator, compute correct/zero/shuffled-time/cross-track conditioning, and compare outputs.
+No training, no new experiments, no code changes this pass -- pure documentation of the current
+state and the interrupted plan, per the user's explicit request.
