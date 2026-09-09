@@ -457,3 +457,101 @@ Then asked directly: "What conclusions can we make?"
   DECISIONS.md, MEMORY.md (durable conclusion), this SCRATCHPAD.md entry (as-it-happened log),
   and NEXT.md (resumability: current status, next command options, blockers) all in the same
   pass, no new code or experiments run.
+
+## 2026-09-09 -- `experiment/muq-to-dac-mlp` branch: predicting DAC latents from MuQ latents
+
+New angle from the user after the reference-HiFi-GAN experiment's partial-improvement verdict:
+instead of decoding MuQ (or ground-truth mel) directly to waveform via HiFi-GAN, try predicting
+a *different, reconstruction-trained neural codec's* latent space from MuQ with a tiny framewise
+MLP, then decode with that codec's own frozen decoder. Branched off `main` (not off any sibling
+experiment branch, per this project's standing pattern).
+
+**Choosing a DAC implementation.** Tried `uv add descript-audio-codec` first (the reference
+`import dac` package) -- failed to resolve: `descript-audiotools` pins `protobuf<3.20`, which
+conflicts with this project's `tensorboard>=2.21.0` (`protobuf>=6.31.1`). Checked whether this
+project's already-pinned `transformers==4.55.0` ships a DAC implementation instead --
+`from transformers import DacModel` imported and loaded `descript/dac_24khz` successfully with no
+new dependency needed. Used that instead.
+
+**Measuring DAC's geometry live (not trusting the printed config).** `DacConfig` prints
+`hop_length: 512`, but a direct probe on a real 48000-sample (2.0s) 24kHz clip gave
+`audio_codes` shape `(1, 32, 150)` and `quantized_representation` shape `(1, 1024, 150)` -- i.e.
+an actual hop of `48000/150 = 320` samples, matching the product of `downsampling_ratios:
+[2,4,5,8]` (=320), not the printed `hop_length` field. Recorded as another instance of CLAUDE.md's
+"do not assume the frame rate" principle catching a real, silent discrepancy between a model's
+advertised config and its measured behavior.
+
+**Choosing which DAC tensor is "the latent."** `DacModel.encode()` returns three candidates:
+`audio_codes` (discrete, `(1,32,150)`), `projected_latents` (continuous, pre-quantizer, `(1,256,
+150)`), and `quantized_representation` (continuous, post-quantizer-sum, `(1,1024,150)`). Chose
+`quantized_representation`: it's the only one of the three that `DacModel.decode()` actually
+accepts directly (`decode(quantized_representation=...)`), which is the natural criterion for a
+predict-then-decode pipeline -- whatever the MLP predicts must be what the frozen decoder
+consumes, without needing a second, separate vector-quantization step of our own.
+
+**Geometry measured (both encoders on the same 24kHz, 48000-sample crop):**
+```
+MuQ:  (1, 50, 1024) channels-last, 25.0 Hz, 960.0 samples/frame
+DAC:  (1, 1024, 150) channels-first, 75.0 Hz, 320.0 samples/frame
+ratio: exactly 3x (50 * 3 == 150)
+```
+Convenient: DAC's 75 Hz is exactly 3x MuQ's 25 Hz, an *exact* integer ratio (unlike some of this
+project's earlier crop-alignment concerns with non-integral ratios). Temporal alignment strategy:
+nearest-neighbor repeat each MuQ frame 3x before the framewise MLP (order doesn't matter
+mathematically -- repeat-then-MLP and MLP-then-repeat give identical results for a purely
+per-frame map, since a framewise MLP applied to 3 identical repeated inputs must always produce 3
+identical outputs).
+
+**First bug: `RuntimeError: Inference tensors cannot be saved for backward.`** Both
+`FrozenMuQEncoder.encode()` and `FrozenDacEncoder.encode()` run under `@torch.inference_mode()`
+(matching this project's existing MuQ wrapper convention). Caching their outputs with just
+`.detach()` still leaves the inference-mode flag set, and PyTorch refuses to use such tensors in
+later autograd graphs even after detaching. Fixed by `.detach().clone()` when caching
+`muq_latents`/`dac_targets` for reuse across training steps.
+
+**100-step smoke test:** ran cleanly after the fix, ~6s wall time total (setup + 100 steps) --
+by far the fastest of any experiment in this project (HiFi-GAN variants take ~0.4-0.5s/*step*
+alone). MSE dropped 19.3 -> 11.05 by step ~60 and then went completely flat -- not just slow
+convergence, bit-identical to 6 decimal places for the rest of the run. Extended to 1500 steps to
+check whether this was a plateau that would eventually break: it did not move at all from step
+150 to step 1500 (11.051893 -> 11.051893 to the printed precision). This looked suspicious enough
+to investigate analytically rather than just accept as "converged."
+
+**Explaining the exact plateau.** Computed the theoretical MSE floor imposed by the architecture
+directly: for each MuQ frame, group its 3 corresponding true DAC sub-frames and compute the
+best possible *constant* predictor (their mean) -- this is the absolute best any purely framewise,
+memoryless map fed 3 identical repeated inputs could ever achieve, regardless of training.
+Result: `pop.00012` floor = 11.0399, `disco.00049` floor = 11.5446 (average 11.29) -- matching the
+trained model's converged MSE (~11.05, dominated by `pop.00012` since the printed log lines all
+happen to fall on `pop.00012`'s steps, a parity coincidence: `LOG_EVERY` is a multiple of 2 and
+`TRACKS[step % 2]` alternates, so every printed step lands on the same clip -- both clips are
+still trained every other step, this is a logging-display artifact only, not a training bug).
+**Conclusion: the plateau is not an optimization failure -- it's an exact architectural ceiling**
+from asking a memoryless per-frame map to resolve intra-frame temporal detail it structurally
+cannot see, given the 3x frame-rate mismatch and the "no temporal modeling" constraint.
+
+**Full 3000-step run** (unnecessary given the ~150-step convergence, but run anyway per the task
+spec and for cross-experiment step-budget comparability): confirmed the same floor, final mse
+11.052118, cosine similarity 0.6418, final/initial ratio 0.6347. Checkpoint 100.7 MB (vs. 969MB-1GB
+for the HiFi-GAN-family checkpoints -- much smaller optimizer/model footprint, consistent with an
+8.4M-parameter MLP vs. 14-62M-parameter generators plus full discriminator stacks). Intermediate
+numbered checkpoints deleted after the run (384MB -> 192MB), keeping only `latest.pt`/
+`step_003000.pt`.
+
+**Decoding through the frozen DAC decoder.** Two reconstructions per clip: the MLP's predicted
+latent decoded (`reconstruction`), and the *true* DAC latent decoded (`dac_oracle`) -- the second
+establishes the ceiling even perfect latent prediction couldn't beat, since DAC's own codec is
+itself lossy. Waveform correlation:
+```
+pop.00012:   MLP reconstruction 0.3028   DAC-oracle ceiling 0.3666
+disco.00049: MLP reconstruction 0.1918   DAC-oracle ceiling 0.5735
+```
+The MLP reconstruction's waveform correlation (0.30/0.19) is higher than every HiFi-GAN-family
+variant in this whole investigation except EnCodec's outlier (0.68/0.60) -- notably higher than
+MuQ+HiFi-GAN (0.073/0.104), ground-truth-mel+HiFi-GAN (0.059/-0.010), and even the reference
+HiFi-GAN (0.073/0.122) -- despite requiring no adversarial training, no waveform loss, and
+converging roughly 20x faster (150 steps vs. 15,000). This is strong support for the experiment's
+core question: latent-space prediction between two reconstruction-trained representations (MuQ
+input notwithstanding -- DAC is the reconstruction-trained side) looks substantially easier than
+direct waveform synthesis. See `notes/DECISIONS.md#muq-to-dac-mlp` for the full write-up; audio
+sent to the user for a listening verdict, not yet received as of this note.

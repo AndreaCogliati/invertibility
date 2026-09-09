@@ -173,3 +173,30 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   step (proposed to user, not yet executed): test much longer/broader adversarial training before
   drawing conclusions about the representation itself. See [[gate3-capacity-ruled-out]] for the
   full three-finding synthesis and reasoning.
+- MuQ-to-DAC-latent MLP experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-mlp` branch,
+  branched off `main`): a tiny framewise MLP (8.4M params, `1024->2048->2048->1024`, no GAN, no
+  waveform loss, no temporal modeling) predicting DAC (`descript/dac_24khz`) latents from MuQ
+  latents converged in ~150 steps (vs. 15,000 for every HiFi-GAN variant) to cosine similarity
+  0.6418, and its downstream waveform correlation via DAC's frozen decoder (0.303/0.192) beat
+  every HiFi-GAN-family variant tested except EnCodec's outlier (0.682/0.602). The convergence
+  plateau was verified to be an **exact architectural ceiling**, not an optimization failure: DAC's
+  measured frame rate (75 Hz) is exactly 3x MuQ's (25 Hz), so the framewise MLP is fed 3 identical
+  repeated input frames per MuQ frame and, being memoryless, cannot produce 3 different outputs --
+  the theoretical floor (best constant predictor per MuQ frame) matches the trained model's
+  converged MSE almost exactly (11.04/11.54 vs. trained ~11.05). This is strong evidence that
+  MuQ contains substantial, usable information for predicting a reconstruction-oriented codec's
+  latent space, and that latent-to-latent regression is a fundamentally easier problem than
+  waveform synthesis -- the residual gap to DAC's own oracle ceiling (0.37/0.57) is most likely
+  explained by the framewise-architecture constraint, not by insufficient MuQ information, though
+  this hasn't been fully separated yet. Full write-up and next-step recommendation (relax the
+  framewise constraint with minimal temporal modeling) in [[muq-to-dac-mlp]]. **Listening verdict
+  (2026-09-09): "Reconstructed audio still recognizable but noticeably worse than previous
+  experiments. DAC oracle is perfect."** Two important results: (1) despite numerically beating
+  three of the four HiFi-GAN-family variants on waveform correlation, this experiment sounds
+  *worse* than all of them -- the strongest confirmation yet that waveform-sample correlation is a
+  poor perceptual proxy; (2) the DAC oracle (true DAC latent decoded, no MLP involved) sounds
+  perfect despite scoring only 0.37/0.57 on the same metric -- evidence the metric may carry
+  near-zero diagnostic value on its own for this project, likely because it's sensitive to small
+  time/phase shifts a codec's conv stack introduces (reference/reconstruction length already
+  differs by 8 samples) that a listener discounts entirely. See [[muq-to-dac-mlp]] "Listening
+  verdict" section for the full analysis.

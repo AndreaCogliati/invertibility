@@ -788,3 +788,179 @@ without first changing something on the training-depth or diagnostic axis, or th
 config change to revert. If a future experiment (longer training, different loss, or otherwise)
 does produce an audible improvement, revisit whether capacity interacts with that fix (e.g. maybe
 capacity matters once training is deep enough) before assuming this finding generalizes forever.
+
+## muq-to-dac-mlp: Latent-to-latent regression converges fast and beats every HiFi-GAN variant on waveform correlation, but hits a clean architectural ceiling
+
+**Context.** After the reference-HiFi-GAN experiment ([[reference-hifigan]]) weakened the
+"our implementation has a bug" hypothesis without resolving the underlying audio-quality
+question, the user proposed a structurally different approach: instead of decoding a
+representation to *waveform* via an adversarially-trained HiFi-GAN, predict the latent space of a
+different, reconstruction-trained neural codec (DAC, `descript/dac_24khz`) from MuQ's latent with
+a tiny framewise MLP, then decode with DAC's own frozen decoder. No waveform loss, no GAN, no
+discriminators, no transformer, no temporal modeling -- a deliberately minimal test of whether
+MuQ's representation contains enough information to predict a reconstruction-oriented codec's
+latent at all, decoupled from the separate question of whether HiFi-GAN-style waveform synthesis
+works well.
+
+**Implementation choices.**
+- DAC: used `transformers.DacModel` (`descript/dac_24khz`), already available via this project's
+  pinned `transformers==4.55.0` -- no new dependency needed. The standalone `descript-audio-codec`
+  PyPI package was tried first and rejected: its `descript-audiotools` dependency requires
+  `protobuf<3.20`, incompatible with this project's `tensorboard>=2.21.0` (`protobuf>=6.31.1`).
+- Measured DAC's frame geometry directly rather than trusting its printed config: `DacConfig`
+  advertises `hop_length: 512`, but a live probe gives an actual hop of 320 samples (`24000 Hz /
+  320 = 75.0 Hz` exactly), matching the product of `downsampling_ratios: [2,4,5,8]`, not the
+  printed field. Another confirmed instance of CLAUDE.md's "do not assume the frame rate" rule
+  catching a real discrepancy.
+- The "DAC latent" predicted and used throughout is `quantized_representation` (`(batch, 1024,
+  num_frames)`), not the discrete `audio_codes` or the pre-quantizer `projected_latents` -- chosen
+  because it's the only one of the three `DacModel.decode()` accepts directly, the natural
+  requirement for a predict-then-decode pipeline.
+- New modules: `src/muq_inversion/dac_encoder.py` (`FrozenDacEncoder`, mirroring
+  `encoder.py`'s `FrozenMuQEncoder` pattern), `src/muq_inversion/models/framewise_mlp.py`
+  (`FramewiseMLP`: `Linear(1024,2048) -> GELU -> Linear(2048,2048) -> GELU -> Linear(2048,1024)`,
+  applied identically and independently per frame), and a standalone
+  `scripts/train_muq_to_dac_mlp.py` (not threaded through `config.py`/`train.py`, matching the
+  precedent set by `scripts/train_reference_hifigan.py` -- this architecture is structurally
+  unrelated to the HiFi-GAN decoder pipeline).
+
+**Measured geometry (same 24kHz, 2.0s/48000-sample crop used throughout this project's Gate 3
+investigation; both MuQ and DAC operate natively at 24kHz, so no extra resampling was needed):**
+
+| | MuQ | DAC |
+|---|---|---|
+| latent shape | `(1, 50, 1024)` channels-last | `(1, 1024, 150)` channels-first |
+| frame rate | 25.0 Hz | 75.0 Hz |
+| samples/frame | 960.0 | 320.0 |
+
+DAC's frame rate is *exactly* 3x MuQ's -- a clean integer ratio, unlike some of this project's
+earlier crop-alignment concerns. **Required temporal alignment strategy:** nearest-neighbor
+repeat each MuQ frame 3x before the framewise MLP (mathematically equivalent to repeating after
+the MLP, since a purely per-frame map fed 3 identical inputs must produce 3 identical outputs).
+
+**Training result: converges almost immediately, then hits an exact, explainable ceiling.**
+MSE dropped from 19.3 (step 1) to ~11.05 by step ~150, then stayed **bit-identical to 6 decimal
+places** through the rest of a 3000-step run (`final/initial ratio 0.6347`, `cosine similarity
+0.6418`). This was suspicious enough to investigate rather than accept as ordinary convergence.
+Computed the theoretical MSE floor directly: for each MuQ frame, the best possible *constant*
+predictor of its 3 corresponding true DAC sub-frames (their mean) gives a floor of 11.04
+(`pop.00012`) / 11.54 (`disco.00049`) -- matching the trained model's converged MSE almost
+exactly. **This is not an optimization failure; it is an exact architectural ceiling**: a
+memoryless, purely framewise map fed 3 identical repeated inputs cannot, by construction, produce
+3 different outputs, so it cannot resolve whatever temporal detail genuinely varies within one
+40ms MuQ frame at DAC's 3x finer time resolution. The model reached this ceiling by step ~150 and
+had nothing left to learn.
+
+**Waveform-domain result (via the frozen DAC decoder), with a DAC-oracle upper bound:**
+in addition to the MLP's predicted-latent reconstruction, the *true* DAC latent was also decoded
+(`_dac_oracle.wav`) to establish the ceiling even perfect latent prediction could not beat, since
+DAC's own codec is itself lossy at this operating point.
+
+| metric | pop.00012 | disco.00049 |
+|---|---|---|
+| MLP reconstruction vs. reference (waveform corr.) | 0.3028 | 0.1918 |
+| DAC-oracle vs. reference (waveform corr., ceiling) | 0.3666 | 0.5735 |
+| MLP parameters | 8,393,728 | (shared model) |
+| checkpoint size | 100.7 MB | (shared) |
+| training steps to convergence | ~150 | (shared) |
+| training steps run | 3000 (unnecessary given ~150-step convergence; run for cross-experiment comparability) | |
+
+**Comparison against every prior representation/decoder combination in this investigation**
+(waveform correlation, pop.00012 / disco.00049): MuQ+HiFi-GAN 0.073/0.104; ground-truth-mel+
+HiFi-GAN 0.059/-0.010; reference HiFi-GAN 0.073/0.122; EnCodec+HiFi-GAN 0.682/0.602 (still the
+outlier); **MuQ->MLP->DAC 0.303/0.192**. This is the second-best waveform correlation of any
+experiment in the whole investigation -- clearly ahead of every HiFi-GAN-family variant except
+EnCodec -- achieved with an 8.4M-parameter MLP, no adversarial training, no waveform loss, and
+convergence roughly 20x faster (150 steps vs. 15,000) than any HiFi-GAN variant.
+
+**Answering the task's success criteria:**
+
+1. *Can the MLP drive latent-space loss close to zero?* No -- it converges to a nonzero floor
+   (cosine similarity 0.64, not 1.0), but that floor is now precisely explained: it is the exact
+   information ceiling imposed by the framewise/no-temporal-modeling constraint given the 3x
+   frame-rate mismatch, not a sign that MuQ lacks the relevant information or that training
+   failed. A model permitted even minimal temporal modeling (e.g. learned upsampling instead of
+   naive repeat) would very likely close much of this specific gap without needing any waveform
+   loss, GAN, or larger latent-regression budget.
+2. *Can it memorize the two clips?* Yes, cleanly and fast -- no instability, no collapse, no
+   adversarial dynamics to manage at all (this is the first experiment in the whole investigation
+   with no discriminator, no GAN loss, and no training-stability concerns to report).
+3. *Does DAC-latent prediction look substantially easier than waveform reconstruction?* Yes,
+   clearly, on every axis measured: convergence speed (~150 vs. 15,000 steps), architectural
+   simplicity (a 3-layer MLP vs. a multi-receptive-field generator plus two discriminators),
+   training stability (no adversarial dynamics at all), and even the downstream waveform-domain
+   correlation this pipeline achieves is better than any HiFi-GAN-family variant tested except
+   EnCodec.
+
+**Assessment: does MuQ contain enough information to predict DAC latents?** Substantially yes,
+within the architectural ceiling tested here. A cosine similarity of 0.64 in DAC's own latent
+space, and a downstream waveform correlation (0.19-0.30) that beats three of this project's four
+HiFi-GAN-family experiments, both indicate real, non-trivial shared information between MuQ's
+25Hz self-supervised representation and DAC's 75Hz reconstruction-oriented latent -- not zero,
+and not saturating at the levels a magnitude-only representation like ground-truth mel showed in
+[[mel-hifigan-sanity]] (waveform correlation 0.06/-0.01, close to noise). The residual gap to
+DAC's own oracle ceiling (0.37/0.57) is not yet attributable to "MuQ lacks the information" versus
+"a memoryless framewise map cannot use the information MuQ has" -- the exact-floor-matching result
+above makes the latter the more likely explanation for at least the largest component of the gap,
+though a further experiment relaxing the framewise constraint would be needed to fully separate
+the two.
+
+**Decision.** Do not scale this specific configuration (more MLP capacity, more steps) further --
+the exact floor-matching result shows more capacity/training cannot help without also relaxing
+the framewise/no-temporal-modeling constraint, since the ceiling is architectural, not an
+optimization shortfall. The natural next step (not yet started, pending user direction, per the
+task's "generate audio only after latent prediction is working" framing) is to test whether a
+small amount of temporal modeling -- e.g. a few 1D-conv layers instead of nearest-neighbor
+repeat, or a tiny learned upsampler -- closes the gap toward DAC's own oracle ceiling, which would
+be strong evidence that MuQ's frame rate (not its content) is the main remaining bottleneck for
+this axis of the investigation.
+
+**Consequences.** `src/muq_inversion/dac_encoder.py`, `src/muq_inversion/models/framewise_mlp.py`,
+and `scripts/train_muq_to_dac_mlp.py` now exist on this branch only, isolated from `main` and
+every sibling experiment branch by construction. No MuQ baseline, HiFi-GAN, EnCodec, or Gate 4/5
+code was touched (confirmed via `ruff check .` and the full 47-test suite passing unchanged).
+`runs/muq_to_dac_mlp/` retains `latest.pt`/`step_003000.pt` (100.7 MB each, notably smaller than
+any HiFi-GAN-family checkpoint) after intermediate numbered checkpoints were deleted.
+
+**Rollback plan.** This entire line of work lives on `experiment/muq-to-dac-mlp`, isolated from
+`main` and from every sibling experiment branch by construction (each branched independently off
+`main`). If abandoned, simply do not merge; no baseline files were touched.
+
+**Listening verdict (2026-09-09).** User's judgment: "Reconstructed audio still recognizable but
+noticeably worse than previous experiments. DAC oracle is perfect." Two important results:
+
+1. **The MLP reconstruction is perceptually worse than prior experiments, despite better waveform
+   correlation than three of the four HiFi-GAN-family variants.** This is another confirmation --
+   the strongest yet -- of this investigation's recurring theme that waveform-sample correlation
+   is a poor proxy for perceptual quality: MuQ->MLP->DAC (0.303/0.192) numerically beat MuQ+
+   HiFi-GAN (0.073/0.104), ground-truth-mel+HiFi-GAN (0.059/-0.010), and reference HiFi-GAN
+   (0.073/0.122), yet sounds worse than all of them to the user. The metric moved in the "right"
+   direction and perception moved the opposite way -- the same pattern as capacity and EnCodec
+   before it, now confirmed on a completely different architecture (non-adversarial latent
+   regression instead of a GAN decoder).
+2. **DAC oracle sounds perfect despite waveform correlation of only 0.37/0.57 -- far from 1.0.**
+   This is the sharpest evidence in the whole investigation that raw waveform-sample correlation
+   is fundamentally the wrong metric for this project's evaluation, not merely an imperfect one:
+   a codec the user judged perceptually perfect scored *lower* on this metric than this
+   experiment's own imperfect-sounding MLP reconstruction would need to in order to be called
+   good. Waveform correlation is sensitive to any small time/phase shift introduced by a codec's
+   own encode/decode conv stack (evident here from the reference/reconstruction length mismatch,
+   47992 vs. 48000 samples), which a perceptual listener discounts entirely but a sample-aligned
+   correlation coefficient cannot.
+
+**Combined implication.** The MLP's latent-space prediction gap (cosine similarity 0.64, short of
+DAC's own near-1.0 self-consistency) is real and audible -- the reconstruction is "noticeably
+worse," not perceptually equivalent to the oracle -- but the *size* of that perceptual gap cannot
+be read off the waveform-correlation numbers at all, since the oracle itself scores far below what
+its perfect-sounding quality would suggest. Future evaluation in this investigation should weight
+mel-domain/latent-domain metrics and listening tests far more heavily than raw waveform
+correlation, which this result suggests may carry near-zero diagnostic value on its own.
+
+**Decision (updated).** Do not treat this experiment's waveform-correlation win over the
+HiFi-GAN-family variants as evidence of perceptual progress -- it isn't, per the listening
+verdict. The core finding about the architectural ceiling (exact floor-matching, cosine similarity
+0.64) stands on its own analytical merits regardless of the perceptual outcome, and remains the
+most actionable lead: closing that specific latent-space gap (via minimal temporal modeling,
+proposed above) is still a reasonable next step if this general direction is pursued further, but
+should be judged going forward primarily by listening and latent/mel-domain metrics, not waveform
+correlation.
