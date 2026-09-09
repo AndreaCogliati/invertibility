@@ -600,3 +600,171 @@ verdict; not yet received as of this note.
 Full parameter count (15,731,712, unchanged from Gate 3 by construction), receptive field (13
 DAC-frames / 5 MuQ-frames, unchanged), and peak MPS memory (~2.45-2.47 GB) recorded in
 `artifacts/gate4_minimal/report.json` and reproduced in `notes/DECISIONS.md#muq-to-dac-minimal-gate4`.
+
+**Gate 4 listening verdict (2026-09-09), confirmed after this scratchpad entry was written:**
+"The listening confirms the poor result. The model is not learning and generalizing." Committed
+as `b9f82ef`. See `notes/DECISIONS.md#muq-to-dac-minimal-gate4`'s "Listening verdict" section.
+
+## 2026-09-09 -- `experiment/muq-to-dac-scale-data` branch: is Gate 4's failure data-hungriness or something fundamental?
+
+Branched off `experiment/muq-to-dac-minimal-gate4` directly (continuing the same
+branch-off-the-parent-experiment pattern started by Gate 4), inheriting `gate4_common.py`,
+`temporal_conv.py`, `dac_encoder.py` unchanged via git history.
+
+**Track selection:** 100 GTZAN tracks, `<genre>.00010`-`<genre>.00019` for all 10 genres (avoids
+the known-corrupted `jazz.00054.wav` entirely by construction). Verified via direct SHA-256
+checksum comparison across all 100 candidates: zero duplicate-checksum collisions. Split: 8 train
++ 1 val + 1 test per genre = 80/10/10 tracks, no track in more than one split. Crops: 4 per train
+track (starts 4,10,16,22s), 2 per val/test track (starts 8,18s) -> 320/20/20 crops. Written by
+`scripts/build_scale_data_manifest.py` -> `data/manifests/scale_data_crops.csv` (360 rows).
+
+**Precompute + cache, as required ("avoid recomputing encoders during training").**
+`scripts/precompute_scale_data_cache.py` encodes all 360 crops with both frozen encoders once
+(15.10s total -- MuQ+DAC encoding is fast, ~34ms/crop combined) and writes one consolidated file,
+`data/cache/scale_data/muq_dac_cache.pt` (281MB, git-ignored). The training script loads this and
+never touches `FrozenMuQEncoder` again (only `FrozenDacEncoder.decode()` at evaluation time, for
+turning latents back into audio).
+
+**A genuinely useful accident during smoke-testing.** Tried to smoke-test with a reduced step
+count via `sed -i '' 's/^STEPS = 20000$/STEPS = 1000/' ...` -- the substitution silently failed
+because the real line has a trailing comment (`STEPS = 20000  # documented deviation...`), so the
+`$`-anchored pattern never matched, while the `LOG_EVERY`/`VAL_EVERY`/`RUN_ID` substitutions (no
+trailing comments) succeeded. The result: an accidental but fully valid execution of the complete
+20000-step experiment, just with a finer validation cadence (every 100 steps instead of the
+intended 500) and the cosmetic run label `scale_data_timing`. Recognized this from the run's own
+duration (~6 minutes, far longer than a real smoke test) and the printed step counts going all
+the way to 20000/20000 -- verified by grepping the actual executed file's constants rather than
+trusting my own sed invocation, and confirmed the `best_checkpoint_step: 300` finding was
+consistent with a 100-step validation cadence (LCM(100,250)=500 explains why printed log lines
+only appeared every 500 steps despite VAL_EVERY=100). Adopted this run as the official result --
+scientifically identical to a "properly" smoke-tested-then-launched run, and if anything more
+rigorously monitored -- by renaming `runs/scale_data_timing/` -> `runs/scale_data/` and
+`artifacts/scale_data_timing/` -> `artifacts/scale_data/` rather than spending another ~6 minutes
+re-running an identical experiment under a different label. (Lesson for next time: sed patterns
+anchored with `$` are fragile against trailing comments -- match on the value plus optional
+comment, or edit via the Edit tool instead of `sed` for anything with inline documentation.)
+
+**Result.** Training time 252.4s (up from Gate 4's ~55s, mostly from the finer VAL_EVERY=100
+evaluation cadence evaluating all 320 train crops every 100 steps -- 200 such evaluations, each
+340 forward passes, dominates the wall clock; the core per-step training cost is unchanged).
+Training was noisier than Gate 4's (occasional large train-MSE spikes, e.g. 224.7 at step 2500,
+64.4 at step 12000, both self-correcting within a few hundred steps) -- expected given the far
+greater genre/content diversity per cyclically-rotated training step, not an instability
+requiring intervention (no non-finite values, no divergence). Best-by-validation-MSE checkpoint:
+step 300 of 20000 (1.5% through training) -- still very early, though `val_cos` alone (not the
+selection criterion) peaks somewhat later, around steps 5000-6500 (~0.21-0.23), before drifting
+back down -- MSE-based and cosine-based selection don't perfectly agree here, a minor nuance
+worth flagging since the task requires MSE-only selection.
+
+**Metrics (train/val/test, correct-conditioning cosine similarity and waveform correlation to
+DAC oracle), compared against Gate 4:**
+```
+                Gate 4 (16 train crops)          Scale-data (320 train crops, 20x)
+val:   cos=0.15-0.18  wav_corr=0.006/-0.005   ->  cos=0.222  wav_corr=-0.0045
+test:  cos=0.14-0.18  wav_corr=-0.009/-0.001  ->  cos=0.223  wav_corr=-0.0043
+```
+Cosine similarity improved meaningfully on held-out data (~25-45% relative). Waveform correlation
+to the oracle did not move at all -- stayed at the same noise-floor level in both experiments.
+
+**Controls, the most interesting difference from Gate 4:** on train data, correct beats shuffled/
+shifted clearly but by a *smaller* relative margin than Gate 4's train gap (cos 0.243 vs.
+0.142/0.156 here, vs. Gate 4's 0.40-0.45 vs. 0.11-0.20) -- expected, since fitting 320 diverse
+crops is harder than fitting 16. On held-out data, **correct conditioning now shows a real,
+consistent edge over both controls** (val: 0.222 vs. 0.144/0.157; test: 0.223 vs. 0.111/0.142) --
+qualitatively different from Gate 4, where correct and controls were statistically
+indistinguishable on held-out data. This is evidence of a genuine (if weak) transferable signal
+that did not exist at Gate 4's data scale.
+
+Listening artifacts: 30 WAVs (6 tracks -- 3 val + 3 test -- x 5 conditions) written to
+`artifacts/scale_data/`, descriptive filenames. Sent a 10-file representative subset (one val,
+one test track, all 5 conditions each) to the user; verdict pending as of this note.
+
+**Note:** the user moved directly to requesting the further data-scaling experiment below without
+providing a listening verdict for this 80-track experiment. Not blocking -- proceeded per the
+explicit new request. If a verdict for this experiment arrives later, record it as an addendum
+to this section, not to the more-data section below.
+
+## 2026-09-09 -- `experiment/muq-to-dac-more-data` branch: does the scaling trend continue at full-GTZAN scale?
+
+Branched off `experiment/muq-to-dac-scale-data` directly (continuing the parent-branch-extension
+pattern started by Gate 4), carrying forward that branch's uncommitted work automatically (git
+preserves working-tree changes across a same-commit branch creation) -- nothing from the prior
+experiment was lost or needed re-doing.
+
+**Track selection: reused Gate 1's own committed split instead of building another one.**
+`data/manifests/gtzan_manifest_smoke.csv` (committed 2026-09-04) already has a full 1000-track,
+checksummed, duplicate-safe, corruption-flagged train/val/test split (793/94/113) from Gate 1 --
+using it directly for this experiment (dropping just the 1 corrupted row) is both more thorough
+(uses essentially the whole dataset, not another hand-picked subset) and safer (leakage-checked
+machinery that already exists, documented in `notes/DECISIONS.md#gtzan-source-and-defects`) than
+re-deriving a new split. Re-verified track-disjointness and checksum-based no-cross-split-leakage
+at manifest-build time anyway (`scripts/build_more_data_manifest.py`), rather than trusting the
+source file's own claims uncritically. Result: 792 train / 94 val / 113 test tracks, 2 crops each
+(starts 5.0s, 15.0s) -> 1584/188/226 crops (1998 total).
+
+**Precompute:** `scripts/precompute_more_data_cache.py`, 1998 crops in 82.15s (~41ms/crop,
+matching the 80-track experiment's per-crop rate) -> `data/cache/more_data/muq_dac_cache.pt`
+(1.5GB, git-ignored).
+
+**A deliberate departure from the prior two experiments' evaluation pattern, to control wall
+time.** Both Gate 4 and the 80-track experiment recomputed full-training-set MSE/cosine at every
+validation checkpoint for the logged curve -- fine at 16-320 crops, but would dominate wall time
+at 1584. Replaced with a running average over the training steps *since the last checkpoint*
+(free, already computed during the normal forward/backward) for the "train" curve, while still
+evaluating the *full* validation set (188 crops, cheap) for checkpoint selection, per this
+experiment's explicit "validation MSE only" requirement. A one-time full-train-set pass is run
+once at the end, on the selected checkpoint, for the final reported train metrics.
+
+**Smoke-testing lesson applied.** Used the Edit tool (not `sed`) to reduce `STEPS`/`VAL_EVERY`/
+`RUN_ID` for a smoke test this time, specifically because of the prior experiment's `sed`-anchor
+failure against a trailing comment. Verified the edits actually took effect by grepping the
+constants in the copied file before running -- caught nothing wrong this time, and the smoke test
+(1500 steps) completed correctly. Its biggest surprise: the **evaluation phase took ~498s**, far
+longer than training itself (11.72s for 1500 steps) -- almost entirely from reloading and
+resampling raw audio per crop during evaluation (2000 crops, each a real disk read + `librosa`
+`soxr_hq` resample) plus ~8000 DAC decode calls and ~6000 multi-resolution STFT computations. This
+cost is fixed regardless of `STEPS` (it only depends on dataset size), so it was budgeted into
+the full run's time estimate (~16-17 min total) rather than optimized away.
+
+**Full run:** launched properly in the background this time (`nohup ... &` + `disown`, tracked by
+real PID via `kill -0` and a `Monitor` until-loop -- not the `run_in_background`+`&` combination
+mistake made twice earlier in this investigation). 60000 steps, training 403.55s (6.73ms/step,
+consistent with every prior experiment's per-step cost), evaluation 477.0s. Total wall time ~15
+minutes, matching the smoke-test-based estimate closely.
+
+**The training curve was genuinely different from every prior experiment -- a turbulent early
+phase, then a late, clean improvement phase.** Steps ~5000-32000 showed large, repeated loss
+spikes (train MSE up to 153,842 at step 7000; val MSE up to 413.9 at step 11000) -- never
+non-finite (no stop condition triggered), but clearly unstable, unlike any smaller-scale
+experiment's smooth training. From step ~33000 onward, training stabilized and improved cleanly:
+val MSE dropped from ~18-21 down to ~17.3, val cosine climbed from ~0.16-0.21 up to ~0.22-0.23.
+**Best-by-validation-MSE checkpoint: step 50000 of 60000 (83.3% through training)** -- a dramatic
+qualitative change from Gate 4's step 200/8000 (2.5%) and the 80-track experiment's step 300/20000
+(1.5%). At this data scale, the model does not immediately overfit; validation performance
+actually improves for most of training, after an initial unstable period.
+
+**Metrics comparison across all three data scales (val/test cosine similarity and waveform
+correlation to oracle, correct conditioning):**
+```
+                    Gate 4 (16 crops, 8 tracks)   80-track (320 crops, 80 tracks)   More-data (1584 crops, 792 tracks)
+val cos:            0.150-0.179                    0.222                              0.230
+test cos:           0.140-0.184                    0.223                              0.226
+val wav_corr:       0.006/-0.005                   -0.0045                            0.0002
+test wav_corr:      -0.009/-0.001                  -0.0043                            -0.0009
+best ckpt step:     200/8000 (2.5%)                300/20000 (1.5%)                   50000/60000 (83.3%)
+```
+Cosine similarity: a large jump from Gate 4 to the 80-track experiment (~0.16 -> ~0.22), then a
+much smaller jump from the 80-track experiment to this one (~0.22 -> ~0.23) despite a
+similarly-sized (in orders of magnitude) further data increase -- classic diminishing-returns
+shape. Waveform correlation to the oracle: unchanged at ~0 across all three scales, no signal of
+improvement at any point.
+
+**Controls:** held-out cosine gap (correct minus controls) was roughly similar to, or modestly
+larger than, the 80-track experiment's gap (val: correct 0.230 vs. shuffled 0.123/shifted 0.149,
+gap ~0.081-0.107; test: correct 0.226 vs. shuffled 0.119/shifted 0.134, gap ~0.092-0.107) -- not a
+dramatic further increase, roughly holding steady rather than continuing to grow.
+
+Listening artifacts: 30 WAVs (6 tracks x 5 conditions) written to `artifacts/more_data/`. Sent a
+10-file representative subset (one val, one test track, all 5 conditions each) to the user;
+verdict pending as of this note. See `notes/DECISIONS.md#muq-to-dac-more-data` for the full
+write-up, six-question interpretation, and final scaling-curve-based recommendation.

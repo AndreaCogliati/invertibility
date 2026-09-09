@@ -223,3 +223,37 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   here (unlike several earlier findings in this project where they diverged in either direction --
   see [[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]): Gate 3's near-perfect result is confirmed
   to have been memorization, not a transferable MuQ-to-DAC mapping.
+- Data-scaling experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-scale-data` branch, off
+  `experiment/muq-to-dac-minimal-gate4`): tested whether Gate 4's generalization failure was
+  caused by insufficient training data, using the exact Gate 3 architecture/hyperparameters
+  unchanged on ~20x more training crops (320 vs. 16) and ~10x more unique training tracks (80
+  across all 10 GTZAN genres vs. 8 across 4). **Result: cosine similarity improved meaningfully on
+  held-out data (0.15-0.18 -> 0.22), and correct conditioning now shows a real, consistent edge
+  over shuffled/time-shifted controls on held-out tracks (unlike Gate 4, where they were
+  statistically indistinguishable) -- genuine evidence of a weak transferable signal that did not
+  exist at Gate 4's scale. But waveform correlation to the DAC oracle did not improve at all,
+  staying at the same noise-floor level (~0) as Gate 4.** Immediate overfitting persists
+  (validation-MSE-selected checkpoint at step 300/20000, 1.5% through training). Conclusion: the
+  MuQ-to-DAC mapping is **data-hungry, not fundamentally non-generalizable** (Gate 4's more
+  extreme reading is now too strong) -- but a ~20x data increase, while producing a measurable
+  latent-space effect, was nowhere near enough to produce audible-quality improvement. Full
+  write-up in [[muq-to-dac-scale-data]]. Listening verdict pending as of this note.
+- Further data-scaling experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-more-data`
+  branch, off `experiment/muq-to-dac-scale-data`): tested whether held-out MuQ-to-DAC prediction
+  keeps improving with ~5x more crops (1584 vs. 320) and ~10x more tracks (792 vs. 80, reusing
+  Gate 1's own committed full-GTZAN split, `data/manifests/gtzan_manifest_smoke.csv`), same
+  architecture/hyperparameters unchanged. **Result: cosine similarity barely moved (0.222/0.223
+  -> 0.230/0.226, ~4-5% relative vs. the prior step's ~35% relative gain) and waveform correlation
+  to the DAC oracle stayed at the same noise floor (~0) as every smaller scale -- a
+  decelerating/saturating curve, not continued scaling.** Training itself was qualitatively new:
+  a turbulent, unstable early phase (steps ~5000-32000, large but always-finite loss spikes) then
+  a clean, late improvement phase, with the validation-MSE-selected checkpoint at **step 50000 of
+  60000 (83.3% through training)** -- a dramatic change from Gate 4's 2.5% and the 80-track
+  experiment's 1.5%, meaning immediate overfitting no longer occurs at this scale. But this later,
+  less-overfit checkpoint did not translate into better ultimate generalization on the
+  audio-relevant metric. **Final recommendation (from the observed 3-point scaling curve, not
+  expectations): further pure data scaling within this exact architecture is unlikely to be
+  productive -- the flat waveform-correlation trend across a ~100x crop-count range points to
+  saturation (an architecture/receptive-field/information ceiling), not a data-limited
+  bottleneck.** Full write-up and six-question interpretation in [[muq-to-dac-more-data]].
+  Listening verdict pending as of this note.

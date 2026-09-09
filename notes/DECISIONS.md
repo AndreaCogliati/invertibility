@@ -1073,3 +1073,260 @@ trusted as evidence of a real, transferable capability -- exactly the discipline
 exists to enforce, and exactly the outcome ("stop and diagnose... [if] evaluation controls
 perform similarly to correct conditioning") that materialized here on held-out data specifically,
 not on training data.
+
+## muq-to-dac-scale-data: A weak but real generalizing signal emerges with ~20x more data -- still far short of usable
+
+**Context.** Gate 4 (tagged nowhere but committed `b9f82ef`) established that Gate 3's
+near-perfect reconstruction was memorization, not a transferable MuQ-to-DAC mapping: held-out
+performance collapsed to noise-level correlation and was statistically indistinguishable from
+shuffled/time-shifted controls. This experiment tests the most direct alternative hypothesis --
+was Gate 4's tiny training set (16 crops) the actual bottleneck, rather than the MuQ-to-DAC
+mapping being fundamentally non-generalizable? Same architecture, hyperparameters, loss, and
+frozen encoders/decoder as Gate 3/Gate 4, unchanged; only the data scale and the requirement to
+precompute/cache both encoders' outputs (avoiding recomputation during training) are new.
+Branched directly off `experiment/muq-to-dac-minimal-gate4`.
+
+**Dataset, built and verified before any training code**
+(`scripts/build_scale_data_manifest.py` -> `data/manifests/scale_data_crops.csv`, tracked in
+git): 100 GTZAN tracks, `<genre>.00010`-`<genre>.00019` for all 10 genres (deterministically
+avoids the known-corrupted `jazz.00054.wav`), verified via direct SHA-256 checksum comparison to
+have zero duplicate-checksum collisions among all 100 candidates. Split: 8 train + 1 val + 1 test
+per genre = 80/10/10 tracks, no track in more than one split (enforced at manifest-build time and
+re-verified at run time). Crops: 4 per train track (starts 4, 10, 16, 22s), 2 per val/test track
+(starts 8, 18s) -> 320 train / 20 val / 20 test crops, ~20x more training data than Gate 4's 16
+crops and ~6.25x more unique training tracks than Gate 4's Experiment B (80 vs. 8, plus all 10
+GTZAN genres represented instead of 4).
+
+**Precompute + cache, as required.** `scripts/precompute_scale_data_cache.py` runs both frozen
+encoders exactly once over all 360 crops (15.10s total) and writes one consolidated file,
+`data/cache/scale_data/muq_dac_cache.pt` (281MB, git-ignored per this project's `data/cache/`
+convention). The training script loads this and never calls `FrozenMuQEncoder` again (only
+`FrozenDacEncoder.decode()` at evaluation time, to turn latents back into audio).
+
+**An accidental but fully valid full run, adopted rather than discarded.** A smoke test intended
+to use a reduced step count (`sed`-edited to `STEPS = 1000`) silently failed to apply because the
+real line carries a trailing comment (`STEPS = 20000  # documented deviation...`), which broke
+the `$`-anchored `sed` pattern; the `LOG_EVERY`/`VAL_EVERY` edits (no trailing comments) did
+apply. The result was an accidental complete execution of the real 20000-step experiment, just
+with a finer validation cadence (every 100 steps instead of the planned 500) and the cosmetic run
+label `scale_data_timing`. Caught by noticing the run's actual duration (~6 minutes, far longer
+than a smoke test) and confirmed by directly inspecting the executed file's constants rather than
+trusting the `sed` invocation. Adopted as the official result (scientifically identical to, and
+if anything more finely monitored than, a "properly" scaled-down-then-full run) by renaming
+`runs/scale_data_timing/` -> `runs/scale_data/` and `artifacts/scale_data_timing/` ->
+`artifacts/scale_data/` rather than spending another ~6 minutes reproducing an identical result
+under a different label. Lesson recorded for future scripts: `sed` patterns anchored with `$` are
+fragile against trailing inline comments.
+
+**Result: cosine similarity improves on held-out data; waveform correlation does not move at
+all.**
+
+| metric | Gate 4 (16 train crops) | Scale-data (320 train crops, ~20x) |
+|---|---|---|
+| val cosine similarity (correct) | 0.150-0.179 | 0.222 |
+| test cosine similarity (correct) | 0.140-0.184 | 0.223 |
+| val waveform correlation to oracle | 0.006 / -0.005 | -0.0045 |
+| test waveform correlation to oracle | -0.009 / -0.001 | -0.0043 |
+| best checkpoint step (of total steps) | 200 / 8000 (2.5%) | 300 / 20000 (1.5%) |
+
+Cosine similarity improved meaningfully (~25-45% relative) on both held-out splits. Waveform
+correlation to the DAC oracle did not move at all -- it remained at the same noise-floor level
+(statistically indistinguishable from zero) in both experiments. Best-by-validation-MSE
+checkpoint selection still picks a very early step (300 of 20000, 1.5% through training) --
+immediate overfitting persists at this data scale, though `val_cos` alone (not the required
+selection criterion) peaks somewhat later, around steps 5000-6500 (~0.21-0.23), before drifting
+back down -- MSE-based and cosine-based checkpoint selection disagree slightly here, a nuance
+worth flagging even though the task requires MSE-only selection and that rule was followed.
+Training was noisier than Gate 4's (occasional large train-MSE spikes, e.g. 224.7 at step 2500,
+64.4 at step 12000, both self-correcting within a few hundred steps -- expected given far greater
+genre/content diversity per training step, not a stop-condition-triggering instability: no
+non-finite values occurred anywhere).
+
+**Controls: the most important difference from Gate 4.** On training data, correct conditioning
+still clearly beats shuffled/time-shifted controls, but by a smaller relative margin than Gate 4
+(cosine 0.243 vs. 0.142/0.156 here, vs. Gate 4's 0.40-0.45 vs. 0.11-0.20) -- expected, since
+jointly fitting 320 diverse crops is harder than fitting 16. **On held-out data, correct
+conditioning now shows a real, consistent edge over both controls** (val: cosine 0.222 vs.
+0.144/0.157; test: 0.223 vs. 0.111/0.142) -- qualitatively different from Gate 4, where correct
+and controls were statistically indistinguishable on held-out data. This is the clearest evidence
+in this experiment of a genuine, if weak, transferable signal that did not exist at Gate 4's data
+scale.
+
+**Answering the six required interpretation questions:**
+
+1. *Does validation performance improve relative to Gate 4?* Yes on cosine similarity (0.150-
+   0.179 -> 0.222, ~25-45% relative improvement); no on waveform correlation (both ~0, no
+   meaningful change).
+2. *Does test performance improve?* Same pattern as validation: cosine similarity improves
+   (0.140-0.184 -> 0.223), waveform correlation does not (stays at noise floor).
+3. *Is there still immediate overfitting?* Yes -- the validation-MSE-selected checkpoint is step
+   300 of 20000 (1.5% through training), similar in kind to Gate 4's step 200 of 8000 (2.5%).
+   Scaling data ~20x did not meaningfully delay the onset of overfitting by this measure, though
+   the peak-`val_cos` step (not the selection criterion) landing later suggests the picture is
+   not perfectly uniform across metrics.
+4. *Is there evidence that generalization scales with data?* Partially, and specifically in the
+   latent space, not yet in the audio domain: the controls comparison (#5 below) is genuinely new
+   evidence of a transferable signal that Gate 4 did not show at all. But the metric that has
+   tracked perceptual quality throughout the broader MuQ-to-DAC investigation (waveform
+   correlation to the oracle) shows zero improvement despite ~20x more data and ~10x more unique
+   tracks -- so if generalization does scale with data, this experiment suggests the required
+   data scale for audio-domain quality is much larger than what moved the latent-space metric.
+5. *Are correct-condition reconstructions now meaningfully better than controls on held-out
+   tracks?* In latent-space cosine-similarity terms, yes, modestly and consistently (a real gap
+   that did not exist in Gate 4). In waveform-correlation-to-oracle terms, no -- all three
+   conditions remain indistinguishable from noise on held-out data. The two metrics disagree,
+   which is itself informative: whatever signal exists in the latent-space improvement has not
+   yet become large enough to survive being decoded into audio.
+6. *Is the model learning a transferable MuQ-to-DAC mapping?* A weak one, in the latent space
+   only, at this data scale. This is a meaningfully different answer from Gate 4's "no
+   transferable mapping at all," but it is not yet "yes, a usable mapping" -- the audio-domain
+   evidence (waveform correlation, and by extension expected perceptual quality) shows no
+   improvement at all. The fair characterization is **data-hungry, and this experiment's ~20x
+   data increase was still nowhere near enough** -- not evidence that the mapping is
+   fundamentally non-generalizable (Gate 4's more extreme conclusion is now too strong), but also
+   not evidence that data scaling alone will resolve this within a laptop-friendly experimental
+   budget. Listening confirmation sent to the user; pending as of this entry.
+
+**Decision.** This experiment shifts the working hypothesis from Gate 4's "the MuQ-to-DAC mapping
+does not generalize" toward "the mapping is data-hungry, and the data-hunger is severe enough
+that a ~20x increase (still small in absolute terms -- 80 tracks, ~4 minutes of unique training
+audio) is not sufficient to produce audible generalization." Per this experiment's own
+instructions, do not proceed to larger models, transformers, additional layers, or Gate 5 based
+on this result alone. The most direct next test of the "simply data-hungry" hypothesis would be a
+further, larger data-scale experiment (or a full GTZAN-scale run) -- but that is a direction to
+propose to the user, not to start unilaterally.
+
+**Consequences.** `scripts/build_scale_data_manifest.py`, `scripts/precompute_scale_data_cache.py`,
+`scripts/train_muq_to_dac_scale_data.py`, `data/manifests/scale_data_crops.csv` (tracked), and
+`data/cache/scale_data/muq_dac_cache.pt` (281MB, git-ignored) now exist on this branch. No MuQ
+baseline, HiFi-GAN, EnCodec, or Gate 5 code was touched (confirmed via `ruff check .` and the
+full 47-test suite passing unchanged). `runs/scale_data/checkpoints/best.pt` (60MB) is the sole
+retained checkpoint.
+
+**Rollback plan.** This entire line of work lives on `experiment/muq-to-dac-scale-data`, branched
+off `experiment/muq-to-dac-minimal-gate4`. If abandoned, simply do not merge; no baseline files
+were touched.
+
+## muq-to-dac-more-data: The scaling curve shows diminishing returns -- likely saturation, not a data-limited ceiling
+
+**Context.** The 80-track scaling experiment ([[muq-to-dac-scale-data]]) found a genuine but weak
+transferable signal (held-out cosine similarity 0.15-0.18 -> 0.22, controls gap now real on
+held-out data) without any improvement in waveform correlation to the DAC oracle. This experiment
+tests the direct continuation: does held-out performance keep improving with substantially more
+data (~5x more crops, ~10x more tracks, essentially the full GTZAN dataset), or does it plateau?
+Same architecture, hyperparameters, loss, and frozen encoders/decoder as every prior experiment
+in this line, unchanged -- this experiment is about data only. Branched directly off
+`experiment/muq-to-dac-scale-data`.
+
+**Dataset: reused Gate 1's own committed split rather than building another ad hoc subset.**
+`scripts/build_more_data_manifest.py` takes `data/manifests/gtzan_manifest_smoke.csv` (committed
+2026-09-04, Gate 1) -- a full 1000-track, checksummed, duplicate-safe, corruption-flagged
+train/val/test split (793/94/113) -- and drops only the 1 corrupted row (`jazz.00054.wav`),
+re-verifying track-disjointness and checksum-based no-cross-split-leakage at manifest-build time
+rather than trusting the source file uncritically. Result: 792 train / 94 val / 113 test tracks
+(comfortably exceeding the 500+ target), 2 crops each (starts 5.0s, 15.0s) -> 1584/188/226 crops.
+Precomputed via `scripts/precompute_more_data_cache.py` (1998 crops in 82.15s ->
+`data/cache/more_data/muq_dac_cache.pt`, 1.5GB, git-ignored).
+
+**A deliberate evaluation-protocol change, to control wall time at this scale.** Both Gate 4 and
+the 80-track experiment recomputed full-training-set MSE/cosine at every validation checkpoint --
+tractable at 16-320 crops, but would dominate wall time at 1584. This script instead uses a
+running average over the steps *since the last checkpoint* for the logged "train" curve (already
+computed for free during the normal forward/backward pass), while still evaluating the *full*
+validation set (188 crops, cheap) for checkpoint selection, per this experiment's explicit
+"validation MSE only" requirement -- documented, not a silent shortcut.
+
+**Training was qualitatively different from every smaller-scale experiment: a turbulent early
+phase, then a clean, late improvement phase.** Steps ~5000-32000 showed large, repeated loss
+spikes (train MSE up to 153,842 at step 7000; val MSE up to 413.9 at step 11000) -- never
+non-finite (no stop condition triggered), but clearly unstable in a way no smaller-scale
+experiment in this investigation showed. From step ~33000 onward, training stabilized and
+improved cleanly: val MSE dropped from ~18-21 to ~17.3, val cosine climbed from ~0.16-0.21 to
+~0.22-0.23. **The validation-MSE-selected checkpoint is step 50000 of 60000 (83.3% through
+training)** -- a dramatic, qualitative change from Gate 4's step 200/8000 (2.5%) and the 80-track
+experiment's step 300/20000 (1.5%). At this data scale, the model does not immediately overfit;
+validation performance keeps improving through most of training, after an initial unstable
+period. This directly answers this experiment's question 5 ("does the best-checkpoint-at-step-300
+problem persist?"): no, not in the same form -- but see the Decision section below for why this
+change in *when* overfitting sets in did not translate into a corresponding change in *how well*
+the model ultimately generalizes.
+
+**The core scaling-curve result, across all three data scales tested in this investigation
+(correct-conditioning cosine similarity and waveform correlation to the DAC oracle):**
+
+| | Gate 4 (16 crops, 8 tracks) | 80-track (320 crops, 80 tracks) | More-data (1584 crops, 792 tracks) |
+|---|---|---|---|
+| val cosine similarity | 0.150-0.179 | 0.222 | 0.230 |
+| test cosine similarity | 0.140-0.184 | 0.223 | 0.226 |
+| val waveform corr. to oracle | 0.006 / -0.005 | -0.0045 | 0.0002 |
+| test waveform corr. to oracle | -0.009 / -0.001 | -0.0043 | -0.0009 |
+| best checkpoint (step / total, %) | 200/8000 (2.5%) | 300/20000 (1.5%) | 50000/60000 (83.3%) |
+
+**Cosine similarity shows a classic diminishing-returns curve**: a large jump from Gate 4 to the
+80-track experiment (~0.16 -> ~0.22, ~35% relative), then a much smaller jump from the 80-track
+experiment to this one (~0.22 -> ~0.23, ~4-5% relative) despite a further data increase of
+similar order of magnitude (5x crops, 10x tracks, vs. the prior step's 20x crops, 10x tracks).
+**Waveform correlation to the oracle has not moved at all across any of the three data scales** --
+it remains statistically indistinguishable from zero whether trained on 16, 320, or 1584 crops.
+
+**Controls:** the held-out cosine gap (correct minus controls) at this data scale (val:
+correct 0.230 vs. shuffled 0.123/shifted 0.149, gap 0.081-0.107; test: correct 0.226 vs. shuffled
+0.119/shifted 0.134, gap 0.092-0.107) is roughly comparable to the 80-track experiment's gap, not
+a further meaningful increase.
+
+**Answering the six required scientific questions:**
+
+1. *Does held-out cosine continue improving with more data?* Yes, but only marginally --
+   0.222/0.223 (80-track) -> 0.230/0.226 (this experiment), a ~4-5% relative gain from a ~5x
+   crop / ~10x track increase, versus a ~35% relative gain from the previous, similarly-sized
+   scaling step. This is a decelerating curve.
+2. *Does the gap between correct conditioning and controls increase?* No, not meaningfully -- it
+   held roughly steady relative to the 80-track experiment.
+3. *Does validation improve smoothly with scale?* No -- training at this scale went through a
+   pronounced unstable phase (roughly the first half of training) before stabilizing, a
+   qualitatively different and less "smooth" dynamic than any smaller-scale experiment showed,
+   even though the *eventual* validation trend (from step ~33000 on) was smooth and improving.
+4. *Does waveform quality improve at all?* No -- waveform correlation to the oracle stayed at the
+   same noise-floor level (~0) across all three data scales tested, with no directional trend.
+5. *Does the "best checkpoint at step 300" problem persist?* No, not in that specific form -- the
+   selected checkpoint moved from ~1.5-2.5% of training to 83.3% of training. But this change in
+   *when* the model overfits did not come with a corresponding improvement in *how well* it
+   ultimately generalizes on the metric that matters most for audio quality.
+6. *Is there evidence the ConvNet is becoming a genuine translator rather than memorizing?* Mixed,
+   leaning toward "somewhat, but hitting a ceiling." The much later best-checkpoint step and the
+   sustained (if not growing) controls gap are more consistent with a genuine, if weak, learned
+   mapping than with pure memorization -- but the complete absence of any waveform-domain
+   improvement across a ~100x total crop-count range (16 -> 1584) argues against "this is simply
+   a data-scaling problem that more GTZAN-scale data will solve."
+
+**Decision and final recommendation, based on the observed scaling curve (not subjective
+expectations).** Three data points across roughly two orders of magnitude of training data
+(16 -> 320 -> 1584 crops; 8 -> 80 -> 792 tracks) show a decelerating improvement in latent-space
+cosine similarity and *zero* improvement in waveform-domain correlation to the oracle at any
+scale tested. This is the signature of **saturation, not a data-limited ceiling**: if audio-domain
+generalization were primarily blocked by insufficient data, the metric that actually reflects
+audio quality (waveform correlation to the oracle) would be expected to show at least some
+directional movement across a 100x data range, even if slower than the latent-space metric's
+movement. It has shown none. **Recommendation: further pure data scaling within this exact
+architecture is unlikely to be a productive next step.** The bottleneck is more likely one of:
+(a) the architecture's capacity/receptive-field being too small to resolve genuinely
+track-general fine-grained temporal structure (a 3-layer, 5-MuQ-frame-receptive-field ConvNet is
+a very small model for this task), or (b) a more fundamental limitation in how much fine
+temporal/phase information a framewise-then-locally-convolved map can recover from MuQ's 25 Hz
+representation regardless of how much training data it sees. Distinguishing between these two
+remaining explanations would require relaxing the "no architecture change" constraint that has
+correctly governed this entire investigation so far -- which is explicitly out of scope for this
+experiment and should not be started without the user's direction. Per this experiment's own
+instructions, do not proceed to transformers, layer sweeps, larger models, or Gate 5 based on
+this result alone.
+
+**Consequences.** `scripts/build_more_data_manifest.py`, `scripts/precompute_more_data_cache.py`,
+`scripts/train_muq_to_dac_more_data.py`, `data/manifests/more_data_crops.csv` (tracked), and
+`data/cache/more_data/muq_dac_cache.pt` (1.5GB, git-ignored) now exist on this branch. No MuQ
+baseline, HiFi-GAN, EnCodec, or Gate 5 code was touched (confirmed via `ruff check .` and the full
+47-test suite passing unchanged). `runs/more_data/checkpoints/best.pt` (60MB) is the sole
+retained checkpoint.
+
+**Rollback plan.** This entire line of work lives on `experiment/muq-to-dac-more-data`, branched
+off `experiment/muq-to-dac-scale-data`. If abandoned, simply do not merge; no baseline files were
+touched.
