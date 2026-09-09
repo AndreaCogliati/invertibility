@@ -909,3 +909,167 @@ representation was never the bottleneck; the memoryless framewise architecture w
 **Tagged as `muq-to-dac-temporal-conv-v1`** to mark this as a durable, confirmed milestone
 result, separate from the many exploratory/negative results on other branches in this
 investigation.
+
+## muq-to-dac-minimal-gate4: The Gate 3 result does not generalize -- it was memorization
+
+**Context.** Gate 3 (tagged `muq-to-dac-temporal-conv-v1`) established near-perfect reconstruction
+(cosine similarity 0.9999, confirmed by listening) for two fixed, memorized 2-second crops. This
+experiment tests whether that result reflects a transferable MuQ-to-DAC mapping or memorization
+of those two specific crops, via two independent generalization axes, using the exact same
+architecture, hyperparameters, loss, and frozen encoders/decoder validated in Gate 3 -- only the
+data (more crops, more tracks, explicit train/val/test splits) and evaluation protocol are new.
+Branched directly off `experiment/muq-to-dac-temporal-conv` (not off `main`, unlike every prior
+sibling branch) since this is a direct extension of that branch's validated model, not an
+independent ablation.
+
+**Manifest, built and verified before any training code** (`scripts/build_gate4_manifests.py` ->
+`data/manifests/gate4_crops.csv`, tracked in git per CLAUDE.md rule 7):
+
+- **Experiment A** (crop-level generalization): the same two Gate 3 tracks (`pop.00012`,
+  `disco.00049`, both 30.00s). Train: 8 crops/track at starts 0,2,...,14s (covers [0,16)). 1.0s
+  guard. Val: 2 crops/track at 17,19s (covers [17,21)). 1.0s guard. Test: 2 crops/track at
+  22,24s (covers [22,26)). 16/4/4 train/val/test crops. Region-disjointness with the guard bands
+  verified programmatically at manifest-build time, not just asserted in a docstring.
+- **Experiment B** (track-level generalization): 8 train tracks (2 each from pop/disco/classical/
+  rock, excluding the two Experiment A tracks), 2 val tracks (`pop.00003`, `disco.00003`), 2 test
+  tracks (`classical.00003`, `rock.00003`). Verified via direct SHA-256 checksum comparison: no
+  duplicate-checksum GTZAN defect among these 12 tracks or against Experiment A's two tracks, and
+  no track spans more than one split. Train tracks get 2 crops each (5.0s, 15.0s); val/test get 1
+  fixed crop each (10.0s).
+
+**Deviation, documented:** the model is trained *fresh* per experiment on that experiment's own
+training crops, not by reusing Gate 3's checkpoint (which memorized exactly `pop.00012`'s and
+`disco.00049`'s *original* crops -- reusing it would make Experiment A's "unseen crop"
+evaluation non-blind, and wouldn't even apply architecturally to Experiment B's different
+tracks). This is the only coherent way to run a train/val/test generalization test.
+
+**A self-inflicted false alarm, caught and fixed before trusting any real result.** The prompt's
+stop condition "training loss does not reproduce the Gate 3 overfit behavior on a tiny subset"
+was first implemented by checking the *full* 16-crop training set's convergence pace at step 300
+against Gate 3's own 0.5 threshold -- it failed (ratio 0.77/0.69). Investigated rather than
+accepting either "the pipeline is broken" or "the check must be wrong" on faith: fitting 16
+diverse crops jointly is a harder problem than Gate 3's 1-2-crop overfit, so slower convergence
+there is expected data about generalization difficulty, not evidence of a regression -- and the
+prompt's own wording says "on a tiny subset," which the full training set is not. Fixed by adding
+a separate pre-flight check (`run_tiny_subset_sanity_check`) that mirrors Gate 3 exactly (one
+crop, 300 steps, same threshold) -- this passed cleanly (ratio 0.0002, matching Gate 3's own
+pace) -- and demoting the full-training-set check to an informational print, not a stop
+condition. This is exactly the kind of self-correction CLAUDE.md's stop-condition discipline is
+meant to produce: a check firing is a prompt to investigate, not to either blindly trust or
+blindly override it.
+
+**Training: 8000 steps (up from Gate 3's 3000), a documented deviation** justified by needing more
+exposures per crop across 16 diverse training examples instead of 1-2 memorized ones; per-step
+cost is unchanged (~7ms/step), so total wall time remained trivial (54.7s for A, 56.4s for B).
+
+**Result: an unambiguous, textbook overfitting signature in both experiments.** Train MSE
+decreased steadily throughout training (cosine similarity reaching 0.40-0.45 by step 8000) while
+validation MSE **increased monotonically from the very start of training**. The
+validation-MSE-based checkpoint-selection rule (required by this experiment's own spec -- not
+test performance, not listening) picked **step 200 of 8000** for both experiments: essentially
+right at the start, before any substantial fitting had occurred.
+
+**Full metrics at the selected checkpoint** (correct-conditioning cosine similarity and waveform
+correlation to the DAC oracle; full breakdown including MSE, multi-res STFT distance, and all
+three controls in `artifacts/gate4_minimal/report.json`):
+
+| | Experiment A (crop-level) | Experiment B (track-level) |
+|---|---|---|
+| train: cosine sim / wav corr to oracle | 0.452 / 0.329 | 0.395 / 0.251 |
+| val: cosine sim / wav corr to oracle | 0.179 / 0.006 | 0.150 / -0.005 |
+| test: cosine sim / wav corr to oracle | 0.184 / -0.009 | 0.140 / -0.001 |
+| DAC-oracle-vs-reference wav corr (val/test) | 0.512 / 0.386 | 0.669 / 0.049 |
+
+Held-out performance is nearly identical between Experiment A (unseen crops, same tracks) and
+Experiment B (entirely unseen tracks) -- both collapse to essentially the same near-zero-
+correlation floor. There is no meaningful advantage from "at least it's the same track."
+
+**Controls: real and large on training data, absent on held-out data.** On train crops, correct
+conditioning clearly beats both shuffled-across and time-shifted controls (Experiment A train:
+cosine 0.452 correct vs. 0.154/0.118 shuffled/shifted -- a real, well-separated effect proving the
+model learned *something* conditioning-dependent about its training crops). On held-out crops,
+correct vs. controls are barely distinguishable and all near-zero (Experiment A val: cosine 0.179
+correct vs. 0.132/0.115 shuffled/shifted; waveform correlation to oracle 0.006/0.001/0.003 --
+statistically indistinguishable from noise). This is the sharpest single piece of evidence for
+memorization: the model's real, measurable sensitivity to correct conditioning essentially
+vanishes once evaluated out-of-distribution.
+
+**Stop conditions checked, none triggered:** no split/track overlap (verified at both
+manifest-build and run time); frame alignment held exactly (ratio 3 for all 44 crops, asserted
+per-crop); the tiny-subset sanity check passed; controls did not perform similarly to correct
+conditioning *on training data* (they did on held-out data, which is the finding itself, not a
+pipeline defect); the DAC oracle's own quality was unaffected (waveform correlation to reference
+0.05-0.67, consistent with every prior MuQ-to-DAC experiment); no non-finite losses or latents
+anywhere; validation metrics were never used to touch test data (test crops were only evaluated
+after checkpoint selection was already fixed by validation MSE alone).
+
+**Answering the six required interpretation questions:**
+
+1. *Does the near-perfect Gate 3 result generalize to unseen crops from the same tracks?* No --
+   held-out crops of the same two tracks collapse from Gate 3's 0.9999 cosine similarity to
+   ~0.18, and waveform correlation to the oracle collapses to essentially zero.
+2. *Does it generalize to completely unseen tracks?* No, and not meaningfully worse than #1 --
+   Experiment B's held-out numbers (cosine ~0.14-0.15, wav corr ~0) are statistically
+   indistinguishable from Experiment A's.
+3. *How large is the train/val/test gap?* Very large: cosine similarity drops ~60% relative
+   (0.40-0.45 -> 0.14-0.18) and waveform correlation to the oracle collapses from a real,
+   positive 0.25-0.33 to a noise-level ~0 -- not a graceful degradation but a near-total collapse
+   of the predictive signal.
+4. *Do shuffled/time-shifted controls substantially degrade reconstruction?* Yes on training
+   data, no on held-out data -- see the controls analysis above. This asymmetry is itself
+   diagnostic: it shows the model's conditioning-sensitivity is real but entirely confined to
+   examples it has memorized.
+5. *Is the model learning a general translation, a track-specific mapping, or memorizing fixed
+   crops?* **Primarily memorizing fixed crops.** Three independent pieces of evidence converge:
+   (a) the validation-selected checkpoint is from step 200/8000, with validation performance
+   worsening monotonically afterward -- a textbook memorization curve; (b) held-out performance is
+   barely above, and often statistically indistinguishable from, mismatched (shuffled/shifted)
+   conditioning; (c) Experiment B's unseen-track performance is no worse than Experiment A's
+   unseen-crop-same-track performance, meaning there is no partial "track-specific" generalization
+   being lost in between -- it is all-or-nothing, consistent with memorization rather than a
+   graded specificity effect.
+6. *How close are predicted-latent reconstructions to the DAC-oracle ceiling, by metrics and
+   listening?* On training crops, moderate (wav corr to oracle 0.25-0.33) but well short of Gate
+   3's 0.9999 -- even training performance here doesn't reach full memorization within 8000 steps,
+   because the model must now jointly fit 16 crops instead of 1-2. On held-out crops, essentially
+   no closeness (near-zero correlation) despite the oracle itself remaining a strong, healthy
+   ceiling (0.05-0.67 correlation to reference, consistent with every prior experiment). Listening
+   confirmation sent to the user; pending as of this entry.
+
+**Decision.** This is a scientifically successful negative result, exactly as this experiment's
+own success criterion anticipated: it cleanly measures the generalization gap and answers the
+central question -- the Gate 3 result was memorization, not evidence of a learned, transferable
+MuQ-to-DAC mapping. Do not scale this architecture/training recipe to Gate 5 or treat Gate 3's
+result as validating the broader MuQ-to-DAC approach without first addressing generalization
+(more diverse training data, regularization, or a fundamentally different training regime would
+all need to be tested before that claim could be made). Per the task's explicit instruction, do
+not increase model complexity in response to this result without further direction.
+
+**Consequences.** `scripts/build_gate4_manifests.py`, `scripts/train_muq_to_dac_gate4.py`,
+`src/muq_inversion/gate4_common.py`, and `data/manifests/gate4_crops.csv` now exist on this
+branch, which itself sits on top of `experiment/muq-to-dac-temporal-conv`'s validated code (not
+recreated, inherited via git history). No MuQ baseline, HiFi-GAN, EnCodec, or Gate 5 code was
+touched (confirmed via `ruff check .` and the full 47-test suite passing unchanged).
+`runs/gate4_minimal/` retains only `best.pt` per experiment (120MB total, no intermediate
+numbered checkpoints since the checkpoint-selection rule only ever needs the single best-by-
+validation state).
+
+**Rollback plan.** This entire line of work lives on `experiment/muq-to-dac-minimal-gate4`,
+branched off `experiment/muq-to-dac-temporal-conv`. If abandoned, simply do not merge; no
+baseline files were touched.
+
+**Listening verdict (2026-09-09).** User's judgment: "The listening confirms the poor result. The
+model is not learning and generalizing." This confirms, by ear, what the objective metrics
+already showed unambiguously: the near-zero held-out waveform correlation and the
+statistically-indistinguishable-from-controls held-out performance were not metric artifacts
+(unlike several earlier findings in this project where a metric misled about perceptual quality
+in either direction -- see [[muq-to-dac-mlp]] and [[muq-to-dac-temporal-conv]]). Here, for once,
+the metrics and the listening verdict agree cleanly: **Gate 3's result was memorization, not
+generalization, and this is now confirmed by both channels of evidence this project requires.**
+
+**This closes the loop CLAUDE.md's own Evaluation and Controls section anticipates**: a positive
+in-distribution result (Gate 3) required an explicit generalization test (Gate 4) before being
+trusted as evidence of a real, transferable capability -- exactly the discipline that section
+exists to enforce, and exactly the outcome ("stop and diagnose... [if] evaluation controls
+perform similarly to correct conditioning") that materialized here on held-out data specifically,
+not on training data.

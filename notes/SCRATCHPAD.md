@@ -508,3 +508,95 @@ predicts the temporal-conv reconstruction should also sound at or near that same
 all four variants (reference/temporal-conv/MLP/DAC-oracle) for both clips to the user for a
 listening verdict; not yet received as of this note. See `notes/DECISIONS.md#muq-to-dac-temporal-conv`
 for the full write-up and answer to the experiment's critical question.
+
+**Listening verdict (2026-09-09), confirmed after this scratchpad entry was written:** "The
+listening test shows almost perfect reconstruction! We nailed it!" Committed as `fbb1fb5` and
+tagged `muq-to-dac-temporal-conv-v1`. See `notes/DECISIONS.md#muq-to-dac-temporal-conv`'s
+"Listening verdict" section (added retroactively there, not duplicated here per this file's
+append-only convention).
+
+## 2026-09-09 -- `experiment/muq-to-dac-minimal-gate4` branch: does the Gate 3 result generalize?
+
+Branched off `experiment/muq-to-dac-temporal-conv` directly (not off `main`, unlike every prior
+sibling experiment) since this is a direct extension of that branch's validated architecture,
+not an independent ablation -- inherits `dac_encoder.py`, `models/framewise_mlp.py`,
+`models/temporal_conv.py` via git history instead of recreating them.
+
+**Manifest first.** Wrote `scripts/build_gate4_manifests.py` before any training code, producing
+`data/manifests/gate4_crops.csv` (44 rows) with built-in stop-condition checks run at build time:
+region-disjointness with a 1.0s guard band for Experiment A (verified programmatically, not just
+by eyeballing the docstring's numbers), and a checksum/track-split-uniqueness check for
+Experiment B (confirmed no duplicate-checksum GTZAN defect among the 14 candidate tracks, and no
+track appears in more than one Experiment B split).
+
+- **Experiment A** (`pop.00012`, `disco.00049`, both 30.00s): train=8 crops/track at
+  starts 0,2,...,14 (covers [0,16)), 1.0s guard, val=2 crops/track at 17,19 (covers [17,21)),
+  1.0s guard, test=2 crops/track at 22,24 (covers [22,26)). 16/4/4 train/val/test crops total.
+- **Experiment B**: 8 train tracks (2 each from pop/disco/classical/rock, excluding the two
+  Experiment A tracks), 2 val tracks (pop.00003, disco.00003), 2 test tracks (classical.00003,
+  rock.00003) -- verified via direct checksum comparison to have no duplicate-checksum collisions
+  with each other or with Experiment A's tracks. Train tracks get 2 crops each (starts 5.0s,
+  15.0s); val/test get 1 fixed crop each (10.0s). 16/2/2 train/val/test crops total.
+
+**First bug caught by my own stop-condition check -- and it was my own check that was
+miscalibrated, not the pipeline.** Applied the "training loss must reproduce Gate 3 overfit
+behavior" stop condition to the *full* 16-crop training set at step 300 (threshold: mse ratio
+<=0.5) -- it failed (ratio 0.77 for A, 0.69 for B). Investigated before concluding anything was
+broken: the spec says "on a tiny subset," and fitting 16 diverse crops jointly is a genuinely
+harder problem than Gate 3's 1-2-crop overfit, so slower convergence there is expected data, not
+evidence of a broken pipeline. Fixed by splitting this into two separate checks: (1) a new
+`run_tiny_subset_sanity_check` that mirrors Gate 3 exactly (fresh model, ONE crop, 300 steps,
+same 0.5 threshold) as a pre-flight gate before trusting the real experiments at all -- this
+passed cleanly (ratio 0.0002, matching Gate 3's own convergence pace almost exactly); (2) the
+full-training-set ratio at step 300 is now printed as informational only, not a stop condition.
+
+**Training (8000 steps each, up from Gate 3's 3000 -- documented deviation, justified by needing
+more exposures per crop across 16 diverse training examples instead of 1-2 memorized ones; same
+per-step cost, ~7ms, so still trivial wall-clock: 54.7s for A, 56.4s for B).** Both experiments
+show the same clean, unambiguous pattern: **train MSE decreases steadily throughout training
+(cosine similarity reaching 0.40-0.45 by step 8000) while validation MSE increases monotonically
+from the very start of training.** The checkpoint-selection rule (lowest validation MSE, not
+final step, not test performance, per this experiment's explicit requirement) picked **step 200
+out of 8000** for both experiments -- essentially right at the start, before any real fitting had
+happened. This is about as clean a memorization/overfitting signature as this kind of experiment
+can produce.
+
+**Full metrics** (train/val/test, correct-conditioning cosine similarity and waveform correlation
+to the DAC oracle) at the selected checkpoint:
+```
+Experiment A:  train cos=0.452 wav_corr=0.329  |  val cos=0.179 wav_corr=0.006  |  test cos=0.184 wav_corr=-0.009
+Experiment B:  train cos=0.395 wav_corr=0.251  |  val cos=0.150 wav_corr=-0.005 |  test cos=0.140 wav_corr=-0.001
+```
+Held-out performance (val/test) is nearly identical between Experiment A (unseen crops, same
+tracks) and Experiment B (entirely unseen tracks) -- both collapse to roughly the same
+near-zero-correlation floor, with no clear advantage for "at least it's the same track."
+
+**Controls.** On train data, correct conditioning clearly beats both shuffled-across and
+time-shifted controls (e.g. Experiment A train: cos 0.452 correct vs. 0.154/0.118 shuffled/
+shifted) -- a real, well-separated effect confirming the model has learned *something*
+conditioning-dependent on its training crops. On held-out data, correct vs. controls are barely
+distinguishable and all near-zero (Experiment A val: cos 0.179 correct vs. 0.132/0.115 shuffled/
+shifted; waveform correlation to oracle 0.006/0.001/0.003 -- all indistinguishable from noise).
+This is the sharpest evidence for memorization: the model's conditioning-sensitivity, which is
+large and real on training data, essentially vanishes once evaluated out-of-distribution.
+
+**Stop conditions checked, none triggered:** no split/track overlap (verified twice, at
+manifest-build time and at run time), frame alignment held exactly (ratio=3 for every one of the
+44 crops across both experiments, asserted per-crop), the tiny-subset sanity check passed,
+evaluation controls did NOT perform similarly to correct conditioning on training data (they did
+on held-out data, which is itself the finding, not a broken-pipeline signal), the DAC oracle's
+own quality was unaffected (waveform correlation to reference 0.39-0.67 across both experiments,
+consistent with every prior MuQ-to-DAC experiment's oracle numbers), no non-finite losses or
+latents anywhere (`nonfinite_seen: False` in both experiment reports), and validation metrics
+were never used to touch test data (test crops were only touched in the final evaluation pass,
+after checkpoint selection was already fixed by validation MSE alone).
+
+**Listening artifacts:** 30 WAVs written (2 experiments x 3 splits x 5 conditions), descriptive
+filenames (`{split}_{track}_t{crop_start}s_{condition}_{run_id}_step{n}.wav`) in
+`artifacts/gate4_minimal/{A,B}/`. Sent a representative 12-file subset to the user (train
+reconstruction + full 5-condition held-out comparison, for each experiment) for a listening
+verdict; not yet received as of this note.
+
+Full parameter count (15,731,712, unchanged from Gate 3 by construction), receptive field (13
+DAC-frames / 5 MuQ-frames, unchanged), and peak MPS memory (~2.45-2.47 GB) recorded in
+`artifacts/gate4_minimal/report.json` and reproduced in `notes/DECISIONS.md#muq-to-dac-minimal-gate4`.

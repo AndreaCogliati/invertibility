@@ -196,3 +196,30 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   latent decodes to the same audio as the true latent" (correlation to the DAC-oracle
   reconstruction, 0.9999/1.0000) -- not waveform-vs-reference correlation, which has been
   unreliable throughout this project (see [[muq-to-dac-mlp]]).
+- Gate 4 minimal generalization experiment CONCLUDED (2026-09-09,
+  `experiment/muq-to-dac-minimal-gate4` branch, off `experiment/muq-to-dac-temporal-conv`):
+  **the Gate 3 near-perfect result (cosine similarity 0.9999) does NOT generalize -- it was
+  memorization, not a transferable MuQ-to-DAC mapping.** Retrained the exact Gate 3 architecture
+  (TemporalConvNet, 15.7M params, unchanged) fresh on two independent generalization tests:
+  Experiment A (16 train / 4 val / 4 test crops, disjoint 2s windows with 1.0s guard bands, from
+  the same 2 Gate 3 tracks) and Experiment B (16 train crops from 8 track-disjoint GTZAN tracks
+  across 4 genres / 2 val tracks / 2 test tracks, no track in more than one split). Both show a
+  textbook overfitting signature: train cosine similarity reaches 0.40-0.45 by step 8000, but
+  validation MSE increases monotonically from the start of training, and the required
+  validation-MSE-based checkpoint selection picks **step 200 of 8000** in both experiments.
+  Held-out (val/test) waveform correlation to the DAC oracle collapses to ~0 (from a real,
+  positive 0.25-0.33 on training data) in BOTH experiments, with Experiment B (unseen tracks) no
+  worse than Experiment A (unseen crops, same tracks) -- an all-or-nothing collapse, not a
+  graded specificity effect. Shuffled-across and time-shifted controls are clearly beaten by
+  correct conditioning on training data (real, well-separated effect) but are statistically
+  indistinguishable from correct conditioning on held-out data -- the model's real
+  conditioning-sensitivity is entirely confined to memorized examples. DAC oracle quality
+  unaffected throughout (0.05-0.67 correlation to reference, consistent with every prior
+  experiment); no stop conditions triggered (no split overlap, no frame misalignment, no
+  non-finite values, tiny-subset sanity check passed at ratio 0.0002). Full write-up, six-question
+  interpretation, and exact manifest in [[muq-to-dac-minimal-gate4]] and
+  `data/manifests/gate4_crops.csv`. **Listening verdict (2026-09-09): "The listening confirms the
+  poor result. The model is not learning and generalizing."** Metrics and listening agree cleanly
+  here (unlike several earlier findings in this project where they diverged in either direction --
+  see [[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]): Gate 3's near-perfect result is confirmed
+  to have been memorization, not a transferable MuQ-to-DAC mapping.
