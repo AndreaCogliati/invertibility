@@ -457,3 +457,54 @@ Then asked directly: "What conclusions can we make?"
   DECISIONS.md, MEMORY.md (durable conclusion), this SCRATCHPAD.md entry (as-it-happened log),
   and NEXT.md (resumability: current status, next command options, blockers) all in the same
   pass, no new code or experiments run.
+
+## 2026-09-09 -- `experiment/muq-to-dac-temporal-conv` branch: does local temporal context close the framewise MLP's gap?
+
+Direct follow-up to `experiment/muq-to-dac-mlp`'s finding that its framewise MLP hit an exact
+architectural ceiling (cosine similarity 0.64) because DAC's frame rate is exactly 3x MuQ's and a
+memoryless per-frame map can't distinguish the 3 repeated-input output slots. Branched off `main`
+(not off the MLP branch, per this project's standing pattern) -- had to recreate
+`dac_encoder.py` and `models/framewise_mlp.py` identically since branches don't share commits;
+the MLP's *trained checkpoint* (`runs/muq_to_dac_mlp/checkpoints/latest.pt`, git-ignored) did
+survive the branch switch and was reloaded directly for a matching comparison WAV rather than
+retrained.
+
+**Single-variable change from the MLP experiment:** same input/target/optimizer/loss/step budget/
+clips/crop, only the framewise `Linear` layers replaced by `Conv1D(k=5)` layers with trivial
+residual connections (`x + GELU(conv(x))`), operating on the same repeated-to-75Hz sequence used
+for temporal alignment. New modules: `src/muq_inversion/models/temporal_conv.py`
+(`TemporalConvNet`), `scripts/train_muq_to_dac_temporal_conv.py`.
+
+**Receptive field.** Analytical: `1 + 3*(5-1) = 13` frames at DAC's 75Hz timeline, translating to
+`ceil(13/3) = 5` MuQ frames (roughly the current MuQ frame plus ~2 neighbors each side).
+Verified empirically, not just trusted: perturbed one frame in a random input sequence and
+measured which output frames changed by more than floating-point noise -- got exactly 13 frames
+affected, matching the formula exactly. This is a good example of CLAUDE.md's "measure, don't
+assume" principle applied to a structural/architectural claim, not just a data-geometry one.
+
+**100-step smoke test result was already dramatic:** cosine similarity 0.9976 by step 100 (vs.
+the framewise MLP's *converged, 3000-step* ceiling of 0.6418) and MSE down to 0.09 (vs. the MLP's
+floor of ~11.05). This was surprising enough that the full 3000-step run was launched immediately
+to confirm it wasn't a fluke or an early favorable coincidence.
+
+**Full 3000-step run:** converged to cosine similarity 0.9999-1.0000 and MSE ~0.004-0.014 (final
+10-step mean 0.004072, final/initial ratio 0.0002) -- essentially a full latent-space solve, not
+just an improvement. Training time 18.12s total (6.04 ms/step) -- slower than the pure-MLP's
+per-step cost (unsurprising, Conv1D vs Linear) but still trivial compared to any HiFi-GAN variant.
+15,731,712 parameters (roughly 1.9x the framewise MLP's 8.4M, from the 3 extra `Conv1D` kernel
+dimensions vs. `Linear`'s per-position weights).
+
+**Waveform-domain result, decoded through the frozen DAC decoder:**
+```
+                 temporal-conv   MLP (reused ckpt)   DAC-oracle
+pop.00012:       0.3683          0.3028              0.3666
+disco.00049:     0.5753          0.1918              0.5735
+```
+And directly comparing the temporal-conv reconstruction against the DAC-oracle reconstruction
+(not the original reference): **0.9999/1.0000** -- i.e. decoding the *predicted* latent produces
+audio essentially indistinguishable, sample-for-sample-correlated, from decoding the *true* DAC
+latent. Given the user's own prior verdict that the DAC oracle "is perfect," this strongly
+predicts the temporal-conv reconstruction should also sound at or near that same ceiling. Sent
+all four variants (reference/temporal-conv/MLP/DAC-oracle) for both clips to the user for a
+listening verdict; not yet received as of this note. See `notes/DECISIONS.md#muq-to-dac-temporal-conv`
+for the full write-up and answer to the experiment's critical question.

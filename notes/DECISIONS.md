@@ -788,3 +788,124 @@ without first changing something on the training-depth or diagnostic axis, or th
 config change to revert. If a future experiment (longer training, different loss, or otherwise)
 does produce an audible improvement, revisit whether capacity interacts with that fix (e.g. maybe
 capacity matters once training is deep enough) before assuming this finding generalizes forever.
+
+## muq-to-dac-temporal-conv: Local temporal context closes the framewise MLP's gap almost entirely
+
+**Context.** `experiment/muq-to-dac-mlp`'s framewise MLP converged to an exact, verified
+architectural ceiling (cosine similarity 0.64): DAC's frame rate (75 Hz) is exactly 3x MuQ's
+(25 Hz), so a memoryless per-frame map fed 3 identical repeated MuQ frames per output triplet
+structurally cannot produce 3 different outputs. This experiment tests the direct follow-up
+question: does giving the model access to *just its immediate neighboring frames* -- nothing
+more, no attention, no transformer, no GAN, no waveform loss, no DAC fine-tuning -- close that
+gap? If yes, the missing information was accessible to MuQ all along and the framewise
+architecture, not MuQ's representation, was the limiting factor. If no, that would point toward a
+real MuQ information ceiling.
+
+**Single-variable change from [[muq-to-dac-mlp]].** Same input (MuQ latent, repeated 3x for
+temporal alignment), same target (DAC's `quantized_representation`), same optimizer/loss/step
+budget/clips/crop -- the *only* change is replacing the framewise MLP's pointwise `Linear` layers
+with `Conv1D(kernel_size=5)` layers (with trivial residual connections, `x + GELU(conv(x))`,
+since channel width stays 1024 throughout). New modules: `src/muq_inversion/models/
+temporal_conv.py` (`TemporalConvNet`), `scripts/train_muq_to_dac_temporal_conv.py`. Branches
+don't share commits in this project's workflow, so `dac_encoder.py` and `models/framewise_mlp.py`
+were recreated identically on this branch; the MLP experiment's *trained checkpoint*
+(git-ignored, survives branch switches) was reloaded directly rather than retrained, so the "MLP
+reconstruction" comparison audio in this experiment's own artifacts directory is exactly the same
+model, not a re-run.
+
+**Receptive field: 5 MuQ frames, verified both analytically and empirically.** Three stacked
+`Conv1D(k=5)` layers give an analytical receptive field of `1 + 3*(5-1) = 13` frames at DAC's
+75 Hz timeline, i.e. `ceil(13/3) = 5` MuQ frames (roughly the current frame plus ~2 neighbors each
+side). Verified this is what the model actually does, not just what the formula predicts: perturbed
+a single frame in a random input sequence and measured which output frames changed by more than
+floating-point noise -- exactly 13 frames were affected, matching the formula exactly.
+
+**Result: near-total convergence, far beyond the framewise ceiling.** A 100-step smoke test
+already reached cosine similarity 0.9976 and MSE 0.09 -- better than the framewise MLP's fully
+*converged* 3000-step result (cosine similarity 0.6418, MSE ~11.05). The full 3000-step run
+converged to **cosine similarity 0.9999-1.0000, MSE ~0.004-0.014** (final/initial ratio 0.0002) --
+essentially a full latent-space solve, not merely an improvement. 15,731,712 parameters (~1.9x
+the framewise MLP's 8.4M). Training time 18.12s total (6.04 ms/step) -- slower per-step than the
+pure MLP (expected, `Conv1D` vs. `Linear`) but still trivial next to any HiFi-GAN variant (15,000
+steps at ~0.4-0.5s/step).
+
+**Waveform-domain result, decoded through the frozen DAC decoder:**
+
+| | temporal-conv | MLP (reused checkpoint) | DAC-oracle |
+|---|---|---|---|
+| waveform correlation vs. reference, pop.00012 | 0.3683 | 0.3028 | 0.3666 |
+| waveform correlation vs. reference, disco.00049 | 0.5753 | 0.1918 | 0.5735 |
+
+The temporal-conv reconstruction now matches (and marginally exceeds, within noise) the DAC
+oracle's own correlation to the reference. More directly: **correlating the temporal-conv
+reconstruction against the DAC-oracle reconstruction itself gives 0.9999 (pop.00012) / 1.0000
+(disco.00049)** -- decoding the *predicted* latent is essentially indistinguishable,
+sample-for-sample, from decoding the *true* DAC latent. Given the user's own prior verdict that
+the DAC oracle "is perfect" ([[muq-to-dac-mlp]] listening verdict), this is strong evidence the
+temporal-conv reconstruction should sound at or near that same ceiling -- audio sent to the user
+for confirmation, per this project's standing practice of never declaring perceptual success from
+metrics alone (doubly warranted here, given [[muq-to-dac-mlp]]'s own finding that waveform
+correlation is an unreliable perceptual proxy in this project).
+
+**Answering the critical question: does adding only local temporal context substantially reduce
+DAC latent error and improve reconstructed audio?** Yes, decisively, on the latent-error question:
+cosine similarity went from 0.64 (framewise ceiling) to 0.9999 (5-MuQ-frame receptive field), and
+the waveform-domain evidence (correlation to the DAC oracle itself, not just to the reference) is
+consistent with the audio quality gap having closed almost entirely too, pending the user's
+listening confirmation. **This means MuQ contained the information the framewise MLP could not
+access** -- the earlier ceiling was a limitation of the *memoryless* architecture specifically,
+not of MuQ's 25 Hz representation's information content. A receptive field of just ~5 MuQ frames
+(~200ms of context) was sufficient; this was not a large or expensive model by any measure (15.7M
+params, ~18s of training).
+
+**Decision.** This result substantially reframes the "is MuQ's representation the bottleneck"
+question that has run through this entire Gate 3 investigation: at least for latent-to-latent
+prediction between MuQ and DAC (a reconstruction-trained codec), the answer now looks like
+**no, given even minimal temporal context** -- a result the earlier HiFi-GAN-family experiments
+(which all used generators with far larger effective receptive fields than 5 frames, via their
+multi-receptive-field residual blocks) could not have cleanly isolated, since they conflated
+temporal modeling with adversarial training, capacity, and waveform-domain losses all at once.
+Per the task's explicit instruction, do not proceed to larger models until this result is
+confirmed by listening. If confirmed, the natural implication is that the *DAC decoding path*
+(MuQ -> small temporal model -> DAC latent -> frozen DAC decoder) is a substantially more
+promising direction for this project's primary scientific question than the HiFi-GAN-family path,
+since it reaches near-oracle latent fidelity with orders of magnitude less compute and no
+adversarial training at all.
+
+**Consequences.** `src/muq_inversion/models/temporal_conv.py` and
+`scripts/train_muq_to_dac_temporal_conv.py` (plus recreated `dac_encoder.py`/
+`models/framewise_mlp.py`) now exist on this branch only, isolated from `main` and every sibling
+branch by construction. No MuQ baseline, HiFi-GAN, EnCodec, or Gate 4/5 code was touched
+(confirmed via `ruff check .` and the full 47-test suite passing unchanged). `runs/
+muq_to_dac_temporal_conv/` retains `latest.pt`/`step_003000.pt` after intermediate numbered
+checkpoints were deleted.
+
+**Rollback plan.** This entire line of work lives on `experiment/muq-to-dac-temporal-conv`,
+isolated from `main` and from every sibling experiment branch by construction (each branched
+independently off `main`). If abandoned, simply do not merge; no baseline files were touched.
+
+**Listening verdict (2026-09-09).** User's judgment: "The listening test shows almost perfect
+reconstruction! We nailed it!" This confirms the objective-metric prediction above -- the
+temporal-conv reconstruction's near-1.0 correlation to the DAC-oracle reconstruction (not just to
+the reference) did in fact predict near-oracle perceptual quality, unlike every other objective
+metric used earlier in this investigation (waveform correlation, mel correlation) which
+repeatedly failed to predict perceptual outcomes (see [[gate3-capacity-ruled-out]],
+[[encodec-mediocrity-across-all-variants]], and [[muq-to-dac-mlp]]'s own listening verdict). The
+key difference this time: the metric that worked was "does the predicted latent decode to the
+same audio as the true latent," not "does the reconstructed waveform correlate with the original
+reference" -- the former isolates prediction quality from the codec's own inherent lossiness,
+which is exactly the confound that made waveform-vs-reference correlation unreliable throughout
+this project.
+
+**This is the first unambiguous positive result in the entire Gate 3 audio-quality
+investigation.** After capacity (ruled out), representation source among MuQ/EnCodec/ground-truth
+mel (ruled out or inconclusive), and the custom-implementation-vs-reference-HiFi-GAN comparison
+(implementation hypothesis weakened, but only a partial perceptual improvement), this experiment
+is the first to be confirmed, by listening, as close to solving its stated objective. It directly
+answers CLAUDE.md's Scientific Question 3 ("is failure caused by implementation/optimization
+problems, or by insufficient information in the representation?") for the MuQ-to-DAC axis: **the
+representation was never the bottleneck; the memoryless framewise architecture was.**
+
+**Tagged as `muq-to-dac-temporal-conv-v1`** to mark this as a durable, confirmed milestone
+result, separate from the many exploratory/negative results on other branches in this
+investigation.

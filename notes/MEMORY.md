@@ -173,3 +173,26 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   step (proposed to user, not yet executed): test much longer/broader adversarial training before
   drawing conclusions about the representation itself. See [[gate3-capacity-ruled-out]] for the
   full three-finding synthesis and reasoning.
+- MuQ-to-DAC temporal-conv experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-temporal-conv`
+  branch, off `main`): direct follow-up to the framewise-MLP experiment's exact architectural
+  ceiling (cosine similarity 0.64). Replaced the MLP's pointwise `Linear` layers with 3 residual
+  `Conv1D(k=5)` layers (receptive field 5 MuQ frames, verified both analytically and empirically
+  via a perturbation test) -- everything else (input, target, optimizer, loss, steps, clips, crop)
+  held identical, a true single-variable comparison. Result: **cosine similarity jumped to
+  0.9999-1.0000** (from 0.6418), MSE dropped to ~0.004-0.014 (from ~11.05) -- essentially a full
+  latent-space solve. Decoded waveform correlates with the DAC-oracle reconstruction itself at
+  0.9999/1.0000 (not just with the reference), meaning the predicted latent decodes to audio
+  essentially indistinguishable from decoding the true DAC latent. 15.7M params, 18s total
+  training time. **This answers this investigation's central open question for the MuQ-to-DAC
+  axis: the framewise MLP's ceiling was a limitation of its memoryless architecture, not of MuQ's
+  representation -- MuQ contained the missing information all along, accessible with just ~200ms
+  of local temporal context.** Full write-up in [[muq-to-dac-temporal-conv]]. **Listening verdict
+  (2026-09-09): "The listening test shows almost perfect reconstruction! We nailed it!"** --
+  confirmed by ear, not just by metric. **This is the first unambiguous positive result in the
+  entire Gate 3 audio-quality investigation**, after capacity, representation-source (MuQ/
+  EnCodec/ground-truth-mel), and custom-implementation-vs-reference-HiFi-GAN were all ruled out or
+  only partially resolved the mediocrity. Tagged `muq-to-dac-temporal-conv-v1` as a durable
+  milestone. Notably, the metric that actually predicted this perceptual success was "predicted
+  latent decodes to the same audio as the true latent" (correlation to the DAC-oracle
+  reconstruction, 0.9999/1.0000) -- not waveform-vs-reference correlation, which has been
+  unreliable throughout this project (see [[muq-to-dac-mlp]]).
