@@ -173,3 +173,23 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   step (proposed to user, not yet executed): test much longer/broader adversarial training before
   drawing conclusions about the representation itself. See [[gate3-capacity-ruled-out]] for the
   full three-finding synthesis and reasoning.
+- Reference HiFi-GAN experiment CONCLUDED (2026-09-08, `experiment/reference-hifigan` branch):
+  vendored the original published `jik876/hifi-gan` (MIT license) generator/discriminators/
+  losses/mel-preprocessing near-verbatim, trained on ground-truth mel spectrograms for the same
+  two GTZAN clips, 15000 steps. Result: best mel-loss convergence of any experiment so far
+  (final/initial ratio 0.174 vs. 0.36-0.52 elsewhere), 4-4.4x fewer generator parameters
+  (13.9M vs. 51.7-61.6M) than this project's own MRF-1024 generators, stable training throughout.
+  **But waveform correlation (0.073/0.122) landed in the same low band as this project's own
+  MuQ (0.073/0.104) and ground-truth-mel (0.059/-0.010) results, not EnCodec's outlier
+  (0.682/0.602).** A faithfully vendored, independently-authored reference implementation
+  reproduced the same fidelity signature as this project's own custom pipeline under the same
+  tiny-overfit budget. This substantially weakens the "our implementation has a bug" hypothesis
+  and strengthens "the 2-clip/15000-step tiny-overfit training paradigm itself under-trains
+  phase/waveform recovery, regardless of whose generator code is used" as the leading explanation.
+  Full comparison table and four-question analysis in [[reference-hifigan]]. Listening verdict
+  (2026-09-09): "slight improvement... especially on the disco song. However, the pop song still
+  has noticeable artifacts" -- the first experiment in this investigation to produce *any*
+  reported perceptual improvement, though partial and track-dependent. Matches the relative
+  ordering of this experiment's own waveform correlation (disco.00049 0.1221 > pop.00012 0.0728).
+  Next experiment will pursue a different angle (not yet specified) rather than further tuning
+  this paradigm.

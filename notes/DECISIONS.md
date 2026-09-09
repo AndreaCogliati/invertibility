@@ -788,3 +788,135 @@ without first changing something on the training-depth or diagnostic axis, or th
 config change to revert. If a future experiment (longer training, different loss, or otherwise)
 does produce an audible improvement, revisit whether capacity interacts with that fix (e.g. maybe
 capacity matters once training is deep enough) before assuming this finding generalizes forever.
+
+## reference-hifigan: A faithfully vendored, published HiFi-GAN produces the same low-fidelity result as our own implementation
+
+**Context.** After three representation-source/capacity axes (decoder capacity, MuQ vs. EnCodec,
+ground-truth mel) all failed to explain the perceptual mediocrity documented in
+[[encodec-mediocrity-across-all-variants]] and [[mel-hifigan-sanity]] (see that branch's
+DECISIONS.md), the user asked a sharper question: is the mediocrity caused by *this project's own*
+generator/discriminator/loss/training-loop implementation, or is it a property of the tiny-overfit
+training paradigm itself (or something deeper)? To answer this without any ambiguity about
+"did we implement HiFi-GAN correctly," the experiment vendored the original published
+`jik876/hifi-gan` (MIT license, NeurIPS 2020) generator, discriminators, losses, and mel
+preprocessing as close to verbatim as possible (see `notes/SCRATCHPAD.md`'s pre-code plan for the
+full fidelity accounting and the six explicitly flagged, unavoidable deviations: 22050 Hz sample
+rate, `segment_size=44032`, batch-size-1 clip-alternating sampling, fixed LR with no decay,
+15000 steps on 2 clips rather than full-corpus training, and no distributed/mixed-precision
+scaffolding). The vendored code lives in `src/muq_inversion/reference_hifigan/`; the standalone
+training script is `scripts/train_reference_hifigan.py`, deliberately *not* threaded through this
+project's own `config.py`/`train.py`, per the task's explicit "do not reuse our custom MRF
+generator unless absolutely necessary."
+
+**What was run.** Ground-truth mel spectrogram (reference implementation's own preprocessing:
+`librosa.filters.mel` filterbank, manual reflect-pad + `center=False` STFT, natural-log
+compression) -> reference `Generator` (`upsample_rates=(8,8,2,2)`, `upsample_kernel_sizes=
+(16,16,4,4)`, `upsample_initial_channel=512`, 13,936,130 parameters -- 4-4.4x *fewer* than any of
+this project's own MRF-1024 generators) -> waveform, trained on the same two fixed GTZAN clips
+(`pop.00012`, `disco.00049`), same 2.0-second-equivalent crop (`segment_size=44032` samples at
+22050 Hz), for the reference's own exact 15,000-step loss recipe (`loss_mel * 45 + adversarial +
+feature-matching`, `AdamW` betas `(0.8, 0.99)`, no warmup, no LR decay).
+
+**Result: PASSED, and by a wide margin -- this is the strongest reconstruction-loss result of any
+experiment in this project.**
+
+| metric | MuQ + custom HiFi-GAN | EnCodec + custom HiFi-GAN | Ground-truth mel + custom HiFi-GAN | Ground-truth mel + **reference** HiFi-GAN |
+|---|---|---|---|---|
+| representation frame rate | 25 Hz | 75 Hz | 80 Hz | 86.13 Hz |
+| representation channels | 1024 | 128 | 128 | 80 |
+| generator parameters | 61,582,593 | 54,799,617 | 51,670,273 | **13,936,130** |
+| checkpoint size | 782.8 MB | 701.4 MB | 663.8 MB | 969.2 MB |
+| training wall time (15000 steps) | ~52 min | ~62 min | ~48 min | ~99 min |
+| training stability | stable | stable | stable | stable |
+| final mel loss (each pipeline's own scale) | 0.319 | 0.381 | 0.379 | **0.233** |
+| final/initial mel-loss ratio | -- | -- | 0.36 | **0.174 (best of any experiment)** |
+| mel correlation (pop.00012 / disco.00049) | 0.965 / 0.976 | 0.950 / 0.970 | 0.944 / 0.966 | 0.9496 / 0.9480 |
+| waveform correlation (pop.00012 / disco.00049) | 0.073 / 0.104 | **0.682 / 0.602** | 0.059 / -0.010 | 0.0728 / 0.1221 |
+
+(Checkpoint size and mel-loss absolute values are not directly comparable across rows -- different
+serialization code and different mel-loss formulas/weights -- but are reported as required by the
+task spec. Wall time is higher for the reference implementation partly because its training loop
+computes mel spectrograms twice per step, once for the real audio's discriminator input framing
+and once for the generator's loss, more overhead than this project's own cached-mel loop, and
+partly because its `AdamW` optimizer processes only 13.9M generator parameters but a comparably
+sized discriminator stack to the custom pipeline's, so the wall-time-per-parameter ratio differs.)
+
+**The critical result: the reference implementation's waveform correlation (0.073/0.122) lands in
+the same low range as this project's own MuQ (0.073/0.104) and ground-truth-mel (0.059/-0.010)
+results, far below EnCodec's outlier (0.682/0.602).** Mel correlation (0.9496/0.9480) is
+comparable to, if marginally below, this project's own best results. Despite having a
+dramatically smaller generator (13.9M vs. 51.7-61.6M parameters) and achieving the best raw
+mel-loss convergence ratio of any experiment run so far, the reference implementation did **not**
+produce a qualitatively different fidelity signature from this project's own custom generator --
+it reproduced the *same* "converges cleanly in the mel domain, stays low in the waveform-sample
+domain" pattern.
+
+**Answering the three required questions:**
+
+1. *Can the reference implementation accurately reconstruct the two clips?* In the mel domain,
+   yes -- more cleanly than any prior experiment (mel-loss ratio 0.174 vs. 0.36-0.52 elsewhere).
+   In the waveform-sample-correlation sense that has been the more sensitive diagnostic throughout
+   this investigation, no more than this project's own pipeline: waveform correlation stayed in
+   the same low 0.06-0.12 band as MuQ and ground-truth-mel, not EnCodec's 0.6-0.7 band. (Audio
+   sent to the user for the actual listening verdict; this section will be updated once that
+   verdict is in, per this project's standing practice of never declaring perceptual success from
+   metrics alone.)
+2. *Does it sound substantially better than our current pipeline?* Not yet determined by listening
+   (pending user verdict) -- but the objective-metric evidence gives no reason to expect it will,
+   since the metric that has tracked every other perceptual verdict in this investigation
+   (waveform correlation) is essentially unchanged from the custom pipeline's own ground-truth-mel
+   and MuQ results.
+3. *If not, what is the most likely explanation? Are we reproducing the original HiFi-GAN training
+   assumptions correctly?* The most likely explanation is that **this project's custom
+   implementation was never the bottleneck.** A near-verbatim, independently-published HiFi-GAN --
+   different codebase, different author, different exact hyperparameter provenance, vendored and
+   run with no architectural changes -- produces the same low-waveform-correlation signature under
+   the same tiny-overfit training budget (2 clips, 15,000 steps, no warmup, adversarial from step
+   1). The training assumptions we are *not* reproducing are exactly the ones flagged in advance
+   in `notes/SCRATCHPAD.md`'s pre-code plan: the original paper trains on the full LJSpeech corpus
+   for far more than 15,000 total generator updates, giving its discriminators broad exposure to
+   real speech/music statistics rather than just 2 fixed clips. This result makes "the tiny-overfit
+   paradigm itself under-trains the adversarial/phase-recovery machinery, regardless of whose
+   generator code is used" the leading explanation, over "our implementation has a bug" or
+   "MuQ/EnCodec's information content is insufficient" (both increasingly ruled out by this and
+   prior experiments).
+
+**Decision.** Treat the custom-implementation hypothesis as substantially weakened by this result:
+a faithfully vendored, independently-authored HiFi-GAN with 4x fewer parameters does not produce a
+qualitatively different fidelity signature under the same training budget. Do not pursue further
+"maybe it's a code bug" experiments (e.g. rewriting more of the custom pipeline to match the
+reference more closely) without first testing the training-paradigm-scale hypothesis directly
+(longer training and/or a broader, non-overfit dataset -- i.e. moving toward Gate 4/5 scale) or
+running the still-pending conditioning-collapse diagnostic from [[mel-hifigan-sanity]] (comparing
+generator output under correct/zero/shuffled/cross-track conditioning on already-trained
+checkpoints). Both were proposed previously and remain the most promising next steps; this
+experiment does not by itself distinguish between them, but it does rule out one candidate root
+cause (custom implementation defects) that had not been directly tested before.
+
+**Consequences.** `src/muq_inversion/reference_hifigan/` and `scripts/train_reference_hifigan.py`
+now exist on this branch only, isolated from `main` by construction (no MuQ-path source file was
+touched; confirmed via lint + the full 47-test suite passing unchanged). No MuQ, EnCodec, BigVGAN,
+or Gate 4/5 work was performed, per the task's explicit constraints. `runs/reference_hifigan/`
+retains only `latest.pt`/`step_015000.pt` (969 MB total kept, ~13 GB of intermediate numbered
+checkpoints deleted after the run concluded, since this is a self-contained diagnostic rather than
+something needing mid-run resume).
+
+**Rollback plan.** This entire line of work lives on `experiment/reference-hifigan`, isolated from
+`main` and from every sibling experiment branch by construction (each branched independently off
+`main`). If abandoned, simply do not merge; no baseline files were touched.
+
+**Listening verdict (2026-09-09).** User's judgment: "There's a slight improvement in the
+reconstructed audio, especially on the disco song. However, the pop song still has noticeable
+artifacts." This is the first experiment in the whole Gate 3 investigation to produce *any*
+reported perceptual improvement -- every prior variant (capacity, EnCodec, ground-truth mel) was
+judged indistinguishable from the baseline. The improvement is partial and track-dependent (clear
+on disco.00049, not on pop.00012), consistent with the objective metrics: waveform correlation was
+higher for disco.00049 (0.1221) than pop.00012 (0.0728) in this experiment, the same relative
+ordering as the perceptual verdict, though both remain far below EnCodec's outlier band
+(0.6-0.7). This tentatively suggests the reference implementation's smaller, more constrained
+generator and/or its exact published hyperparameters modestly help within the shared tiny-overfit
+paradigm, without resolving the underlying bottleneck -- track-dependent residual artifacts point
+toward content-dependent phase/transient recovery difficulty (pop's percussive/transient-dense
+material vs. disco's) as still unresolved. This is a small, real signal, not a solved problem;
+the next experiment (per the user, not yet specified) will pursue a different angle rather than
+further tuning this same paradigm.

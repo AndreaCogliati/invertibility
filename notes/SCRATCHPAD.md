@@ -457,3 +457,191 @@ Then asked directly: "What conclusions can we make?"
   DECISIONS.md, MEMORY.md (durable conclusion), this SCRATCHPAD.md entry (as-it-happened log),
   and NEXT.md (resumability: current status, next command options, blockers) all in the same
   pass, no new code or experiments run.
+
+## 2026-09-08 -- New branch: experiment/reference-hifigan -- PLAN (written before any code changes)
+
+New branch created off `main` (same isolation pattern as the two sibling experiment branches --
+this one needs neither EnCodec nor our own MuQ/mel-encoder selector code). Re-read CLAUDE.md and
+all notes files first, per explicit instruction; confirmed this branch's notes are at the
+pre-EnCodec "capacity ruled out" state, same as the other two sibling branches.
+
+**Why this experiment exists.** Three custom-pipeline variants (MuQ, EnCodec, ground-truth mel)
+all sounded "mediocre" and indistinguishable to the user, despite wildly different objective
+metrics -- raising the hypothesis (not yet tested) that something in *our* implementation or
+training setup, not the representation, is the actual bottleneck. This experiment tests that
+hypothesis directly by removing our own generator/discriminator/loss code entirely and
+substituting a well-known, published, faithfully-reproduced implementation, trained on the exact
+representation it was designed for.
+
+**Chosen reference implementation: `jik876/hifi-gan`** (github.com/jik876/hifi-gan), the official
+PyTorch implementation released alongside Kong, Kim & Bae, "HiFi-GAN: Generative Adversarial
+Networks for Efficient and High Fidelity Speech Synthesis" (NeurIPS 2020). This is the canonical,
+most widely cited/reused HiFi-GAN codebase (the basis for most downstream reimplementations,
+including this project's own `models/generator.py` and `models/discriminators.py`). MIT licensed
+(confirmed by fetching `LICENSE` directly from the repo before deciding to vendor anything).
+
+**Fidelity plan -- what will be vendored essentially verbatim** (fetched the actual source files
+via `curl` from `raw.githubusercontent.com/jik876/hifi-gan/master/` rather than reconstructing
+from memory, to avoid subtle transcription errors):
+
+- `models.py`: `ResBlock1`, `Generator`, `DiscriminatorP`, `MultiPeriodDiscriminator`,
+  `DiscriminatorS`, `MultiScaleDiscriminator`, `feature_loss`, `discriminator_loss`,
+  `generator_loss` -- copied near-verbatim (only mechanical changes: relative imports instead of
+  `from utils import ...`, no `ResBlock2`/spectral-norm-only paths since `config_v1.json` doesn't
+  use them). Notably: `Generator.forward` sums the `num_kernels` resblock branches and *divides
+  by num_kernels* (a true average, not a raw sum) -- this differs slightly from this project's
+  own `MultiReceptiveFieldFusion`, which also averages, so the two are actually consistent here;
+  the real architectural differences are elsewhere (upsample factor breakdown, kernel sizes,
+  `init_weights`).
+- `utils.py`: `init_weights` (Conv layers initialized `normal_(mean=0.0, std=0.01)` -- notably
+  different from PyTorch's default Conv init, and from whatever init this project's own
+  `MiniGenerator` implicitly uses via PyTorch defaults) and `get_padding`.
+- `meldataset.py`'s `mel_spectrogram` function: uses `librosa.filters.mel` (not
+  `torchaudio.transforms.MelSpectrogram`) for the filterbank, manually reflect-pads by
+  `(n_fft - hop_size) // 2` each side then runs `torch.stft` with `center=False` (the same
+  convention independently arrived at for the sibling `mel-hifigan-sanity` branch's
+  `GroundTruthMelEncoder` -- convergent evidence that's the right way to get exact frame
+  alignment), magnitude via `sqrt(power_sum + 1e-9)`, natural-log compression with `clip_val=1e-5`.
+  **Required compatibility fix, not a design deviation:** the reference code calls
+  `librosa_mel_fn(sampling_rate, n_fft, num_mels, fmin, fmax)` positionally, which matches an
+  older librosa API; this project's installed `librosa==1.0.0` makes all of `mel()`'s parameters
+  keyword-only (confirmed via `inspect.signature`) -- will call it as
+  `librosa.filters.mel(sr=..., n_fft=..., n_mels=..., fmin=..., fmax=...)` instead. Same category
+  of fix as the earlier `transformers` version pin (documented, smallest possible change, not a
+  design choice).
+- `config_v1.json` hyperparameters, used as published: `resblock="1"`, `upsample_rates=[8,8,2,2]`,
+  `upsample_kernel_sizes=[16,16,4,4]`, `upsample_initial_channel=512`,
+  `resblock_kernel_sizes=[3,7,11]`, `resblock_dilation_sizes=[[1,3,5],[1,3,5],[1,3,5]]`,
+  `num_mels=80`, `n_fft=1024`, `hop_size=256`, `win_size=1024`, `fmin=0`, `fmax=8000`,
+  `fmax_for_loss=null` (i.e. the loss-mel uses the same fmax as the conditioning mel),
+  `sampling_rate=22050`, `adam_b1=0.8`, `adam_b2=0.99`, `learning_rate=0.0002`. Note:
+  `upsample_rates` product = 8*8*2*2 = 256 = `hop_size` exactly -- their own config is already
+  self-consistent for frame alignment, unlike this project's MuQ/EnCodec/mel configs which each
+  needed their `upsample_rates` hand-derived to match a measured ratio.
+- Optimizer: `torch.optim.AdamW` (not plain `Adam`, confirmed from `train.py`) with
+  `betas=(0.8, 0.99)` -- same betas this project already adopted for its own custom pipeline
+  (originally *inspired by* this exact reference, now confirmed directly from its source).
+- Loss composition (from `train.py`, exact): `loss_mel = L1(y_mel, y_hat_mel) * 45`;
+  `loss_gen_all = loss_gen_s + loss_gen_f + loss_fm_s + loss_fm_f + loss_mel` where
+  `feature_loss` already multiplies by 2 internally (`return loss*2`) and the adversarial/
+  discriminator losses are the standard unweighted LSGAN form. **No multi-resolution STFT loss at
+  all** -- this project's own custom pipeline added one; the reference doesn't use one.
+  **No reconstruction-only warmup** -- discriminators and all adversarial/feature-matching losses
+  are active from step 1, unlike this project's own `adversarial_warmup_steps=500`. Both of these
+  will be followed exactly as published, since the whole point is testing the *unmodified*
+  reference recipe, not our own hybrid.
+
+**Deviations required by this task's own explicit constraints (each will be flagged, not hidden):**
+
+1. **Sample rate 22050 Hz, not this project's usual 24kHz.** The reference's mel/upsample
+   configuration is defined entirely in sample counts tied to 22050 Hz; forcing 24kHz through it
+   unchanged would silently shift every timing assumption (hop/win length in ms) away from what
+   the architecture was actually designed and tuned for. Will resample the two GTZAN clips
+   (already available at 24kHz from this project's existing pipeline) down to 22050 Hz
+   specifically for this experiment, using this project's own `audio.py` resampling utility --
+   the most faithful choice given the goal is testing the *reference's own* assumptions, not
+   forcing our pipeline's sample rate onto it.
+2. **Segment size 2.0s (44032 samples), not the reference's default 8192 samples (~0.371s).**
+   The task explicitly asks for "the same 2.0-second crops" as this project's own Gate 3 setup.
+   44032 = 172 * 256 (an exact multiple of `hop_size`, giving exactly 172 mel frames and an exact
+   `172 * 256 = 44032`-sample generator output with no padding/cropping mismatch) -- the nearest
+   exact-frame-multiple to 2.0s * 22050 = 44100 (off by 68 samples / ~3ms, negligible and
+   explicitly documented rather than silently rounded).
+3. **Effectively batch size 1, alternating between the two fixed clips**, not their default
+   `batch_size=16` (which assumes a real multi-file dataset with a DataLoader/sampler this
+   2-clip overfit setting doesn't have). Matches this project's own Gate 3 recipe's approach
+   exactly (same clip-rotation pattern already used for MuQ/EnCodec/mel).
+4. **Fixed learning rate, no `ExponentialLR` decay.** The reference decays LR per-*epoch* across
+   a many-epoch, full-LJSpeech training run; naively treating our 15,000 individual steps as
+   15,000 "epochs" would decay `lr` by `0.999^15000` (~3e-7 of its start) into numerical
+   irrelevance well before training finishes -- clearly not what the schedule is for. Using a
+   fixed LR for the full run instead, which is what this project's own custom pipeline already
+   does.
+5. **15,000 steps on 2 fixed clips, not the reference's real training regimen** (full LJSpeech,
+   many epochs, effectively millions of generator updates). This is the single most important,
+   deliberately-flagged deviation: if the *exact* published architecture+loss+optimizer recipe
+   still sounds mediocre at this project's own tiny-overfit budget, that's strong evidence the
+   bottleneck is the tiny-overfit training regime itself (Gate 3's own scale), not this project's
+   custom generator/discriminator/loss code specifically -- directly answering this experiment's
+   purpose. If it sounds *much* better than our custom pipeline at the identical step budget,
+   that would point squarely at our own implementation/training setup instead.
+6. **No distributed training, mixed precision, or the reference's own checkpoint/resume
+   scaffolding** -- irrelevant complexity for a single-GPU, single 15,000-step run. Will still
+   follow this project's own atomic-checkpoint discipline (reusing `checkpoint.py` where the
+   shapes are compatible), since that's a standing rule of this repo regardless of which
+   generator architecture is in use, not specific to any one experiment.
+
+**Where the vendored code will live:** `src/muq_inversion/reference_hifigan/` (new package:
+`generator.py`, `discriminators.py`, `mel.py`, `__init__.py`), each file headed with a comment
+crediting the exact source (`https://github.com/jik876/hifi-gan`, MIT License, Copyright (c) 2020
+Jungil Kong) and noting exactly which lines were mechanically adapted (imports only) vs. which
+hyperparameters were deliberately changed (listed above) vs. left untouched. A new, separate
+script `scripts/train_reference_hifigan.py` (not threaded through this project's own
+`config.py`/`train.py`/`cli.py` machinery, since the task explicitly says not to reuse the custom
+MRF generator "unless absolutely necessary" and this experiment is meant to be as close to
+"someone else's code, minimally glued to our data" as possible) will reuse this project's own
+`audio.py`/`data.py` for GTZAN loading (package code, not a notebook, per CLAUDE.md's coding
+standards) but implement its own training loop using the vendored reference architecture and its
+exact loss recipe (mel*45, no STFT term, no warmup).
+
+**What this experiment is NOT claiming to be:** a full reproduction of the original paper's
+published audio quality (that used the complete LJSpeech corpus and a training budget many
+orders of magnitude larger than 15,000 steps on 2 clips) -- it is specifically "does the
+unmodified, published architecture+loss+optimizer recipe do noticeably better or worse than our
+own custom pipeline, under the same tiny-overfit budget this project has used throughout its
+Gate 3 investigation."
+
+## Reference HiFi-GAN run results (2026-09-08, `experiment/reference-hifigan` branch)
+
+100-step timing/smoke test (`scripts/_timing_test.py`, since deleted) confirmed the vendored
+pipeline runs end-to-end on `mps`: mel shape `(1, 80, 172)`, `frames_per_second=86.1328`,
+`samples_per_frame=256.0000` exactly, generator params `13,936,130`, ~0.48s/step. Full run
+launched via `uv run python scripts/train_reference_hifigan.py`, PID 86140, backgrounded with
+`&` + `disown` (note: combining this with the Bash tool's own `run_in_background: true` repeated
+the exact mistake already logged earlier in this file -- the tool reported "exited with code 0"
+immediately because only the outer shell wrapper exited; the real process kept running
+detached and was tracked correctly afterward via `kill -0 <pid>` + a persistent `Monitor`, not
+by trusting the tool's own completion signal).
+
+Full 15000-step run, `Gate 3 (reference HiFi-GAN) PASSED`:
+```
+step 1/15000:     gen_loss_total=168.3929 mel_l1=3.5759 disc_loss=8.0171
+step 15000/15000: gen_loss_total=28.3197  mel_l1=0.2333 disc_loss=2.3040
+mean mel L1 (first 10 steps): 1.3644 -> mean mel L1 (last 10 steps): 0.2372
+final/initial ratio: 0.1739 (PASS threshold <= 0.5; best ratio of any experiment this project has run)
+```
+Training was stable throughout: `disc_loss` oscillated in a healthy 1.5-3.2 range for the full
+run (no collapse to 0, no runaway growth), matching the qualitative stability of every prior
+experiment once Adam betas were fixed to `(0.8, 0.99)`.
+
+Wall time: checkpoints at `step_001000` (20:03) through `step_015000`/`latest.pt` (21:42) --
+**~99 minutes for 15000 steps**, matching the smoke-test extrapolation (~120 min upper bound;
+actual came in faster, plausibly because MPS overhead amortizes better over a longer run).
+Checkpoints written every 1000 steps as required; intermediate numbered checkpoints deleted after
+the run to reclaim disk (15GB -> 1.9GB), keeping only `latest.pt` and `step_015000.pt` -- this
+run is a self-contained diagnostic, not something that needs mid-run resume, so the project's
+"keep periodic numbered checkpoints" rule was relaxed deliberately here (documented, not silent).
+`latest.pt` size: 1,016,454,967 bytes (969.2 MB) -- includes full G+D weights and both AdamW
+optimizer states (matching this project's own checkpoint discipline), despite the generator
+itself having 4-4.4x *fewer* parameters than any of this project's own MRF-1024 generators
+(13.9M vs. 51.7-61.6M). The larger checkpoint despite fewer generator params is presumably
+serialization overhead specific to `_save_atomic`'s own state dict (not investigated further --
+checkpoint size is a reported metric per the task spec, not a load-bearing one for the
+experiment's actual question).
+
+Post-hoc mel/waveform correlation computed directly from the written WAVs (script in scratch,
+using the vendored `mel_spectrogram` function itself for the mel-domain comparison, so the
+metric uses the reference implementation's own preprocessing, not this project's `torchaudio`
+based one):
+```
+pop.00012:    mel_l1=0.2867  mel_corr=0.9496  wav_corr=0.0728
+disco.00049:  mel_l1=0.2989  mel_corr=0.9480  wav_corr=0.1221
+```
+
+**Immediate interpretation:** the reference implementation's waveform correlation (0.073/0.122)
+lands in the *same low range* as this project's own MuQ+MRF-1024 (0.073/0.104) and
+ground-truth-mel+MRF-1024 (0.059/-0.010) results -- nowhere near EnCodec's outlier
+(0.682/0.602). Mel correlation (0.9496/0.9480) is comparable to, if slightly below, the custom
+pipeline's own ground-truth-mel result (0.944/0.966). See `notes/DECISIONS.md#reference-hifigan`
+for the full comparison table and analysis; audio not yet sent to the user for a listening
+verdict as of this note.
