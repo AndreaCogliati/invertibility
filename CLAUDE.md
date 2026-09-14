@@ -110,7 +110,7 @@ Dependency compatibility on Apple Silicon must be verified before implementation
 │   ├── DECISIONS.md
 │   └── NEXT.md
 ├── tasks/
-│   └── Task-NN.md           # tracked; task prompts given to the assistant
+│   └── TASK-NN.md           # tracked; task prompts given to the assistant
 └── scripts/
     └── inspect_checkpoint.py
 ```
@@ -287,7 +287,7 @@ At the start of every session, read `CLAUDE.md`, `notes/MEMORY.md`, `notes/DECIS
 
 ### `tasks/`
 
-Tracked, append-only record of the task prompts given to the assistant, one file per task (e.g. `tasks/Task-01.md`). Each file is the verbatim brief, not a summary. Do not edit a task file after the fact; if scope changes, record that in `notes/DECISIONS.md` and start a new task file for the next request. Read the relevant task file for full context and intent before resuming work on it.
+Tracked, append-only record of the task prompts given to the assistant, one file per task (e.g. `tasks/TASK-01.md`). Each file is the verbatim brief, not a summary. Do not edit a task file after the fact; if scope changes, record that in `notes/DECISIONS.md` and start a new task file for the next request. Read the relevant task file for full context and intent before resuming work on it.
 
 ## Resource Discipline on the M4 Max
 
