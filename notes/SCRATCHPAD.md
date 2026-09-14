@@ -893,3 +893,82 @@ the task's own pre-registered decision rule -- full write-up in
 verdict not yet in hand as of this note -- treat the "Outcome B" reading as provisional until
 confirmed by ear, per this project's own repeated experience of metrics and listening
 disagreeing (muq-to-dac-mlp, muq-to-dac-temporal-conv).
+
+## 2026-09-14: Dense-audio-coverage rerun (tasks/TASK-02.md)
+
+Hypothesis: was TASK-01's negative result caused by using only ~13.3% of GTZAN, rather than the
+pipeline itself?
+
+Commands:
+```
+uv run python scripts/build_dense_gtzan_manifest.py    # 14976 crops, 999 tracks, matches estimate exactly
+uv run python scripts/precompute_dense_cache.py          # 354.5s, 10.36GB cache (est. 10.35GB)
+uv run python -u scripts/train_spectrogram_to_dac_dense.py   # sanity PASSED, 450000 steps, 4677s train, 3805s eval
+uv run ruff check .    # clean
+uv run pytest -q       # 79 passed
+```
+
+Training curve, same turbulent character as every prior run in this line: val_mse readings at
+75k/150k/225k/300k/375k/450k steps were 17.17/31.32/17.57/1051.51/26.03/20.03 -- one huge but
+finite spike at step 300000, recovered by 375000, no stop condition triggered.
+
+Best-by-val-MSE checkpoint: step 1000/450000 (again the earliest possible selection point --
+third experiment in a row with this pattern, see NEXT.md).
+
+Three-way comparison (val):
+                    MuQ->DAC   TASK-01(sparse)  TASK-02(dense)
+MSE                 17.29      16.54            16.44
+cosine               0.230      0.298            0.293
+STFT distance         2.65       3.02             3.09
+wav corr (~0)        0.0002    -0.0008          -0.0014
+norm ratio            n/a       0.364            0.322
+variance ratio        n/a       0.110            0.086
+lag1 autocorr pred     n/a       0.970            0.952
+
+TASK-01 vs TASK-02: no metric moved meaningfully in the "more data helps" direction; norm/
+variance ratios actually moved slightly further from 1.0. Outcome C per the task's own
+pre-registered rule: increasing coverage doesn't address the pathology.
+
+30 listening WAVs written to artifacts/dense_spectrogram_control/, same 6 tracks as TASK-01
+(t=4.0s vs t=5.0s). Sent to the user alongside TASK-01's for a direct comparison. Full write-up:
+notes/DECISIONS.md#dense-spectrogram-positive-control.
+
+## 2026-09-14: TASK-03 (BlueHive + W&B instrumentation)
+
+No SSH/sbatch access to BlueHive from this environment -- surfaced to user via AskUserQuestion
+before starting, user confirmed: build everything runnable, validate locally, hand off cluster
+execution. Found real W&B credentials in ~/.netrc (andrea-cogliati-university-of-rochester).
+
+Commands:
+```
+uv add wandb
+uv run ruff check .; uv run pytest -q   # 103 passed
+uv run python -u scripts/train_spectrogram_to_dac_wandb.py --steps 50 --wandb-mode disabled     # PASSED
+uv run python -u scripts/train_spectrogram_to_dac_wandb.py --steps 2500 --wandb-mode online      # PASSED, real run
+uv run python scripts/analyze_early_checkpoint_selection.py
+```
+
+Online smoke test: real W&B run at wandb.ai/andrea-cogliati-university-of-rochester/
+muq-invertibility/runs/gz3uffcf. 5 files, 9 media, 20 artifacts synced, zero errors. Step-1000
+checkpoint val_mse=16.442551 -- exact match to TASK-02's own number, confirming determinism.
+
+Early-checkpoint analysis (the interesting part): checked TASK-01/TASK-02's full training_curves
+against (a) rank of the step-1000 checkpoint among all checkpoints by val_mse, (b) a trivial
+"predict the mean DAC vector" baseline computed directly from the cache, (c) correlation between
+val_mse and val_cos across checkpoints.
+
+Results:
+- TASK-01: step 1000 is rank 1/60 (never beaten). Baseline MSE 17.65 vs selected 16.54 (0.937x).
+  corr(mse,cos) excl. spikes = -0.72.
+- TASK-02: step 1000 is rank 1/450 (never beaten across 449000 more steps!). Baseline MSE 17.63
+  vs selected 16.44 (0.933x). corr(mse,cos) excl. spikes = -0.72. Best cosine (0.300) occurs at
+  step 443000 with MSE 16.60 -- WORSE than step 1000's MSE, so MSE-only selection structurally
+  can't find it even though it's a real late-training improvement.
+
+Conclusion: regression-to-the-mean, not instability/noise. Same mechanism as the norm/variance
+collapse already documented -- a near-constant prediction is the MSE-cheap, norm-collapsed, and
+maximally-smooth solution simultaneously, for this loss/target combination.
+
+Full write-up: notes/DECISIONS.md#task03-bluehive-wandb. bluehive/README.md +
+bluehive/run_task03.slurm are the handoff -- genuinely untested against a real cluster, flagged
+as such.

@@ -20,6 +20,7 @@ dependencies = [
     "torchaudio>=2.11.0",
     "tqdm>=4.70.0",
     "transformers==4.55.0",
+    "wandb>=0.30.0",
 ]
 
 [project.scripts]

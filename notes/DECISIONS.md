@@ -1593,3 +1593,245 @@ spectrogram_control/report.json` + 30 listening WAVs (git-ignored).
 
 **Rollback plan.** Entirely additive; no baseline MuQ-to-DAC file was modified. Deleting the six
 new files and three new artifact/cache/run directories fully reverts this experiment.
+
+## dense-spectrogram-positive-control: More audio coverage does not move the pathology -- Outcome C
+
+**Context (`tasks/TASK-02.md`).** [[spectrogram-positive-control]] used only ~13.3% of GTZAN's
+audio (1998 sparse 2-crops/track). This experiment tests the remaining confound directly: was
+that result caused by insufficient effective training data, rather than the pipeline/objective?
+Single-variable change from TASK-01: audio coverage only. Representation, architecture, loss,
+optimizer all held byte-for-byte identical.
+
+**Dataset construction, estimated before implementation then measured exactly (per this task's
+explicit requirement), Option B (non-overlapping 2.0s crops) chosen over A (50% overlap, ~2x
+redundant audio per second) and C (longer crops, would change the representation's temporal
+grid) -- simplest option maximizing coverage with zero redundancy, full rationale in
+`scripts/build_dense_gtzan_manifest.py`'s docstring:**
+
+| | TASK-01 (sparse) | TASK-02 (dense) | ratio |
+| --- | --- | --- | --- |
+| train crops / tracks | 1584 / 792 | 11873 / 792 | 7.496x |
+| val crops / tracks | 188 / 94 | 1409 / 94 | 7.495x |
+| test crops / tracks | 226 / 113 | 1694 / 113 | 7.496x |
+| total audio | 3996s (66.6 min) | 29952s (499.2 min) | 7.496x |
+| % of GTZAN's ~29970s | 13.3% | 99.94% | -- |
+
+Same 999-track split as every prior experiment in this investigation (Gate 1's committed
+assignment, verified 0 mismatches against `more_data_crops.csv`'s track->split map before
+building anything). Storage estimated at ~10.35GB (DAC 9.20GB + mel 1.15GB) before running the
+precompute script; measured actual: **10.36GB** -- estimate held almost exactly.
+
+**Precompute optimization (engineering only, no experimental variable touched):**
+`scripts/precompute_dense_cache.py` resamples each of the 999 tracks once and slices all ~15
+crops from the in-memory waveform, instead of TASK-01's per-crop `load_crop_waveform` (which
+would have re-read and re-resampled entire tracks ~15x each at this crop density). Measured:
+14976 crops encoded (DAC + log-mel) in **354.5s** -- faster than a linear extrapolation from
+TASK-01's combined MuQ+DAC precompute would suggest, since this variant skips MuQ entirely.
+
+**Step budget, scaled and documented before training, per this investigation's own established
+precedent** (`train_muq_to_dac_more_data.py` scaled steps with crop count "to keep a comparable
+per-crop exposure count"): STEPS = 60000 x (11873/1584 = 7.4956) -> **450000** (rounded), so the
+larger training set doesn't get systematically under-trained relative to TASK-01's ~37.9 passes
+over its crops. `VAL_EVERY` held literally at TASK-01's 1000-step cadence per this task's explicit
+"same evaluation frequency" instruction (450 checkpoints instead of 60, an accepted consequence,
+not a deviation). Full reasoning in `scripts/train_spectrogram_to_dac_dense.py`'s docstring.
+
+**Training: 4677s (78 min, 10.39 ms/step -- includes the extra validation-frequency cost).**
+Tiny-subset sanity check passed before the real run. Turbulent through much of the budget, same
+character as every prior experiment in this line (val MSE spiked to 1051 at step 300000, finite,
+recovered by step 375000 -- no non-finite-loss stop triggered). **Best-by-validation-MSE
+checkpoint again landed at step 1000 -- this time step 1000 of 450000, an even more extreme case
+of the "early lucky dip" pattern than TASK-01's own step-1000-of-60000 selection or
+[[muq-layer-sweep]]'s step-1500-of-45000.** This is now the third independent experiment in this
+investigation where validation-MSE-only selection picked the very first or a very early
+checkpoint; worth treating as a structural property of this training regime, not a one-off, in
+any future experiment using this pipeline. Evaluation phase (full 3-condition decode over all
+14976 crops) took 3805s (63 min) -- the dominant single cost of this run.
+
+**Result -- direct three-way comparison (val split):**
+
+| metric | MuQ->DAC (more_data) | TASK-01 (sparse spectrogram) | TASK-02 (dense spectrogram) |
+| --- | --- | --- | --- |
+| best-checkpoint val MSE | 17.29 | 16.54 | 16.44 |
+| val cosine similarity | 0.230 | 0.298 | 0.293 |
+| val STFT distance (pred vs. oracle) | 2.65 | 3.02 | 3.09 |
+| val waveform correlation (pred vs. oracle) | 0.0002 | -0.0008 | -0.0014 |
+| val norm ratio (pred/oracle) | n/a (not computed) | 0.364 | 0.322 |
+| val variance ratio (pred/oracle) | n/a (not computed) | 0.110 | 0.086 |
+| val lag-1 autocorr, predicted / oracle | n/a (not computed) | 0.970 / 0.092 | 0.952 / 0.089 |
+
+**TASK-01 and TASK-02 are statistically indistinguishable given this pipeline's known
+run-to-run noise (e.g. [[muq-layer-sweep]]'s MPS-nondeterminism tolerance discussion).** MSE and
+cosine moved by ~1-2% in either direction; STFT distance got marginally worse with more data, not
+better; waveform correlation stayed at the same noise floor; norm and variance ratios moved
+*slightly further from* 1.0 (i.e. marginally worse collapse) with 7.5x more audio, not toward it;
+lag-1 autocorrelation over-smoothing is essentially unchanged (0.970 -> 0.952 predicted, both
+extreme vs. oracle's ~0.09). **None of the five things a genuine data-coverage effect would have
+to move (per this task's own Outcome A criteria: better latent metrics, better audio metrics,
+reduced norm collapse, reduced variance collapse, reduced smoothing) moved in the expected
+direction by any margin exceeding this pipeline's demonstrated run-to-run noise.**
+
+**Interpretation -- Outcome C, cleanly, per this task's own pre-registered rule.** "Performance
+is essentially unchanged" despite going from ~13.3% to ~99.94% of GTZAN's audio (7.5x more crops,
+7.5x more training steps to match). **Increasing audio coverage does not meaningfully address the
+failure mode.** Combined with [[spectrogram-positive-control]]'s own finding (a substantially
+richer per-frame representation than MuQ hit the same wall), this investigation has now ruled
+out, across two independent single-variable experiments, both "wrong/insufficient input
+representation" and "insufficient training data" as explanations for the norm-collapse/
+over-smoothing/near-zero-waveform-correlation pathology. **The current formulation likely has a
+deeper issue** -- per this task's own Outcome C interpretation, attention should now shift to
+target formulation, DAC latent geometry, and the regression objective itself (MSE + cosine
+directly on a high-variance, only loosely metric continuous residual-VQ latent), not further data
+or representation scaling.
+
+**Listening verdict: pending.** 30 WAVs written to `artifacts/dense_spectrogram_control/`, same 6
+tracks as TASK-01's listening package (val: blues.00014/00029/00034, test: blues.00005/00024/
+00025), at the closest available crop on this task's even-second grid (t=4.0s vs. TASK-01's
+t=5.0s -- documented in the training script, not the same instant but the same tracks). Sent to
+the user for direct comparison against TASK-01's WAVs.
+
+**Consequences.** New files only: `scripts/build_dense_gtzan_manifest.py`,
+`scripts/precompute_dense_cache.py`, `scripts/train_spectrogram_to_dac_dense.py`,
+`tests/test_dense_manifest.py` (6 new tests, full suite now 79 passing). No TASK-01 or earlier
+file modified. New artifacts: `data/manifests/dense_crops.csv` (tracked, per CLAUDE.md's manifest
+convention), `data/cache/dense/mel_dac_cache.pt` (10.36GB, git-ignored), `runs/
+dense_spectrogram_control/checkpoints/best.pt` (git-ignored), `artifacts/
+dense_spectrogram_control/report.json` + 30 listening WAVs (git-ignored).
+
+**Rollback plan.** Entirely additive; no baseline or TASK-01 file was modified. Deleting the four
+new files, `data/manifests/dense_crops.csv`, and the three new artifact/cache/run directories
+fully reverts this experiment.
+
+## task03-bluehive-wandb: W&B instrumentation built and validated; BlueHive run handed off; early-checkpoint mechanism identified
+
+**Context (`tasks/TASK-03.md`).** After [[spectrogram-positive-control]] and
+[[dense-spectrogram-positive-control]] ruled out representation and data-coverage as
+explanations for the norm-collapse/over-smoothing/early-checkpoint pathology, this task asks for
+(1) a reproduction of TASK-02 on a different hardware/software environment (BlueHive) and (2)
+deep W&B instrumentation to investigate the recurring pathologies, especially the early-
+checkpoint-selection phenomenon.
+
+**Access gap, surfaced to the user before starting (not worked around silently).** This
+environment has no SSH access to BlueHive and no `sbatch`/`squeue`/`srun` locally -- the actual
+cluster run cannot be executed here. A real W&B API key was found in `~/.netrc`
+(`andrea-cogliati-university-of-rochester`), so genuine W&B logging *is* possible. User confirmed
+the scope: build everything runnable, validate it with real (short) local runs, hand off the
+actual cluster execution.
+
+**CUDA/MPS-agnostic device selection (`src/muq_inversion/logging_utils.py`).**
+`select_device`'s `"auto"` now prefers CUDA (BlueHive) then MPS (this machine) then CPU-if-
+allowed, preserving every existing call site's behavior unchanged on this Mac (`torch.cuda.is_available()`
+is simply always `False` here). `capture_environment_manifest` gained `cuda_available`,
+`cuda_device_name`, `cuda_device_count`, `hostname`, and `slurm_job_id` (from `$SLURM_JOB_ID`)
+fields, needed for this task's "record all runtime environment information" requirement. 9 new
+tests (`tests/test_device_selection.py`, using `monkeypatch` to simulate both backends -- this
+machine has no real CUDA to test against).
+
+**Diagnostics modules, new and unit-tested independent of any training script:**
+
+- `src/muq_inversion/grad_diagnostics.py`: total/max/min gradient norm plus per-submodule norm
+  (`input_projection`, `temporal_conv`), operating on any `nn.Module` right after `backward()`.
+  4 tests, including a synthetic "one submodule gets zero gradient" case to confirm collapse is
+  actually detectable, not silently masked.
+- `src/muq_inversion/latent_diagnostics.py` extended (additive fields, no existing test broke):
+  `vector_norm_median` (median more robust than mean to the huge-but-finite MSE spikes this
+  pipeline has shown) and `frame_to_frame_variance_mean` (a second, complementary over-smoothing
+  signal to lag-1 autocorrelation), both explicit TASK-03 requirements.
+- `src/muq_inversion/wandb_logging.py`: thin wrapper isolating all `wandb` SDK calls so the
+  training script's scientific-formulation logic stays readable and this module's network-free
+  parts (run-name generation, run metadata, top-10-checkpoint-table selection) are independently
+  testable without a live connection. 11 tests, all network-free.
+
+**Training script (`scripts/train_spectrogram_to_dac_wandb.py`): TASK-02's exact loop, plus
+instrumentation only.** Manifest, cache, architecture, loss, optimizer, LR/betas, default step
+budget (450000), checkpoint-selection rule, and evaluation protocol are unchanged from TASK-02.
+Four deliberate deviations, documented in the script's own module docstring per this task's "any
+deviation must be documented and justified" instruction: (1) STFT distance/waveform correlation
+computed every validation cycle only on the same fixed 6-track subset used for audio logging, not
+the full val/test set (TASK-02's own full-split decode pass took 3805s -- doing that at all 450
+checkpoints would take days; the full-split numbers are still computed once at the end, matching
+TASK-02's exact protocol, for the reproduction table); (2) audio logged to W&B every 10000 steps,
+not every validation cycle; (3) gradient stats logged every 100 steps, not literally every step;
+(4) a `--steps` CLI override exists ONLY for infrastructure validation, never for the real
+reproduction (enforced by an `is_smoke_test` flag that also skips the expensive full-split final
+evaluation, replacing it with a 5-crops-per-split reduced pass that still exercises every code
+path).
+
+**Local validation, two real runs (this machine, MPS, not BlueHive -- clearly labeled as such in
+every log line and report field, never presented as a BlueHive result):**
+
+1. `--steps 50 --wandb-mode disabled`: full pipeline, no network. PASSED end-to-end (sanity
+   check, training, reduced eval, report write) with zero errors.
+2. `--steps 2500 --wandb-mode online`: real run against the user's actual W&B account. Live at
+   `https://wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility/runs/gz3uffcf`.
+   Synced 5 W&B files, 9 media (audio) files, 20 artifact files (checkpoint, report, config,
+   manifest) with zero errors. Confirmed working: config panel (hyperparameters + git commit +
+   hostname + CUDA/MPS flags), per-step loss/gradient logging, per-validation-cycle prediction-
+   statistics and temporal-diagnostics logging, checkpoint tables, correlation scatter plots,
+   audio logging, artifact upload. **This run's best checkpoint landed at step 1000 with
+   val_mse=16.442551 -- an exact match to TASK-02's own step-1000 result**, confirming this
+   pipeline is fully deterministic given the same seed/data/code (same `torch.manual_seed(0)`,
+   same data order), not merely similar.
+
+**BlueHive handoff (`bluehive/README.md`, `bluehive/run_task03.slurm`).** A SLURM job script
+with explicitly marked `CHANGE_ME` placeholders (partition, account, mail) for the allocation
+details this environment cannot know, a resource-request justification (1 GPU is sufficient --
+this model is 15.9M params with no batching, so it's not GPU-memory- or FLOP-bound; the 450000
+sequential small steps are the actual cost), and a README covering: getting the code onto the
+cluster, `uv sync` (CUDA wheel resolves automatically, no special index needed for this project's
+torch pin), transferring or regenerating the 10.36GB dense cache, W&B credential setup, filling
+in the placeholders, submitting, and what to record afterward (GPU type, wall time, driver
+version) to complete the reproduction-comparison table TASK-03 asks for. **The actual cluster run
+and the M4-Max-vs-BlueHive comparison table are explicitly left for the user to complete and
+report back** -- not fabricated here.
+
+**Additional Investigation: why does the best checkpoint land so early? Evidence-based, not
+speculative, per this task's own instruction -- `scripts/analyze_early_checkpoint_selection.py`,
+read-only over TASK-01/TASK-02's existing training curves plus one cheap new computation:**
+
+1. **The first validation checkpoint (step 1000) is the GLOBAL minimum validation MSE of the
+   entire run in both TASK-01 (rank 1 of 60) and TASK-02 (rank 1 of 450)** -- never beaten again
+   despite up to 449000 further gradient steps. Not "an early lucky dip somewhere in a noisy
+   landscape" -- literally never surpassed.
+2. **A trivial baseline -- predicting the dataset's mean DAC latent vector, constant across every
+   frame and every input, completely ignoring the spectrogram -- achieves val MSE within 6-7% of
+   that "best" checkpoint** (16.54/17.65 = 0.937x baseline for TASK-01; 16.44/17.63 = 0.933x for
+   TASK-02). The model's globally-best-by-MSE checkpoint is barely distinguishable from doing
+   nothing.
+3. **Validation MSE and validation cosine similarity are genuinely anti-correlated across
+   checkpoints** (r=-0.72 in both runs, excluding the large turbulence-spike outliers) -- lower
+   MSE checkpoints tend to have *worse* cosine similarity, not better. TASK-02's own single best
+   cosine-similarity checkpoint (0.300, step 443000, near the very end of training) has an MSE of
+   16.60 -- *higher* than step 1000's 16.44 -- so pure validation-MSE selection can never find it,
+   even though 449000 more steps did eventually produce a real (if small) cosine improvement.
+4. **This rules out "optimization instability" and "pure validation-noise fluctuation" as the
+   primary mechanism** (item 1: the run does reach many later stable low-MSE regions, just never
+   strictly below step 1000's; item 2's baseline match is too systematic across two independent
+   runs to be measurement noise) **and instead directly supports regression-to-the-mean**: MSE
+   against a target with large but only weakly input-conditioned variance has a cheap, easy
+   near-optimum at the dataset mean, reachable in ~1000 steps of unbatched SGD; genuine temporal/
+   conditional structure (what the cosine term rewards) costs MSE to express, so pure
+   validation-MSE checkpoint selection is structurally biased toward the least-informative,
+   most-collapsed solution available at any point in training. **This is the same mechanism as
+   the norm/variance collapse documented in both prior TASK-01/02 write-ups, not a separate
+   phenomenon** -- a near-constant prediction is simultaneously the MSE-cheap solution, the
+   norm-collapsed solution, and the maximally over-smoothed (high lag-1-autocorrelation)
+   solution, because for this target/loss combination those are the same solution.
+
+**Consequences.** New files: `src/muq_inversion/grad_diagnostics.py`,
+`src/muq_inversion/wandb_logging.py`, `scripts/train_spectrogram_to_dac_wandb.py`,
+`scripts/analyze_early_checkpoint_selection.py`, `bluehive/README.md`,
+`bluehive/run_task03.slurm`, `tests/test_device_selection.py`, `tests/test_grad_diagnostics.py`,
+`tests/test_wandb_logging.py` (24 new tests, full suite now 103 passing). Modified additively:
+`src/muq_inversion/logging_utils.py` (CUDA support, new manifest fields -- no existing behavior
+changed on this machine), `src/muq_inversion/latent_diagnostics.py` (two new `LatentStats`
+fields), `pyproject.toml`/`uv.lock` (added `wandb`), `.gitignore` (added `wandb/`). No TASK-01/
+TASK-02 file touched. New artifacts: `artifacts/task03_wandb_repro/` (report + config from both
+local validation runs + `early_checkpoint_analysis.json`), a live W&B project at
+`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility`.
+
+**Rollback plan.** Entirely additive except the two small, backward-compatible extensions noted
+above (both verified via the full existing test suite passing unchanged). Deleting the new files/
+directories and reverting the two modified files' diffs fully reverts this task's code. The W&B
+project/runs live on wandb.ai and are not affected by any local git rollback -- delete via the
+W&B UI/API separately if desired.

@@ -307,4 +307,54 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   0.27), so this did not appear to be misleading here. Full write-up, comparison table, and
   interpretation in [[spectrogram-positive-control]]. 11 new tests (`tests/
   test_spectrogram_control.py`), full suite 73 passing. 30 listening WAVs written to
-  `artifacts/spectrogram_control/`; listening verdict pending. 15 new tests added (`tests/test_layer_sweep.py`), full suite 62 passing.
+  `artifacts/spectrogram_control/`; listening verdict pending.
+- Dense-audio-coverage rerun CONCLUDED (2026-09-14, `tasks/TASK-02.md`): tested whether
+  [[spectrogram-positive-control]]'s result was caused by insufficient training data (only
+  ~13.3% of GTZAN used, 1998 sparse crops) rather than the pipeline itself, by rebuilding the
+  exact same experiment on ~100% of GTZAN's audio (14976 non-overlapping 2.0s crops, 792/94/113
+  track-disjoint train/val/test tracks -- same split, 7.50x more crops) with the step budget
+  scaled 60000 -> 450000 to preserve per-crop exposure. Representation, architecture, loss,
+  optimizer held byte-for-byte identical to TASK-01. **Result: TASK-01 and TASK-02 are
+  statistically indistinguishable.** Val MSE 16.54 -> 16.44, val cosine 0.298 -> 0.293, val STFT
+  distance 3.02 -> 3.09 (marginally worse), waveform correlation to oracle stayed at the same ~0
+  noise floor, and norm/variance collapse ratios moved slightly *further* from 1.0 (0.364 ->
+  0.322 norm ratio, 0.110 -> 0.086 variance ratio) rather than toward it -- none of the five
+  things a genuine data-coverage effect should move (per the task's own pre-registered Outcome A
+  criteria) moved in the expected direction by any margin exceeding this pipeline's known
+  run-to-run noise. **Conclusion: Outcome C -- increasing audio coverage does not meaningfully
+  address the failure mode.** Combined with [[spectrogram-positive-control]], this rules out both
+  "wrong/insufficient input representation" and "insufficient training data" as explanations for
+  the norm-collapse/over-smoothing pathology across two independent single-variable experiments;
+  the deeper issue is now most plausibly the target formulation / regression objective onto DAC's
+  raw continuous latent, not representation or data scale. Best checkpoint again selected at step
+  1000 -- this time of 450000, the third independent experiment in this investigation with this
+  "early lucky dip" checkpoint-selection pattern ([[muq-layer-sweep]], TASK-01, this one).
+  6 new tests (`tests/test_dense_manifest.py`), full suite 79 passing. 30 listening WAVs (same 6
+  tracks as TASK-01) written to `artifacts/dense_spectrogram_control/`; listening verdict pending.
+  Full write-up in [[dense-spectrogram-positive-control]].
+- BlueHive/W&B instrumentation built and validated; early-checkpoint mechanism identified
+  (2026-09-14, `tasks/TASK-03.md`): this environment has no SSH/sbatch access to BlueHive, so the
+  actual cluster reproduction is handed off (`bluehive/README.md`, `bluehive/run_task03.slurm`) --
+  not fabricated here. Built CUDA/MPS-agnostic device selection, gradient/latent/W&B diagnostics
+  modules (`grad_diagnostics.py`, extended `latent_diagnostics.py`, `wandb_logging.py`), and
+  `scripts/train_spectrogram_to_dac_wandb.py` (TASK-02's exact scientific formulation, plus
+  instrumentation only -- documented deviations for cost control). Validated with two real local
+  runs on this machine (MPS, NOT BlueHive): a disabled-mode dry run and a real online run against
+  the user's actual W&B account (`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility`,
+  run `gz3uffcf`), both clean, zero errors. The online run's best checkpoint (step 1000,
+  val_mse=16.442551) exactly matched TASK-02's own step-1000 result, confirming this pipeline is
+  fully deterministic given the same seed/data/code. **Additional-investigation finding (evidence-
+  based, `scripts/analyze_early_checkpoint_selection.py`, read-only over TASK-01/TASK-02's
+  existing curves): the early-checkpoint phenomenon is regression-to-the-mean, not optimization
+  instability or validation noise.** The first validation checkpoint (step 1000) is the GLOBAL
+  minimum validation MSE across the entire run in BOTH TASK-01 (rank 1 of 60) and TASK-02 (rank 1
+  of 450) -- never beaten again. A trivial "predict the dataset's mean DAC vector, ignore the
+  input entirely" baseline achieves MSE within 6-7% of that "best" checkpoint in both runs
+  (0.937x/0.933x). Validation MSE and cosine similarity are genuinely anti-correlated across
+  checkpoints (r=-0.72 in both runs, excluding turbulence-spike outliers) -- TASK-02's single best
+  cosine checkpoint (step 443000, near the end of training) has *higher* MSE than step 1000, so
+  pure-MSE selection can never find it. **This is the same underlying mechanism as the norm/
+  variance collapse documented in TASK-01/TASK-02: a near-constant prediction is simultaneously
+  the MSE-cheap solution, the norm-collapsed solution, and the maximally over-smoothed solution,
+  because for this target/loss combination those are the same solution.** 24 new tests, full
+  suite 103 passing. Full write-up in [[task03-bluehive-wandb]].

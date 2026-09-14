@@ -2,127 +2,136 @@
 
 ## Current gate
 
-Spectrogram-to-DAC positive control (`tasks/TASK-01.md`, code committed alongside
-`experiment/muq-layer-sweep`). **Result: the training pipeline itself cannot productively exploit
-a substantially richer input representation either -- audio-relevant metrics (STFT distance,
-waveform correlation) did not improve over MuQ, and severe norm/variance collapse plus extreme
-over-smoothing persist essentially unchanged.** Full reasoning in
-[[DECISIONS.md#spectrogram-positive-control]]. Do not proceed to the optional mel-bin-ablation
-follow-up, model scaling, or any new representation experiment without further direction (per
-this task's own instruction to prioritize diagnosis over model improvement).
+BlueHive/W&B instrumentation for `tasks/TASK-03.md` -- code built and validated locally, actual
+cluster run handed off to the user (this environment has no BlueHive access). **The
+early-checkpoint-selection mechanism is now identified with direct evidence: regression-to-the-
+mean, the same underlying phenomenon as the norm/variance collapse documented in TASK-01/TASK-02.**
+Full reasoning in [[DECISIONS.md#task03-bluehive-wandb]]. Do not start a new
+architecture/loss/objective experiment without further direction -- see "Next command" below for
+what this evidence now points toward.
 
 **Conclusions reached this session (full reasoning in
-[[DECISIONS.md#spectrogram-positive-control]]):**
+[[DECISIONS.md#task03-bluehive-wandb]]):**
 
-1. Built a full parallel pipeline reusing everything possible from `experiment/muq-to-dac-more-
-   data` unchanged (manifest, split, DAC cache, `TemporalConvNet`, optimizer, loss, step budget,
-   checkpoint-selection rule) -- only the input representation changed (log-mel spectrogram,
-   128 mels, hop aligned to DAC's 75Hz grid) plus one required 128->1024 linear input projection
-   (spectrogram's channel count doesn't coincidentally match DAC's the way MuQ's did).
-2. **Latent-space metrics improved only modestly** (val cosine 0.230 -> 0.298, ~30% relative;
-   val MSE 17.29 -> 16.54, ~4%) despite the spectrogram carrying far more raw temporal-spectral
-   resolution than MuQ's compressed embedding.
-3. **Audio-relevant metrics did not improve at all**: multi-res STFT distance got *worse* (2.65
-   -> 3.02 on val), and waveform correlation to the DAC oracle stayed at the same ~0 noise floor
-   observed in every MuQ-based experiment to date.
-4. **New diagnostics added this session** (`latent_diagnostics.py`, not computed by any prior
-   MuQ-to-DAC script) found severe, essentially undiminished norm collapse (predicted/oracle
-   vector-norm ratio 0.36), variance collapse (ratio 0.11), and extreme over-smoothing (lag-1
-   autocorrelation 0.97 for predictions vs. 0.08 for the oracle) -- exactly the pathologies named
-   in CLAUDE.md's own Scientific Motivation section, present in essentially unchanged form under
-   a richer input.
-5. **Per this task's own pre-registered decision rule, this is Outcome B (similar failure), not
-   Outcome A**: the training/objective formulation (a 13-frame-receptive-field residual ConvNet
-   doing MSE+cosine regression directly onto DAC's raw continuous latent) is now the leading
-   suspect for the saturation ceiling seen throughout this investigation -- ahead of both "wrong
-   MuQ layer" ([[muq-layer-sweep]], ruled out) and "insufficient MuQ information" (not exonerated,
-   but no longer the most parsimonious explanation, since a richer representation hit the same
-   wall).
-6. The validation-MSE-selected checkpoint landed at step 1000/60000 -- an extreme case of the
-   "early lucky dip" pattern already flagged in [[muq-layer-sweep]]'s notes. End-of-training
-   (step 60000) numbers were close (val_mse 17.06 vs. 16.54, val_cos 0.27 vs. 0.30), so this
-   specific selection did not appear misleading, but the pattern is worth continuing to watch.
+1. **BlueHive access gap surfaced up front, not worked around silently**: no SSH/sbatch access
+   from this environment. User confirmed scope: build everything runnable, validate locally, hand
+   off the cluster execution. A real W&B API key was found in `~/.netrc` and used for genuine
+   (not simulated) W&B logging.
+2. Built CUDA/MPS-agnostic device selection (`logging_utils.select_device`, additive, MPS
+   behavior unchanged), gradient diagnostics (`grad_diagnostics.py`), extended latent diagnostics
+   (median norm, frame-to-frame variance), and a W&B wrapper (`wandb_logging.py`) -- 24 new tests.
+3. `scripts/train_spectrogram_to_dac_wandb.py` reproduces TASK-02's scientific formulation
+   exactly (manifest, architecture, loss, optimizer, step budget, checkpoint rule, eval protocol
+   all unchanged); four documented, cost-driven instrumentation deviations (reduced-frequency
+   STFT/waveform-correlation, audio logging, gradient logging; a `--steps` override reserved for
+   infrastructure validation only).
+4. **Validated with two real local runs (MPS, not BlueHive)**: a disabled-mode dry run and a real
+   online run against the user's actual W&B account
+   (`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility`, run `gz3uffcf`), both
+   clean. The online run's step-1000 checkpoint exactly matched TASK-02's own number
+   (val_mse=16.442551), confirming determinism.
+5. **Additional-investigation finding, evidence-based**: the first validation checkpoint (step
+   1000) is the GLOBAL minimum validation MSE across the ENTIRE run in both TASK-01 (rank 1/60)
+   and TASK-02 (rank 1/450) -- never beaten again. A trivial "predict the dataset mean DAC
+   vector" baseline gets within 6-7% of that "best" MSE in both runs. Validation MSE and cosine
+   similarity are anti-correlated across checkpoints (r=-0.72, excluding turbulence spikes) --
+   pure-MSE checkpoint selection is structurally biased toward the least-informative, most-
+   collapsed solution. **Conclusion: regression-to-the-mean, not optimization instability or
+   validation noise -- and the same mechanism as the norm/variance-collapse findings, not a
+   separate phenomenon.**
+6. **BlueHive execution itself is NOT done** -- `bluehive/README.md` + `bluehive/run_task03.slurm`
+   are ready, with `CHANGE_ME` placeholders for account/partition details this environment cannot
+   know. The user must run this on the actual cluster and report back.
 
 ## Exact last successful commands
 
 ```bash
-uv run python scripts/precompute_spectrogram_cache.py   # 1998 crops, 14.6s -> data/cache/spectrogram_control/mel_cache.pt
-uv run python scripts/train_spectrogram_to_dac.py        # 60000 steps, 518s train + eval, PASSED sanity check
+uv add wandb    # dependency added, uv.lock updated
 uv run ruff check .    # all checks passed
-uv run pytest -q       # 73 passed (62 baseline + 11 new spectrogram-control tests)
+uv run pytest -q       # 103 passed (79 baseline + 9 device-selection + 4 grad-diagnostics + 11 wandb-logging)
+uv run python -u scripts/train_spectrogram_to_dac_wandb.py --steps 50 --wandb-mode disabled     # PASSED, no errors
+uv run python -u scripts/train_spectrogram_to_dac_wandb.py --steps 2500 --wandb-mode online      # PASSED, real W&B run gz3uffcf, no errors
+uv run python scripts/analyze_early_checkpoint_selection.py    # regression-to-the-mean evidence, both runs
 ```
 
-2026-09-14, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown`, tracked by real PID
-and a `Monitor` until-loop.
+2026-09-14, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown` (unbuffered `-u`),
+tracked by real PID and `Monitor`.
 
 ## Run/checkpoint path
 
-- `data/cache/spectrogram_control/mel_cache.pt` (git-ignored) -- log-mel features for all 1998
-  crops of the reused `more_data_crops.csv` manifest.
-- `runs/spectrogram_control/checkpoints/best.pt` (git-ignored) -- validation-MSE-selected
-  checkpoint, step 1000.
-- `artifacts/spectrogram_control/report.json` -- full metrics (latent MSE/cosine, 3 eval
-  conditions, STFT/waveform-correlation, latent norm/variance/autocorrelation diagnostics by
-  split, direct comparison block against `artifacts/more_data/report.json`, training curves,
-  parameter count, timing, peak memory).
-- `artifacts/spectrogram_control/*.wav` (30 files, git-ignored) -- reference / dac_oracle /
-  spectrogram_to_dac / shuffled_across / time_shifted, 3 val + 3 test tracks, step 1000. Sent to
-  the user for a listening verdict; not yet given as of this note.
+- `src/muq_inversion/grad_diagnostics.py`, `wandb_logging.py`, extended `latent_diagnostics.py`,
+  extended `logging_utils.py` -- new/modified diagnostics modules.
+- `scripts/train_spectrogram_to_dac_wandb.py` -- the instrumented reproduction script (run this
+  on BlueHive with default `--steps` for the real reproduction).
+- `scripts/analyze_early_checkpoint_selection.py` -- the additional-investigation analysis;
+  `artifacts/task03_wandb_repro/early_checkpoint_analysis.json` -- its output.
+- `bluehive/README.md`, `bluehive/run_task03.slurm` -- the cluster handoff.
+- `artifacts/task03_wandb_repro/report.json`, `config.json` -- from the two local validation runs
+  (both labeled `is_smoke_test: true`; NOT the real reproduction numbers).
+- Live W&B project: `wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility`
+  (group `spectrogram-control`), run `gz3uffcf` from the 2500-step online validation.
 
 ## Next command
 
-**Blocked on user direction and the pending listening verdict.** This task's own instructions say
-not to prioritize the optional mel-bin-ablation follow-up until the primary result is understood
-and (implicitly) reviewed. Given the conclusion narrows the remaining hypothesis space for this
-whole investigation to the training/objective formulation itself, natural next directions (not yet
-authorized) are:
+**Blocked on the user running the BlueHive job.** Once that's done:
 
-- **A different loss or target formulation for the DAC latent** -- e.g. something less purely
-  pointwise-MSE, or a formulation that respects DAC's residual-VQ structure more directly (the
-  requantization/codebook-agreement diagnostics from `scripts/analyze_dac_manifold.py` are
-  relevant prior art here).
-- **The still-untested architecture/receptive-field-capacity axis** flagged as the next hypothesis
-  in [[muq-layer-sweep]]'s own NEXT.md, now with slightly more urgency since this experiment
-  suggests architecture/objective rather than representation is the bottleneck.
-- **Treating the MuQ-to-DAC-via-`TemporalConvNet` line as having reached a documented ceiling**
-  with this specific pipeline design, independent of the input representation.
+1. Fill in `bluehive/run_task03.slurm`'s `CHANGE_ME` placeholders with real account/partition
+   details and submit (`sbatch bluehive/run_task03.slurm`).
+2. Report back wall-clock time, GPU type, and any errors so the reproduction-comparison table
+   (M4 Max/TASK-02 vs. BlueHive) can be completed and the "does TASK-02 reproduce on different
+   hardware" question actually answered.
 
-Do not start any of these without the user's go-ahead.
+**Independent of BlueHive**, the regression-to-the-mean finding (item 5 above) is itself now
+actionable and doesn't need cluster access to pursue further:
+
+- **A loss/target reformulation that doesn't reward the dataset-mean solution as cheaply** is now
+  the most directly evidence-backed next direction across this entire investigation -- e.g.
+  down-weighting or replacing plain MSE (per-frame relative error, a loss on normalized/
+  whitened latents, or something that respects DAC's residual-VQ structure more directly, per
+  `scripts/analyze_dac_manifold.py`'s codebook-agreement diagnostics).
+- The architecture/receptive-field-capacity axis (flagged in [[muq-layer-sweep]]'s NEXT.md,
+  never addressed by TASK-01/02/03) remains untested but is now a less urgent lead than the loss
+  reformulation, since the mechanism identified this session is a loss-geometry property, not
+  obviously a capacity limitation.
+
+Do not start either without the user's go-ahead.
 
 ## Blockers
 
-1. **Listening verdict for this experiment's 30 WAVs** -- pending, needed before treating the
-   metric-based "Outcome B" reading as final (metrics and listening have diverged before in this
-   project, in both directions -- see [[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]).
-2. **Decision needed from the user** on which of the three "Next command" directions (loss/target
-   reformulation, architecture/receptive-field capacity, or stopping this pipeline design) to
-   pursue next.
-3. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` (see
-   that branch's DECISIONS.md) remains untested and is orthogonal to this branch's finding.
-4. The `shuffled_time` finding from Gate 4 (HiFi-GAN-family, see
-   [[DECISIONS.md#gate4-shuffled-time-finding]]) -- still dormant.
-5. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
-   the MuQ layer-sweep were never given by the user -- not blocking, but worth noting if any comes
-   up again.
+1. **BlueHive job not yet run** -- this environment cannot do it; the user must execute
+   `bluehive/run_task03.slurm` (after filling in placeholders) and report results back.
+2. **Listening verdicts for TASK-01's and TASK-02's 30-WAV packages** -- still pending (see
+   [[DECISIONS.md#dense-spectrogram-positive-control]]).
+3. **Decision needed from the user** on whether to pursue the loss/target-reformulation direction
+   the regression-to-the-mean finding now points toward.
+4. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
+   untested, orthogonal to this branch's findings.
+5. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
+   still dormant.
+6. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
+   the MuQ layer-sweep were never given -- not blocking, worth noting if any comes up again.
 
 ## Expected verification criteria for Gate 5
 
-Not yet reached, and not authorized to start per this and prior experiments' own instructions.
+Not yet reached, and not authorized to start.
 
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#spectrogram-positive-control]] first** -- it's the first experiment in
-  this investigation to test the *pipeline*, not the representation, and its result reframes what
-  the remaining hypothesis space looks like.
-- `spectrogram_encoder.py`, `latent_diagnostics.py`, and `models/spectrogram_translator.py` are
-  new, reusable modules -- `latent_diagnostics.py` in particular (norm ratio, variance ratio,
-  lag-1 autocorrelation, all unit-tested) is generic and worth reusing for any future experiment
-  that wants the same norm/variance-collapse diagnostics prior scripts computed only ad hoc
-  (`scripts/analyze_dac_manifold.py`).
-- `TemporalConvNet` itself remains byte-for-byte unchanged across every experiment in this
-  investigation to date (Gate 3 through this one) -- if the architecture/receptive-field-capacity
-  hypothesis is pursued next, this will be the first experiment to actually change it.
-- Validation-MSE-only checkpoint selection continues to be noisy at this pipeline's training
-  scale (step 1000/60000 selected here, step 1500/45000 in [[muq-layer-sweep]]'s control run) --
-  worth a sanity glance at the full curve, not just the selected checkpoint's number, in any
-  future experiment using this style of training loop.
+- **Read [[DECISIONS.md#task03-bluehive-wandb]] first.** It closes off "is this an optimization-
+  instability or noise artifact" for the early-checkpoint phenomenon with direct evidence, and
+  reframes the norm-collapse/over-smoothing/early-checkpoint findings from TASK-01/02 as three
+  faces of one mechanism (regression-to-the-mean under plain MSE on a high-variance, weakly-
+  conditioned target), not three separate open questions.
+- `scripts/analyze_early_checkpoint_selection.py` is read-only and cheap (~seconds) -- rerun it
+  against any future experiment's `report.json` (as long as it has a `training_curves` field) to
+  get the same rank/baseline/correlation diagnostics without needing a fresh training run.
+- The W&B integration (`wandb_logging.py`) is generic enough to reuse for any future training
+  script in this project, not just this one -- `init_run`, `log_checkpoint_tables`, and
+  `log_audio_examples` don't assume anything TASK-03-specific.
+- Real credentials exist in `~/.netrc` for `api.wandb.ai` (account
+  `andrea-cogliati-university-of-rochester`) -- any future script that calls `wandb.init()` will
+  connect to the real account by default; use `mode="disabled"` for any future automated/CI-style
+  test that shouldn't create real W&B runs.
+- `bluehive/` is new infrastructure, never exercised end-to-end (no cluster access here) --
+  treat `bluehive/run_task03.slurm` as a well-reasoned first draft, not a proven-working script,
+  until the user actually runs it once and reports back.
