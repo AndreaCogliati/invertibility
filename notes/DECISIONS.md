@@ -1466,3 +1466,130 @@ muq_dac_cache.pt` was verified unmodified (mtime-checked at runtime, not just in
 **Rollback plan.** This entire line of work lives on `experiment/muq-layer-sweep`, branched off
 `experiment/muq-to-dac-more-data`. If abandoned, simply do not merge; no baseline files were
 touched.
+
+## spectrogram-positive-control: The pipeline itself is the bottleneck, not MuQ's information content
+
+**Context (`tasks/TASK-01.md`).** [[muq-layer-sweep]] ruled out MuQ layer choice as the cause of
+the saturation ceiling. This experiment tests the remaining, more fundamental hypothesis directly:
+is the training pipeline itself (architecture, loss, optimizer) even capable of learning a
+MuQ-to-DAC-style mapping when given a representation known to carry far more low-level
+reconstruction-relevant information than MuQ's semantic embedding? A **positive control**, not an
+attempt to improve MuQ inversion: log-mel spectrogram -> the exact `TemporalConvNet` -> DAC latent
+-> frozen DAC decoder. Branched conceptually from `experiment/muq-to-dac-more-data` (same
+manifest, split, crops, DAC cache, optimizer, loss, step budget); implemented as new files
+alongside the layer-sweep branch's code rather than a separate git branch.
+
+**Representation, chosen and documented before training (`spectrogram_encoder.py`).**
+`hop_length=320` (exactly `24000/75`, DAC's own measured hop) lands the spectrogram on DAC's
+75Hz grid directly -- no repeat-interleave upsampling step, unlike MuQ's 25Hz features. `n_fft=
+win_length=1024`, `n_mels=128` (this task's suggested starting point), `f_min=0`, `f_max=12000`
+(Nyquist), magnitude mel (`power=1.0`) then `log(clamp_min(1e-5))` -- matches this codebase's
+existing `MelSpectrogramLoss` convention, no additional normalization. **Temporal alignment,
+measured not assumed:** `torchaudio.transforms.MelSpectrogram`'s `center=True` default produces
+151 frames for a 2.0s/48000-sample crop, exactly one more than DAC's 150 (confirmed on real
+GTZAN audio via `.probe()`, not just synthetic input) -- `align_to_dac_frames` truncates the
+trailing frame and raises for any larger, unexpected mismatch.
+
+**Architecture: `TemporalConvNet` itself is byte-for-byte unchanged.** Every prior MuQ-to-DAC
+experiment could feed it directly only because MuQ's channel count (1024) coincidentally equals
+DAC's (1024) -- `TemporalConvNet`'s pure-residual design (`x + GELU(conv(x))`) requires equal
+input/output width. Spectrogram's 128 mel bins don't share that coincidence, so one learned linear
+projection (128->1024, 132,096 of the model's 15,863,808 total parameters) is prepended
+(`models/spectrogram_translator.py`) -- the same kind of component CLAUDE.md's own Decoder Design
+section already specifies generically ("a learned input projection ... to decoder channels"), not
+a new architecture family. This is the only structural difference from the MuQ pipeline.
+
+**Caching:** `scripts/precompute_spectrogram_cache.py` computes log-mel features for all 1998
+crops of the existing `more_data_crops.csv` manifest in 14.6s (`data/cache/spectrogram_control/
+mel_cache.pt`) -- no model forward pass needed, unlike MuQ/DAC encoding. DAC targets are read
+directly, unmodified, from `data/cache/more_data/muq_dac_cache.pt`.
+
+**Dataset coverage, stated precisely (user question, 2026-09-14):** 1998 crops (1584 train / 188
+val / 226 test, 792/94/113 track-disjoint tracks, 999 of GTZAN's 1000 tracks -- `jazz.00054`
+excluded since Gate 1, see [[gtzan-source-and-defects]]) x 2.0s each = 3996s (~66.6 minutes) of
+audio actually seen by the model, against GTZAN's full 1000 x ~30s = 30000s (~8.3 hours) --
+**~13.3% of GTZAN's total duration**, but as two fixed 2.0s windows per track rather than full
+tracks, i.e. ~6.7% of any single track's duration, spread breadth-first over nearly all tracks
+rather than depth-first over few. Not a choice made fresh for this experiment: inherited unchanged
+from `experiment/muq-to-dac-more-data`'s own crop-count/duration decision (cheap per-step compute
+on the M4 Max, prioritizing near-full track-level coverage over seconds-per-track), reused here
+per this task's explicit "reuse the same crop selection strategy" instruction.
+
+**Training: identical hyperparameters to `experiment/muq-to-dac-more-data`** -- Adam lr=1e-3,
+betas=(0.9,0.999), MSE + 0.1*cosine loss, 60000 steps, validation-MSE-only checkpoint selection,
+same three eval conditions (correct/shuffled-across/time-shifted). Tiny-subset pre-flight sanity
+check passed (mse ratio 0.42-ish, well under the 0.5 threshold) before the real run. Training took
+518s (8.6 ms/step) -- slower per-step than MuQ's 6.7ms (no repeat-interleave to fuse, plus the
+extra projection layer) but comparable overall. Training was turbulent through much of the budget,
+mirroring [[muq-to-dac-more-data]]'s own instability (one finite-but-enormous val MSE spike,
+4.7e8, at step 15000 -- did not trigger the non-finite-loss stop condition, training recovered by
+step 20000). **The validation-MSE-selected checkpoint landed at step 1000 of 60000** -- the very
+first validation check, an even more extreme case of the "early lucky dip" pattern already flagged
+in [[muq-layer-sweep]]'s own final-layer control run. The step-60000 (end-of-training, stable
+region) numbers are close to step 1000's (val_mse 17.06 vs. 16.54, val_cos 0.27 vs. 0.30), so this
+does not appear to be a misleading fluke this time, but it is the same noisy-selection property
+worth remembering, not a bug in this run specifically.
+
+**Result -- direct comparison to the current best MuQ-to-DAC model
+(`artifacts/more_data/report.json`, held-out splits):**
+
+| metric (val) | MuQ->DAC (final layer) | Spectrogram->DAC |
+| --- | --- | --- |
+| best-checkpoint val MSE | 17.29 | 16.54 (~4% lower) |
+| val cosine similarity | 0.230 | 0.298 (~30% relative higher) |
+| val multi-res STFT distance (pred vs. oracle) | 2.65 | 3.02 (**worse**) |
+| val waveform correlation (pred vs. oracle) | 0.0002 (~noise floor) | -0.0008 (~noise floor, unchanged) |
+| shuffled-across cosine margin | 0.106 | 0.120 (comparable) |
+| time-shifted cosine margin | 0.081 | 0.066 (comparable) |
+
+Test-split numbers tell the same story (MSE 16.44 vs. 17.18, cosine 0.291 vs. 0.226, STFT 3.02
+vs. 2.61 -- worse).
+
+**New diagnostics this experiment adds (`latent_diagnostics.py`, not computed by any prior
+MuQ-to-DAC script): severe norm and variance collapse, and extreme over-smoothing, on held-out
+data.** Predicted-vs-oracle vector-norm ratio **0.36** (predicted vectors carry about a third of
+the oracle's magnitude), channel-variance ratio **0.11** (89% variance reduction), and lag-1
+autocorrelation **0.97 for predictions vs. 0.08 for the oracle** -- the oracle DAC latent is
+essentially frame-to-frame uncorrelated (expected for a residual-VQ codec's continuous
+pre-quantization representation), while the prediction is nearly a random walk, changing barely
+frame to frame. This is the same qualitative signature ("strong norm collapse," "strong temporal
+smoothing") CLAUDE.md's own Scientific Motivation section names as the MuQ pipeline's observed
+pathology -- present here in essentially undiminished form despite a representation with ~100x
+more raw temporal-spectral resolution than MuQ's compressed embedding.
+
+**Interpretation -- Outcome B (similar failure), not Outcome A.** Per this experiment's own
+pre-registered decision rule: latent-space metrics improved modestly (not "much higher" cosine
+similarity -- 30% relative, not multiples), but the audio-relevant metrics did not follow: STFT
+distance got *worse*, waveform correlation to the DAC oracle stayed exactly at the same noise
+floor as every MuQ-based experiment, and norm/variance collapse plus extreme over-smoothing are
+present in essentially the same character as the phenomena this whole positive-control experiment
+was designed to test. **Conclusion: the current translation pipeline -- architecture (a
+13-frame-receptive-field residual ConvNet), loss (MSE + cosine on the raw DAC latent), and
+optimizer/training regime -- cannot productively exploit a substantially richer input
+representation either.** This does not exonerate MuQ (a spectrogram-based control that itself
+failed to reconstruct audio says nothing about whether MuQ specifically retains enough
+information), but it does mean **conclusions about MuQ's invertibility from this pipeline's
+waveform-quality failures remain premature**, exactly per this task's own framing: the training
+formulation itself -- almost certainly the direct MSE/cosine regression onto DAC's raw continuous
+latent, a high-variance, only loosely metric target for a residual VQ codec -- is now the leading
+suspect, ahead of both "wrong MuQ layer" ([[muq-layer-sweep]], ruled out) and "insufficient MuQ
+information" (this experiment, not exonerated but no longer the most parsimonious explanation
+either, since a richer representation hit the same wall).
+
+**Listening verdict: pending.** 30 WAVs written to `artifacts/spectrogram_control/`
+(reference/dac_oracle/spectrogram_to_dac/shuffled_across/time_shifted for 3 val + 3 test tracks,
+step 1000). Representative examples sent directly to the user rather than declaring success or
+failure from metrics alone, per this project's standing practice (metrics and listening have
+diverged in both directions before -- [[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]).
+
+**Consequences.** New files only: `src/muq_inversion/spectrogram_encoder.py`,
+`src/muq_inversion/latent_diagnostics.py`, `src/muq_inversion/models/spectrogram_translator.py`,
+`scripts/precompute_spectrogram_cache.py`, `scripts/train_spectrogram_to_dac.py`,
+`tests/test_spectrogram_control.py` (11 new tests, full suite now 73 passing). `data/cache/
+more_data/muq_dac_cache.pt` and `artifacts/more_data/report.json` read-only, unmodified.
+`TemporalConvNet` itself untouched. New artifacts: `data/cache/spectrogram_control/mel_cache.pt`
+(git-ignored), `runs/spectrogram_control/checkpoints/best.pt` (git-ignored), `artifacts/
+spectrogram_control/report.json` + 30 listening WAVs (git-ignored).
+
+**Rollback plan.** Entirely additive; no baseline MuQ-to-DAC file was modified. Deleting the six
+new files and three new artifact/cache/run directories fully reverts this experiment.

@@ -2,119 +2,127 @@
 
 ## Current gate
 
-MuQ hidden-layer sweep for the MuQ-to-DAC temporal-conv pipeline (`experiment/muq-layer-sweep`,
-branched off `experiment/muq-to-dac-more-data`). **Result: MuQ layer choice does not resolve the
-saturation ceiling -- the final layer (this investigation's baseline throughout) already wins.**
-Do not proceed to layer fusion, model scaling, transformers, additional datasets, or Gate 5 (per
-this experiment's own explicit instruction) without further direction.
+Spectrogram-to-DAC positive control (`tasks/TASK-01.md`, code committed alongside
+`experiment/muq-layer-sweep`). **Result: the training pipeline itself cannot productively exploit
+a substantially richer input representation either -- audio-relevant metrics (STFT distance,
+waveform correlation) did not improve over MuQ, and severe norm/variance collapse plus extreme
+over-smoothing persist essentially unchanged.** Full reasoning in
+[[DECISIONS.md#spectrogram-positive-control]]. Do not proceed to the optional mel-bin-ablation
+follow-up, model scaling, or any new representation experiment without further direction (per
+this task's own instruction to prioritize diagnosis over model improvement).
 
-**Conclusions reached this session (full reasoning in [[DECISIONS.md#muq-layer-sweep]]):**
+**Conclusions reached this session (full reasoning in
+[[DECISIONS.md#spectrogram-positive-control]]):**
 
-1. Measured MuQ's `output_hidden_states` structure directly: 13 tensors (index 0 = embedding
-   output, indices 1-12 = each of 12 Conformer blocks), `hidden_states[12] ==
-   last_hidden_state` confirmed. Chose 5 candidates [1, 4, 6, 9, 12] via a pure, unit-tested
-   function -- no shape adapter needed (all layers share shape/channels/frame-rate).
-2. Trained the exact `experiment/muq-to-dac-more-data` architecture/config, varying only the
-   input MuQ layer, at a documented 45000-step screening budget chosen from that experiment's
-   own curve before running anything else.
-3. **Final layer wins the primary ranking metric (validation MSE) outright** -- lowest val AND
-   test MSE of all five layers. "Earliest" (layer 1) had a small cosine-similarity edge (~10%
-   relative) but no MSE or waveform-domain advantage; waveform correlation to the DAC oracle
-   stayed at ~0 for every layer.
-4. Per the experiment's own decision rule, no layer qualifies for a full follow-up run.
-   Architecture/context (receptive field, temporal modeling capacity) remains the leading
-   unexplored hypothesis for the saturation ceiling.
-5. A separately noteworthy finding: the final-layer control run was itself turbulent through
-   most of its 45000-step budget, with its best-by-validation-MSE checkpoint landing on an early
-   lucky dip (step 1500) rather than the eventual stable region -- a property of this training
-   regime's noise worth remembering when interpreting any "best checkpoint step" from this
-   pipeline, not a bug in this experiment specifically.
+1. Built a full parallel pipeline reusing everything possible from `experiment/muq-to-dac-more-
+   data` unchanged (manifest, split, DAC cache, `TemporalConvNet`, optimizer, loss, step budget,
+   checkpoint-selection rule) -- only the input representation changed (log-mel spectrogram,
+   128 mels, hop aligned to DAC's 75Hz grid) plus one required 128->1024 linear input projection
+   (spectrogram's channel count doesn't coincidentally match DAC's the way MuQ's did).
+2. **Latent-space metrics improved only modestly** (val cosine 0.230 -> 0.298, ~30% relative;
+   val MSE 17.29 -> 16.54, ~4%) despite the spectrogram carrying far more raw temporal-spectral
+   resolution than MuQ's compressed embedding.
+3. **Audio-relevant metrics did not improve at all**: multi-res STFT distance got *worse* (2.65
+   -> 3.02 on val), and waveform correlation to the DAC oracle stayed at the same ~0 noise floor
+   observed in every MuQ-based experiment to date.
+4. **New diagnostics added this session** (`latent_diagnostics.py`, not computed by any prior
+   MuQ-to-DAC script) found severe, essentially undiminished norm collapse (predicted/oracle
+   vector-norm ratio 0.36), variance collapse (ratio 0.11), and extreme over-smoothing (lag-1
+   autocorrelation 0.97 for predictions vs. 0.08 for the oracle) -- exactly the pathologies named
+   in CLAUDE.md's own Scientific Motivation section, present in essentially unchanged form under
+   a richer input.
+5. **Per this task's own pre-registered decision rule, this is Outcome B (similar failure), not
+   Outcome A**: the training/objective formulation (a 13-frame-receptive-field residual ConvNet
+   doing MSE+cosine regression directly onto DAC's raw continuous latent) is now the leading
+   suspect for the saturation ceiling seen throughout this investigation -- ahead of both "wrong
+   MuQ layer" ([[muq-layer-sweep]], ruled out) and "insufficient MuQ information" (not exonerated,
+   but no longer the most parsimonious explanation, since a richer representation hit the same
+   wall).
+6. The validation-MSE-selected checkpoint landed at step 1000/60000 -- an extreme case of the
+   "early lucky dip" pattern already flagged in [[muq-layer-sweep]]'s notes. End-of-training
+   (step 60000) numbers were close (val_mse 17.06 vs. 16.54, val_cos 0.27 vs. 0.30), so this
+   specific selection did not appear misleading, but the pattern is worth continuing to watch.
 
 ## Exact last successful commands
 
 ```bash
-uv run python scripts/inspect_muq_hidden_states.py       # writes artifacts/muq_layer_sweep/hidden_states_inspection.json
-uv run python scripts/precompute_layer_sweep_cache.py     # writes data/cache/layer_sweep/muq_layers_cache.pt (45.91s)
-uv run python scripts/train_layer_sweep.py                 # 5 layers x 45000 steps, ~35 min total, PASSED (as a measurement)
+uv run python scripts/precompute_spectrogram_cache.py   # 1998 crops, 14.6s -> data/cache/spectrogram_control/mel_cache.pt
+uv run python scripts/train_spectrogram_to_dac.py        # 60000 steps, 518s train + eval, PASSED sanity check
 uv run ruff check .    # all checks passed
-uv run pytest -q       # 62 passed (47 baseline + 15 new layer-sweep tests)
+uv run pytest -q       # 73 passed (62 baseline + 11 new spectrogram-control tests)
 ```
 
-2026-09-10, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown`, tracked by real PID
+2026-09-14, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown`, tracked by real PID
 and a `Monitor` until-loop.
 
 ## Run/checkpoint path
 
-- `artifacts/muq_layer_sweep/hidden_states_inspection.json` -- the measured MuQ hidden-state
-  structure and exact candidate-layer selection, tracked as a durable record.
-- `data/cache/layer_sweep/muq_layers_cache.pt` (2.05GB, git-ignored) -- all 5 candidate MuQ
-  layers for all 1998 crops. `data/cache/more_data/muq_dac_cache.pt` (DAC targets) reused
-  read-only, unmodified (verified via mtime check at runtime).
-- `runs/layer_sweep/<layer_label>/checkpoints/best.pt` (5 x 60MB, git-ignored) -- one
-  validation-MSE-selected checkpoint per layer.
-- `artifacts/layer_sweep/report.json` -- full metrics for all 5 layers (MSE, cosine similarity,
-  controls margins, waveform correlation, STFT distance, training curves, parameter count,
-  timing, peak memory).
-- No listening WAVs were generated this round -- see [[DECISIONS.md#muq-layer-sweep]]'s
-  "Listening screen: not generated" section for why (the validation-selected best candidate
-  coincides with the baseline, so there is no second condition to blind-test).
+- `data/cache/spectrogram_control/mel_cache.pt` (git-ignored) -- log-mel features for all 1998
+  crops of the reused `more_data_crops.csv` manifest.
+- `runs/spectrogram_control/checkpoints/best.pt` (git-ignored) -- validation-MSE-selected
+  checkpoint, step 1000.
+- `artifacts/spectrogram_control/report.json` -- full metrics (latent MSE/cosine, 3 eval
+  conditions, STFT/waveform-correlation, latent norm/variance/autocorrelation diagnostics by
+  split, direct comparison block against `artifacts/more_data/report.json`, training curves,
+  parameter count, timing, peak memory).
+- `artifacts/spectrogram_control/*.wav` (30 files, git-ignored) -- reference / dac_oracle /
+  spectrogram_to_dac / shuffled_across / time_shifted, 3 val + 3 test tracks, step 1000. Sent to
+  the user for a listening verdict; not yet given as of this note.
 
 ## Next command
 
-**Blocked on user direction.** This experiment's own instructions are explicit: do not proceed
-to layer fusion, model scaling, transformers, additional datasets, or Gate 5 based on this result
-alone. The negative result here, combined with [[muq-to-dac-more-data]]'s data-scaling
-saturation, narrows the remaining hypothesis space for this investigation's MuQ-to-DAC line to:
+**Blocked on user direction and the pending listening verdict.** This task's own instructions say
+not to prioritize the optional mel-bin-ablation follow-up until the primary result is understood
+and (implicitly) reviewed. Given the conclusion narrows the remaining hypothesis space for this
+whole investigation to the training/objective formulation itself, natural next directions (not yet
+authorized) are:
 
-- **Architecture/receptive-field capacity**: the TemporalConvNet's 5-MuQ-frame receptive field
-  and 3-layer depth have been held fixed since Gate 3 -- untested as a variable in this entire
-  investigation. A receptive-field or capacity sweep (mirroring this experiment's own minimal-
-  confounding methodology) would be the natural next test, but is explicitly out of scope here.
-- **A fundamentally different translator design** (still not transformers/attention, if the user
-  wants to stay within this investigation's established constraints) -- also out of scope
-  without direction.
-- **Treating the MuQ-to-DAC line as having reached a documented ceiling** with this specific
-  small-ConvNet-translator approach, and revisiting whether to invest further here versus the
-  HiFi-GAN-family findings from earlier in the broader investigation.
+- **A different loss or target formulation for the DAC latent** -- e.g. something less purely
+  pointwise-MSE, or a formulation that respects DAC's residual-VQ structure more directly (the
+  requantization/codebook-agreement diagnostics from `scripts/analyze_dac_manifold.py` are
+  relevant prior art here).
+- **The still-untested architecture/receptive-field-capacity axis** flagged as the next hypothesis
+  in [[muq-layer-sweep]]'s own NEXT.md, now with slightly more urgency since this experiment
+  suggests architecture/objective rather than representation is the bottleneck.
+- **Treating the MuQ-to-DAC-via-`TemporalConvNet` line as having reached a documented ceiling**
+  with this specific pipeline design, independent of the input representation.
 
 Do not start any of these without the user's go-ahead.
 
 ## Blockers
 
-1. **Decision needed from the user**: pursue architecture/receptive-field capacity as the next
-   axis (the one remaining untested variable after data and MuQ-layer-choice), or treat the
-   current evidence as a stopping point for this specific translator design.
-2. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` (see
+1. **Listening verdict for this experiment's 30 WAVs** -- pending, needed before treating the
+   metric-based "Outcome B" reading as final (metrics and listening have diverged before in this
+   project, in both directions -- see [[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]).
+2. **Decision needed from the user** on which of the three "Next command" directions (loss/target
+   reformulation, architecture/receptive-field capacity, or stopping this pipeline design) to
+   pursue next.
+3. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` (see
    that branch's DECISIONS.md) remains untested and is orthogonal to this branch's finding.
-3. The `shuffled_time` finding from Gate 4 (HiFi-GAN-family, see
+4. The `shuffled_time` finding from Gate 4 (HiFi-GAN-family, see
    [[DECISIONS.md#gate4-shuffled-time-finding]]) -- still dormant.
-4. Listening verdicts for the 80-track scaling experiment and the full-GTZAN scaling experiment
-   were never given by the user (superseded by this and the prior request) -- not blocking, but
-   worth noting if either comes up again.
+5. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
+   the MuQ layer-sweep were never given by the user -- not blocking, but worth noting if any comes
+   up again.
 
 ## Expected verification criteria for Gate 5
 
-Not yet reached, and explicitly not to be started per this experiment's own instructions.
+Not yet reached, and not authorized to start per this and prior experiments' own instructions.
 
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#muq-layer-sweep]] first** -- it closes off "wrong MuQ layer" as an
-  explanation for the saturation ceiling, narrowing what's left to test.
-- This branch sits on top of `experiment/muq-to-dac-more-data` (not `main`), continuing the
-  parent-branch-extension pattern started by Gate 4 and followed by every experiment since.
-- `src/muq_inversion/encoder.py` gained `encode_all_hidden_states()` -- additive only, the
-  existing `encode()` method (used by every other branch/experiment) is untouched.
-- `src/muq_inversion/layer_sweep_common.py` holds the pure, unit-tested layer-selection,
-  cache-key, and checkpoint-selection logic -- reuse it rather than re-deriving similar logic if
-  a future architecture sweep needs the same kind of deterministic-selection/checkpoint-selection
-  machinery.
-- MuQ's hidden-state indexing convention (0 = embedding output, 1-12 = each Conformer block,
-  12 = `last_hidden_state`) is now a measured, documented fact
-  (`artifacts/muq_layer_sweep/hidden_states_inspection.json`) -- reuse it directly rather than
-  re-inspecting if any future experiment needs a different MuQ layer.
-- Validation-MSE-only checkpoint selection can land on an early, lucky low point in this training
-  regime's noisy loss landscape (see the final-layer control run's step-1500 selection) rather
-  than a representative late-training optimum -- worth a sanity glance at the full curve, not
-  just the selected checkpoint's number, in any future experiment using this pipeline.
-- Adam betas `(0.9, 0.999)` (PyTorch's default), same as every prior MuQ-to-DAC experiment -- no
-  adversarial training in this line of work.
+- **Read [[DECISIONS.md#spectrogram-positive-control]] first** -- it's the first experiment in
+  this investigation to test the *pipeline*, not the representation, and its result reframes what
+  the remaining hypothesis space looks like.
+- `spectrogram_encoder.py`, `latent_diagnostics.py`, and `models/spectrogram_translator.py` are
+  new, reusable modules -- `latent_diagnostics.py` in particular (norm ratio, variance ratio,
+  lag-1 autocorrelation, all unit-tested) is generic and worth reusing for any future experiment
+  that wants the same norm/variance-collapse diagnostics prior scripts computed only ad hoc
+  (`scripts/analyze_dac_manifold.py`).
+- `TemporalConvNet` itself remains byte-for-byte unchanged across every experiment in this
+  investigation to date (Gate 3 through this one) -- if the architecture/receptive-field-capacity
+  hypothesis is pursued next, this will be the first experiment to actually change it.
+- Validation-MSE-only checkpoint selection continues to be noisy at this pipeline's training
+  scale (step 1000/60000 selected here, step 1500/45000 in [[muq-layer-sweep]]'s control run) --
+  worth a sanity glance at the full curve, not just the selected checkpoint's number, in any
+  future experiment using this style of training loop.

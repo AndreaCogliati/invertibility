@@ -244,4 +244,118 @@ Compare:
 ### Latent Metrics
 
 - MSE
-- Cosine
+- Cosine similarity
+- Norm ratio
+- Variance ratio
+- Temporal statistics
+
+### Audio Metrics
+
+- Reconstruction quality
+- Similarity to DAC oracle reconstruction
+- Subjective listening quality
+
+### Failure Modes
+
+Specifically assess whether the following remain present:
+
+- Norm collapse
+- Variance collapse
+- Over-smoothing
+- Excessive temporal autocorrelation
+- Near-constant predictions
+
+---
+
+## Success Criteria
+
+Define the interpretation **before training**.
+
+### Outcome A: Strong Success
+
+Spectrogram→DAC significantly outperforms MuQ→DAC.
+
+Possible indicators:
+
+- Much higher cosine similarity
+- Realistic latent norms
+- Realistic latent variance
+- Reduced smoothing
+- Recognizable reconstructed audio
+
+Interpretation:
+
+```text
+The current pipeline is capable of learning an inverse mapping.
+
+The primary bottleneck lies in:
+- MuQ information content,
+- available training data,
+- target formulation,
+or some combination thereof.
+```
+
+---
+
+### Outcome B: Similar Failure
+
+Spectrogram→DAC exhibits the same pathologies observed in MuQ→DAC.
+
+Examples:
+
+- Norm collapse
+- Variance collapse
+- Excessive smoothing
+- Poor audio reconstruction
+
+Interpretation:
+
+```text
+The problem extends beyond MuQ itself.
+
+Conclusions about MuQ invertibility should be postponed until
+the underlying training formulation is better understood.
+```
+
+---
+
+## Optional Follow-Up
+
+Only if the primary experiment succeeds convincingly:
+
+Run an information-ablation study using:
+
+```text
+128 mel bins
+64 mel bins
+32 mel bins
+16 mel bins
+```
+
+to estimate how reconstruction quality degrades as information is progressively removed.
+
+Do not prioritize this until the primary positive-control experiment is complete.
+
+---
+
+## Deliverables
+
+Produce:
+
+1. A detailed experimental report
+2. Training curves
+3. Validation and test metrics
+4. Norm and variance diagnostics
+5. Representative audio examples
+6. Side-by-side comparison with the best MuQ→DAC run
+7. Scientific interpretation of the results
+
+Most importantly, answer:
+
+> Does the current translation pipeline successfully learn a highly informative Spectrogram→DAC mapping on GTZAN?
+
+and
+
+> How large is the performance gap between Spectrogram→DAC and MuQ→DAC?
+
+Focus on diagnosis and scientific understanding rather than model improvement.

@@ -851,3 +851,45 @@ numerical difference."
 
 Full six-plus-one-question interpretation and final recommendation in
 `notes/DECISIONS.md#muq-layer-sweep`.
+
+## 2026-09-14: Spectrogram-to-DAC positive control (tasks/TASK-01.md)
+
+Hypothesis: does the MuQ-to-DAC training pipeline itself (architecture/loss/optimizer) work at
+all, when given a representation known to carry far more information than MuQ?
+
+Commands run:
+```
+uv run python scripts/precompute_spectrogram_cache.py   # 1998 crops, 14.58s
+uv run python scripts/train_spectrogram_to_dac.py        # tiny-subset sanity PASSED, 60000 steps, 517.98s train
+uv run ruff check .    # clean
+uv run pytest -q       # 73 passed
+```
+
+Training curve was turbulent (same character as `more_data`'s own instability) -- one huge but
+finite val_mse spike (4.7e8) at step 15000, recovered by step 20000, no non-finite-loss stop
+triggered. Best-by-val-MSE checkpoint landed at step 1000/60000 (first validation check) --
+double-checked this wasn't a misleading fluke by comparing to the step-60000 end-of-training
+numbers (17.06/0.27 vs. the selected 16.54/0.30) -- close enough that it doesn't look like a
+lucky-dip artifact this time, unlike the muq-layer-sweep control run's step-1500 selection.
+
+Direct comparison against `artifacts/more_data/report.json` (val split):
+- MSE: 17.29 (MuQ) -> 16.54 (spectrogram), ~4% better
+- cosine: 0.230 -> 0.298, ~30% relative better
+- STFT distance (pred vs oracle): 2.65 -> 3.02, WORSE
+- waveform correlation (pred vs oracle): 0.0002 -> -0.0008, both ~noise floor, unchanged
+
+New latent diagnostics (val split, predicted vs oracle):
+- norm_ratio = 0.364 (severe collapse)
+- variance_ratio = 0.110 (severe collapse)
+- lag1_autocorr: predicted 0.970 vs oracle 0.092 (extreme over-smoothing -- oracle is nearly
+  uncorrelated frame-to-frame, predictions are nearly a random walk)
+
+Interpretation: modest latent-metric gains, zero audio-domain gain, same-character
+norm/variance collapse and over-smoothing as every MuQ-based run. Outcome B (similar failure) per
+the task's own pre-registered decision rule -- full write-up in
+`notes/DECISIONS.md#spectrogram-positive-control`.
+
+30 listening WAVs written to `artifacts/spectrogram_control/`. Sent to the user; listening
+verdict not yet in hand as of this note -- treat the "Outcome B" reading as provisional until
+confirmed by ear, per this project's own repeated experience of metrics and listening
+disagreeing (muq-to-dac-mlp, muq-to-dac-temporal-conv).

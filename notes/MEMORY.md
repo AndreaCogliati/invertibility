@@ -281,4 +281,30 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   (step 1500) rather than the eventual stable region -- a real property of this training regime's
   noise, not a bug, and worth remembering when interpreting any single "best checkpoint step" from
   this pipeline. Full write-up, comparison table, and seven-question interpretation in
-  [[muq-layer-sweep]]. 15 new tests added (`tests/test_layer_sweep.py`), full suite 62 passing.
+  [[muq-layer-sweep]].
+- Spectrogram-to-DAC positive control CONCLUDED (2026-09-14, `tasks/TASK-01.md`, code alongside
+  `experiment/muq-layer-sweep`): tested whether the MuQ-to-DAC training pipeline itself (not
+  MuQ) is the bottleneck, by feeding it a log-mel spectrogram (128 mels, hop aligned to DAC's
+  75Hz grid, no repeat-interleave needed) through the exact unmodified `TemporalConvNet` (plus
+  one required 128->1024 linear input projection) instead of MuQ's `last_hidden_state`. Same
+  manifest/split/DAC-cache/optimizer/loss/step-budget as [[muq-to-dac-more-data]] (the current
+  best MuQ-to-DAC model). **Result: latent-space metrics improved only modestly (val cosine 0.230
+  -> 0.298, val MSE 17.29 -> 16.54) despite ~100x more raw temporal-spectral resolution in the
+  input, while audio-relevant metrics did not improve at all -- multi-res STFT distance got
+  worse (2.65 -> 3.02), and waveform correlation to the DAC oracle stayed at the same ~0 noise
+  floor as every MuQ-based experiment.** New diagnostics (`latent_diagnostics.py`, predicted-vs-
+  oracle on held-out data) found severe, undiminished norm collapse (ratio 0.36), variance
+  collapse (ratio 0.11), and extreme over-smoothing (lag-1 autocorrelation 0.97 for predictions
+  vs. 0.08 for the oracle) -- the same pathologies named in CLAUDE.md's own Scientific Motivation
+  section, present in essentially unchanged form under a richer input representation.
+  **Conclusion: the current pipeline (13-frame-receptive-field residual ConvNet, MSE+cosine
+  regression directly onto DAC's raw continuous latent) cannot productively exploit a
+  substantially richer representation either -- the training/objective formulation, not MuQ's
+  information content, is now the leading suspect, and conclusions about MuQ's invertibility
+  from this pipeline's waveform-quality failures remain premature.** Validation-MSE-selected
+  checkpoint landed at step 1000/60000 (an extreme case of the "early lucky dip" pattern flagged
+  in [[muq-layer-sweep]]); end-of-training (step 60000) numbers were close (val_mse 17.06, val_cos
+  0.27), so this did not appear to be misleading here. Full write-up, comparison table, and
+  interpretation in [[spectrogram-positive-control]]. 11 new tests (`tests/
+  test_spectrogram_control.py`), full suite 73 passing. 30 listening WAVs written to
+  `artifacts/spectrogram_control/`; listening verdict pending. 15 new tests added (`tests/test_layer_sweep.py`), full suite 62 passing.
