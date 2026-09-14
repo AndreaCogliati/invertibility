@@ -257,3 +257,28 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   saturation (an architecture/receptive-field/information ceiling), not a data-limited
   bottleneck.** Full write-up and six-question interpretation in [[muq-to-dac-more-data]].
   Listening verdict pending as of this note.
+- MuQ hidden-layer sweep CONCLUDED (2026-09-10, `experiment/muq-layer-sweep` branch, off
+  `experiment/muq-to-dac-more-data`): tested whether an earlier/intermediate MuQ hidden layer
+  predicts DAC latents better than the final layer (this investigation's baseline throughout).
+  MuQ measured to have 13 `output_hidden_states` (index 0 = embedding output, indices 1-12 =
+  each of 12 Conformer blocks; `hidden_states[12] == last_hidden_state`, confirmed via
+  `torch.equal`); 5 candidates chosen by a pure function (`linspace(1,12,5)` rounded) = layers
+  [1, 4, 6, 9, 12]; all share shape/channel-count/frame-rate, no adapter needed. Same
+  architecture/optimizer/loss/split/manifest as [[muq-to-dac-more-data]], only the MuQ layer
+  varied; 45000-step screening budget chosen and documented from that experiment's own curve
+  before running anything else. **Result: the final layer (baseline) wins the primary ranking
+  metric (validation MSE) outright -- lowest val AND test MSE of all five layers, no candidate
+  close.** The earliest layer had a small (~10% relative) edge in cosine similarity and controls
+  margin, but this didn't translate to a lower MSE or any waveform-domain gain -- waveform
+  correlation to the DAC oracle stayed at ~0 for every layer, no exceptions. **Conclusion: MuQ
+  layer choice does not resolve the saturation ceiling found in the data-scaling experiments --
+  the final layer was never the bottleneck on this axis.** Per the experiment's own decision
+  rule, no layer qualifies for a full follow-up run; architecture/context (receptive field,
+  temporal modeling capacity) remains the leading unexplored hypothesis. A genuine, separately
+  noteworthy finding: the final-layer control run itself was turbulent through most of its
+  budget (val MSE spiking to 142 and 65 at similar step counts to the original more-data run's
+  own turbulence), with its best-by-validation-MSE checkpoint landing on an early lucky dip
+  (step 1500) rather than the eventual stable region -- a real property of this training regime's
+  noise, not a bug, and worth remembering when interpreting any single "best checkpoint step" from
+  this pipeline. Full write-up, comparison table, and seven-question interpretation in
+  [[muq-layer-sweep]]. 15 new tests added (`tests/test_layer_sweep.py`), full suite 62 passing.

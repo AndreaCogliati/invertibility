@@ -768,3 +768,86 @@ Listening artifacts: 30 WAVs (6 tracks x 5 conditions) written to `artifacts/mor
 10-file representative subset (one val, one test track, all 5 conditions each) to the user;
 verdict pending as of this note. See `notes/DECISIONS.md#muq-to-dac-more-data` for the full
 write-up, six-question interpretation, and final scaling-curve-based recommendation.
+
+## 2026-09-10 -- `experiment/muq-layer-sweep` branch: is the final MuQ layer the wrong source representation?
+
+Branched off `experiment/muq-to-dac-more-data` (continuing the parent-branch-extension pattern),
+inheriting `gate4_common.py`, `temporal_conv.py`, the more-data manifest, and its DAC cache
+unchanged via git history / gitignored `data/`+`runs/` persistence.
+
+**Inspected MuQ's hidden-state structure directly, per CLAUDE.md's "measure, don't assume" rule
+applied to layer indexing** (`scripts/inspect_muq_hidden_states.py`): `output_hidden_states=True`
+returns 13 tensors; measured `len(model.model.conformer.layers) == 12`, confirming index 0 is the
+frontend/embedding output (before any transformer block) and indices 1-12 are the outputs after
+each of the 12 Conformer blocks, with `hidden_states[12]` verified byte-identical
+(`torch.equal`) to `last_hidden_state` -- the representation used throughout every prior
+experiment. All 13 hidden states share shape `(1, 50, 1024)` (measured on a 2s crop) -- same
+channel count, same frame rate -- so no shape adapter is needed anywhere in this sweep.
+
+**Candidate selection.** `layer_sweep_common.select_evenly_spaced_layers(12, 5)` --
+`linspace(1, 12, 5)` rounded to nearest int, Python's banker's rounding turning the exact
+midpoint 6.5 into 6 rather than 7 -- gives **[1, 4, 6, 9, 12]** (earliest / early-middle / middle
+/ late-middle / final). This is a pure, unit-tested function (`tests/test_layer_sweep.py`), not
+a value chosen by eye.
+
+**Caching.** One MuQ forward pass per crop (`output_hidden_states=True`), extracting all 5
+candidate layers at once, for the SAME 1998-crop `more_data_crops.csv` manifest (reused
+unchanged, not rebuilt) -- 45.91s total, `data/cache/layer_sweep/muq_layers_cache.pt` (2.05GB,
+git-ignored, new file). DAC latents were NOT recomputed: read directly from the existing
+`data/cache/more_data/muq_dac_cache.pt`, with an explicit runtime assertion that its mtime never
+changes during the precompute run (verifying it truly stays read-only, not just documented as
+such).
+
+**Budget choice, made before looking at any layer but the final-layer control.** Reviewed
+`artifacts/more_data/report.json`'s curve: turbulent/unstable through ~step 32000 (val MSE
+spikes to 30-142), then a comparatively stable region to step 60000 (val MSE 17.3-21.4, best at
+50000). Chose **45000 steps** -- past the turbulent phase, samples several near-best points,
+without fully repeating the 60000-step run. Documented in the training script's own docstring
+*before* running anything, per the task's explicit ordering requirement.
+
+**A genuine surprise: the "final-layer control run" was itself turbulent for most of its
+budget, only settling in the last third.** Its val MSE spiked to 142.3 (step 10000) and 65.5
+(step 15000) -- reproducing the exact turbulent signature the original more-data run showed at
+similar step counts -- before improving to 18.6 by step 45000. But the *best* checkpoint by
+validation MSE turned out to be from **step 1500** (val_mse=17.34), an early, lucky dip before
+the turbulence, not from the stable late region. This is a new, slightly uncomfortable finding
+about this training regime: validation-MSE-only checkpoint selection can occasionally pick an
+early, possibly less-representative checkpoint if it happens to land on a lucky low point before
+a long turbulent stretch -- worth flagging even though it didn't change this experiment's
+conclusion (the sanity-check bounds, val_mse<=25 and val_cos>=0.15, were still comfortably met:
+17.34 and 0.2208).
+
+**Full comparison table** (ordered by MuQ depth; primary ranking metric val MSE, lower better):
+```
+        layer  idx  best_step  val_mse  val_cos  test_mse  test_cos  margin_shuf  margin_shift  val_wav_corr
+     earliest    1      18000  17.8052   0.2443   17.6505    0.2395       0.1242        0.0818        0.0004
+ early_middle    4       4500  17.5662   0.2301   17.4594    0.2255       0.1121        0.0731        0.0000
+       middle    6       2500  17.9254   0.2160   17.8065    0.2130       0.1012        0.0689       -0.0013
+  late_middle    9      33000  17.6987   0.2260   17.5615    0.2233       0.1005        0.0719        0.0004
+        final   12       1500  17.3382   0.2208   17.2589    0.2154       0.1022        0.0733        0.0001
+```
+**Final layer wins the primary metric (val AND test MSE, both lowest of the five) -- no
+candidate layer beats the baseline.** Interestingly, "earliest" (layer 1) has the *highest*
+cosine similarity on both val and test (0.244/0.240, vs. final's 0.221/0.215) and the largest
+controls margin -- a real but small secondary-metric edge that doesn't come with a lower MSE or
+any waveform-domain gain (`val_wav_corr` is ~0 for literally every layer, no exceptions).
+Val/test rankings agree closely for both metrics (same top-2 under each), so this isn't a
+test-performance artifact -- it's a genuine, if minor and metric-dependent, MuQ-depth effect.
+
+**Decision rule applied literally:** "a layer qualifies for a full follow-up run only if it
+improves validation latent prediction reproducibly and substantially relative to the re-run
+final-layer baseline." No layer does -- final already has the lowest val MSE. Per the spec's own
+fallback ("if all layers perform similarly... document architecture/context as the next
+hypothesis"), no follow-up run is recommended.
+
+**Listening screen: not generated.** The spec calls for a blinded A/B between "the current
+final-layer baseline" and "the validation-selected best candidate layer" -- but the
+validation-selected best candidate *is* the final layer. There is no second, distinct condition
+to blind-test against the baseline, so producing WAV files here would just be comparing the same
+checkpoint against itself. Noted explicitly rather than silently skipped, and rather than
+substituting a different layer (e.g. "earliest," the cosine-similarity standout) that the primary
+ranking metric did not select -- doing so would violate "do not declare success from a tiny
+numerical difference."
+
+Full six-plus-one-question interpretation and final recommendation in
+`notes/DECISIONS.md#muq-layer-sweep`.

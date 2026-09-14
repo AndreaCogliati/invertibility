@@ -1330,3 +1330,139 @@ retained checkpoint.
 **Rollback plan.** This entire line of work lives on `experiment/muq-to-dac-more-data`, branched
 off `experiment/muq-to-dac-scale-data`. If abandoned, simply do not merge; no baseline files were
 touched.
+
+## muq-layer-sweep: MuQ layer choice does not resolve the saturation ceiling -- the final layer already wins
+
+**Context.** The full-GTZAN data-scaling experiment ([[muq-to-dac-more-data]]) found the
+generalization curve saturating (held-out cosine ~0.23, waveform correlation to the DAC oracle
+still ~0) despite ~100x more training data than Gate 4. This experiment tests an orthogonal
+hypothesis with minimal confounding: is MuQ's *final* hidden layer simply the wrong source
+representation for this task, independent of data scale? Everything except the selected MuQ
+hidden layer is held fixed to `experiment/muq-to-dac-more-data`'s exact configuration
+(architecture, receptive field, hidden size, optimizer, learning rate, loss, DAC target
+definition, MuQ checkpoint, GTZAN split, crop manifest, checkpoint-selection rule). Branched off
+`experiment/muq-to-dac-more-data`.
+
+**MuQ's hidden-state structure, measured directly (`scripts/inspect_muq_hidden_states.py`), not
+assumed:** `output_hidden_states=True` returns 13 tensors; `len(model.model.conformer.layers) ==
+12` confirms index 0 is the frontend/embedding output (before any transformer block) and indices
+1-12 are the outputs after each of the 12 Conformer blocks. `hidden_states[12]` is verified
+byte-identical (`torch.equal`) to `last_hidden_state` -- the representation used in every prior
+experiment in this investigation. All 13 hidden states share shape `(1, 50, 1024)` on a 2s crop
+-- same channel count, same frame rate across every layer -- so **no shape adapter was needed**.
+
+**Candidate layers, chosen by a pure, unit-tested function, not by eye:**
+`layer_sweep_common.select_evenly_spaced_layers(12, 5)` (`linspace(1, 12, 5)` rounded to nearest
+int) gives **[1, 4, 6, 9, 12]** -- earliest / early-middle / middle / late-middle / final.
+
+**Caching:** one MuQ forward pass per crop (`output_hidden_states=True`) extracting all 5
+candidate layers at once, for the exact same 1998-crop `more_data_crops.csv` manifest (reused
+unchanged) -- 45.91s total, `data/cache/layer_sweep/muq_layers_cache.pt` (2.05GB, new file,
+git-ignored). DAC latents were read directly from the existing, untouched
+`data/cache/more_data/muq_dac_cache.pt`, with a runtime assertion that its mtime never changed
+during the precompute run, confirming the read-only reuse held in practice, not just in
+intention. Cache keys (`layer_sweep_common.layer_cache_label`) embed the crop label, exact
+hidden-state index, source-audio checksum, MuQ checkpoint identifier, MuQ package version, and
+dtype, per this experiment's explicit requirement.
+
+**Screening budget: 45000 steps, chosen and documented before training anything but the
+final-layer control.** `artifacts/more_data/report.json`'s curve showed a turbulent/unstable
+phase through ~step 32000, then a comparatively stable region to 60000 (best at 50000); 45000
+steps lands past the turbulence with several near-best sample points, without repeating the full
+60000-step run.
+
+**A genuine, slightly uncomfortable surprise: the final-layer control run was itself turbulent
+for most of its budget.** Its validation MSE spiked to 142.3 (step 10000) and 65.5 (step 15000)
+-- reproducing the same turbulence signature as the original more-data run at similar step
+counts -- before settling to 18.6 by step 45000. The *best* checkpoint by validation MSE came
+from **step 1500** (val_mse=17.34), an early, fortuitous dip before the long turbulent stretch,
+not from the eventual stable region. This means validation-MSE-only checkpoint selection can, at
+this training regime's noise level, occasionally land on an early lucky point rather than a
+representative late-training optimum -- worth flagging as a real property of this pipeline, even
+though it did not change this experiment's outcome (the sanity-check bounds, val MSE <= 25 and
+val cosine >= 0.15, were comfortably met: 17.34 and 0.2208 respectively). The control run
+**passed** its sanity check, so the sweep proceeded.
+
+**Full comparison table, ordered by MuQ depth (primary ranking metric: validation MSE, lower is
+better):**
+
+| layer | index | best step | val MSE | val cosine | test MSE | test cosine | margin (shuffled) | margin (shifted) | val wav corr. to oracle |
+|---|---|---|---|---|---|---|---|---|---|
+| earliest | 1 | 18000 | 17.8052 | 0.2443 | 17.6505 | 0.2395 | 0.1242 | 0.0818 | 0.0004 |
+| early-middle | 4 | 4500 | 17.5662 | 0.2301 | 17.4594 | 0.2255 | 0.1121 | 0.0731 | 0.0000 |
+| middle | 6 | 2500 | 17.9254 | 0.2160 | 17.8065 | 0.2130 | 0.1012 | 0.0689 | -0.0013 |
+| late-middle | 9 | 33000 | 17.6987 | 0.2260 | 17.5615 | 0.2233 | 0.1005 | 0.0719 | 0.0004 |
+| **final** | **12** | **1500** | **17.3382** | 0.2208 | **17.2589** | 0.2154 | 0.1022 | 0.0733 | 0.0001 |
+
+**Final layer wins the primary metric outright -- lowest val MSE AND lowest test MSE of all
+five, with no candidate coming close.** The one notable secondary-metric wrinkle: "earliest"
+(layer 1) has the *highest* cosine similarity on both val and test (0.244/0.240 vs. final's
+0.221/0.215) and the largest controls margin -- a real, if small (~10% relative), effect that
+does not come with a lower MSE or any waveform-domain gain. `val_wav_corr` is statistically
+indistinguishable from zero for every single layer, no exceptions -- the metric that has tracked
+perceptual outcomes throughout this investigation shows literally no signal from layer choice at
+all.
+
+**Answering the seven required scientific questions:**
+
+1. *Does DAC-latent predictability vary systematically with MuQ depth?* Only weakly and
+   non-monotonically. Val MSE doesn't trend cleanly with depth (17.81 -> 17.57 -> 17.93 -> 17.70
+   -> 17.34); val cosine is highest at the earliest layer and doesn't decline monotonically
+   toward the final layer either. Differences across all five layers are small relative to their
+   overall scale.
+2. *Does any layer materially outperform the final layer on validation and test?* No. Final has
+   the lowest MSE (the primary metric) on both splits. "Earliest" edges it out on cosine
+   similarity, but not materially, and not on the primary ranking metric.
+3. *Are gains visible only in latent metrics, or do they reach oracle-relative audio metrics?*
+   Only in latent metrics, and only marginally there. No layer's waveform correlation to the DAC
+   oracle differs meaningfully from zero -- nothing reaches the audio-domain metric at all.
+4. *Does the correct-conditioning advantage over shuffled and shifted controls increase for
+   earlier layers?* Marginally for the single earliest layer (largest margins in the table), but
+   not as a clean monotonic trend across all four non-final layers (early-middle, middle, and
+   late-middle margins are all lower than earliest's and don't decrease steadily with depth
+   either).
+5. *Is there evidence that reconstruction-relevant acoustic information becomes less accessible
+   in later MuQ layers?* Weak, suggestive evidence at best -- consistent with the plausible
+   mechanism that a self-supervised music-understanding model abstracts away low-level acoustic
+   detail as depth increases -- but this doesn't translate into better latent MSE or any
+   waveform-domain improvement, so it's not strong evidence.
+6. *Is the best layer consistent across validation and test without having selected it on test
+   performance?* Yes. Final has the lowest MSE on both val and test; "earliest" (under the
+   cosine metric instead) is also the best on both val and test. Whichever metric is used, val
+   and test agree on the winner -- this isn't a test-performance artifact in either reading.
+7. *Does the observed result justify a full training run for one candidate layer?* No.
+
+**Decision, per this experiment's own decision rule, applied literally.** "A layer qualifies for
+a full follow-up run only if it improves validation latent prediction reproducibly and
+substantially relative to the re-run final-layer baseline" -- no layer does; final already has
+the lowest validation MSE among all five. Per the spec's explicit fallback for this outcome ("if
+all layers perform similarly... conclude that layer choice does not resolve the current ceiling
+under this translator; do not increase model complexity automatically; document architecture/
+context as the next hypothesis"): **MuQ layer choice does not explain or resolve the saturation
+ceiling found in the data-scaling experiments.** The final layer -- the representation used
+throughout this entire investigation -- was never the bottleneck on this axis. Architecture and
+context (receptive field, temporal modeling capacity) remain the leading unexplored hypotheses,
+consistent with [[muq-to-dac-more-data]]'s own recommendation.
+
+**Listening screen: not generated, and this is itself worth recording.** The spec's blinded A/B
+set is defined as "current final-layer baseline" vs. "validation-selected best candidate layer"
+-- but the validation-selected best candidate *is* the final layer. There is no second, distinct
+condition to blind-test against the baseline. Substituting a different layer (e.g. "earliest,"
+the cosine-similarity standout) would have meant generating a listening comparison for a layer
+the primary ranking metric did not select -- directly against the spec's "do not declare success
+from a tiny numerical difference" instruction. Noted explicitly rather than silently worked
+around.
+
+**Consequences.** `src/muq_inversion/layer_sweep_common.py`, `scripts/
+inspect_muq_hidden_states.py`, `scripts/precompute_layer_sweep_cache.py`, `scripts/
+train_layer_sweep.py`, and `tests/test_layer_sweep.py` (15 new tests, all passing; full suite now
+62 tests) now exist on this branch. `src/muq_inversion/encoder.py` gained one new method,
+`encode_all_hidden_states`, additive only -- the existing `encode()` contract used by every other
+branch/experiment is untouched. No MuQ baseline, HiFi-GAN, EnCodec, or Gate 5 code was touched
+(confirmed via `ruff check .` and the full test suite passing). `data/cache/more_data/
+muq_dac_cache.pt` was verified unmodified (mtime-checked at runtime, not just intended).
+`runs/layer_sweep/<layer>/checkpoints/best.pt` (5 x 60MB) are the sole retained checkpoints.
+
+**Rollback plan.** This entire line of work lives on `experiment/muq-layer-sweep`, branched off
+`experiment/muq-to-dac-more-data`. If abandoned, simply do not merge; no baseline files were
+touched.
