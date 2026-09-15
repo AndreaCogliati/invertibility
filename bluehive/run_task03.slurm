@@ -1,15 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=muq-spec-dense-wandb
-#SBATCH --output=%x-%j.out
-#SBATCH --error=%x-%j.err
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
 #SBATCH --time=06:00:00
-#SBATCH --partition=CHANGE_ME        # e.g. "gpu" -- check `sinfo -o "%P %G"` on BlueHive for your allocation's GPU partitions
-#SBATCH --account=CHANGE_ME          # your BlueHive allocation/account (check `sacctmgr show assoc user=$USER`)
+#SBATCH --partition=preempt          # e.g. "gpu" -- check `sinfo -o "%P %G"` on BlueHive for your allocation's GPU partitions
 #SBATCH --gres=gpu:1                 # 1 GPU is enough for this model (15.9M params) -- see bluehive/README.md
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=CHANGE_ME@rochester.edu
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=andrea.cogliati@rochester.edu
 
 # TASK-03 (tasks/TASK-03.md): exact reproduction of TASK-02's dense-coverage spectrogram-to-DAC
 # experiment, on BlueHive, with full W&B instrumentation. Every CHANGE_ME above must be filled in
