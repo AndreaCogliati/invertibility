@@ -50,18 +50,24 @@ def init_run(
     job_id: str | None = None,
     run_name: str | None = None,
     mode: str = "online",
+    group: str = GROUP,
+    job_type: str | None = None,
+    tags: list[str] | None = None,
 ):
-    """Initializes a W&B run under this task's fixed project/group. Import of `wandb` is local
-    to this function so the rest of the codebase (and its test suite) never requires `wandb` to
-    be importable or configured -- only the scripts that actually opt into W&B logging pay that
-    cost. `mode='offline'` or `'disabled'` lets a caller (or a BlueHive compute node with no
-    outbound network access) run without a live connection; `wandb sync` can push an offline run
-    later."""
+    """Initializes a W&B run under the fixed `PROJECT`, with `group` defaulting to TASK-03's
+    `spectrogram-control` (overridable -- e.g. `tasks/TASK-04.md`'s `spectrogram-gate3`). Import
+    of `wandb` is local to this function so the rest of the codebase (and its test suite) never
+    requires `wandb` to be importable or configured -- only the scripts that actually opt into
+    W&B logging pay that cost. `mode='offline'` or `'disabled'` lets a caller (or a BlueHive
+    compute node with no outbound network access) run without a live connection; `wandb sync` can
+    push an offline run later."""
     import wandb
 
     run_name = run_name or make_run_name()
     full_config = {**config, **build_run_metadata(environment, job_id)}
-    return wandb.init(project=PROJECT, group=GROUP, name=run_name, config=full_config, mode=mode)
+    return wandb.init(
+        project=PROJECT, group=group, job_type=job_type, tags=tags, name=run_name, config=full_config, mode=mode
+    )
 
 
 def checkpoint_table_rows(

@@ -972,3 +972,54 @@ maximally-smooth solution simultaneously, for this loss/target combination.
 Full write-up: notes/DECISIONS.md#task03-bluehive-wandb. bluehive/README.md +
 bluehive/run_task03.slurm are the handoff -- genuinely untested against a real cluster, flagged
 as such.
+
+## 2026-09-15: Spectrogram Gate-3 memorization control (tasks/TASK-04.md)
+
+Hypothesis: can Spectrogram->DAC memorize the same 2 fixed excerpts (pop.00012, disco.00049) as
+the successful MuQ Gate-3 control?
+
+Found the exact MuQ Gate-3 crop (scripts/train_muq_to_dac_temporal_conv.py: centered crop,
+start=(len-48000)//2 -> 14.000083s for both tracks) and confirmed it's already in TASK-02's dense
+cache at t=14.00s (crop_index=7), 2 samples/83us off. Reused directly, no new cache.
+
+Commands:
+```
+uv run python -u scripts/train_spectrogram_gate3_wandb.py --wandb-mode disabled   # first pass
+```
+First pass revealed a bug: comparing the MuQ checkpoint against examples[track].dac (TASK-02's
+dense-grid target) gave mean_cos=0.577, mean_mse=15.9 -- wildly worse than the documented
+0.9999-1.0000. Debugged directly: reproduced independently, found the MuQ model is EXTREMELY
+sensitive to the 2-sample/83us crop offset -- evaluating on its exact own crop gives cos=0.99998,
+evaluating 2 samples off gives cos=0.577. Real finding, not a bug in my harness. Fixed the
+comparison section to recompute MuQ's input/target from its own exact crop formula.
+
+Reran clean:
+```
+uv run python -u scripts/train_spectrogram_gate3_wandb.py --wandb-mode disabled   # PASSED, byte-identical curve to first pass (as expected, bug was only in the post-hoc comparison)
+uv run python -u scripts/train_spectrogram_gate3_wandb.py --wandb-mode online     # the real run, 3000 steps is small enough this IS the real experiment, not just a smoke test
+uv run ruff check .; uv run pytest -q   # 117 passed
+```
+
+Refactored testable logic (evaluate_prediction, three_way_grad_norms, count_nonfinite,
+ExampleData/load_examples, build_memorization_log_payload) into
+src/muq_inversion/gate3_spectrogram_common.py, following the gate4_common.py/
+layer_sweep_common.py precedent, rather than importing from scripts/ in tests (no prior
+precedent for that in this repo).
+
+Final result (best checkpoint step 2536/3000): mse=0.000547, cos=0.99999, norm_ratio=0.9999,
+var_ratio=0.9998, wav_corr=0.99999, stft=0.0145 -- matching/exceeding MuQ's own (re-evaluated
+correctly): mse=0.001936, cos=0.99996, norm_ratio=1.0038, var_ratio=1.0073, wav_corr=0.99994,
+stft=0.0415. Strong Success. Full write-up: notes/DECISIONS.md#task04-spectrogram-gate3.
+
+Live W&B run: wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility/runs/7kfiziym
+
+## 2026-09-15: TASK-04 listening verdict
+
+User's verdict on the 4 sent WAVs (pop.00012 reference/dac_oracle/best_by_mse-step2536/step0):
+"the two audio excerpts are already great at 1000 steps. Almost undistinguishable from the final
+version or the original. The early excerpts show signs of artifacts, though."
+
+Confirms the metrics by ear -- Strong Success holds perceptually, not just numerically. Also
+confirms perceptual convergence is front-loaded (matches cosine already at 0.98 by step 1000),
+and that early/unconverged checkpoints are audibly worse (matches their far-from-converged
+metrics). Recorded in notes/DECISIONS.md#task04-spectrogram-gate3 and notes/MEMORY.md.

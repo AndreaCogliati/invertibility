@@ -358,3 +358,35 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   the MSE-cheap solution, the norm-collapsed solution, and the maximally over-smoothed solution,
   because for this target/loss combination those are the same solution.** 24 new tests, full
   suite 103 passing. Full write-up in [[task03-bluehive-wandb]].
+- Spectrogram Gate-3 memorization control CONCLUDED (2026-09-15, `tasks/TASK-04.md`): tested
+  whether Spectrogram->DAC can memorize two fixed training excerpts at all, on the exact same
+  two clips (`pop.00012`, `disco.00049`) as the successful MuQ Gate-3 memorization control
+  (`experiment/muq-to-dac-temporal-conv`, cosine 0.9999-1.0000). Same architecture
+  (`SpectrogramToDacTranslator`), loss (MSE+0.1*cosine), and hyperparameters as that control
+  (Adam lr=1e-3, 3000 steps, alternating presentation). **Result: Strong Success -- near-perfect
+  memorization matching or exceeding the MuQ control** (best checkpoint, step 2536/3000: MSE
+  0.000547, cosine 0.99999, norm ratio 0.9999, variance ratio 0.9998, waveform correlation
+  0.99999, STFT distance 0.0145 -- vs. MuQ's own 0.001936 / 0.99996 / 1.0038 / 1.0073 / 0.99994 /
+  0.0415). Both excerpts memorized evenly (1500/1500 presentations). **This decisively rules out
+  data alignment, spectrogram preprocessing, the 128->1024 projection, translator implementation,
+  target extraction, loss computation, gradient flow, checkpoint restoration, and DAC decoding as
+  explanations for TASK-01/02's GTZAN-scale failure -- the pipeline works; the failure is
+  generalization/scale-specific**, consistent with and reinforcing [[task03-bluehive-wandb]]'s
+  regression-to-the-mean finding (collapse never emerged here: lag-1 autocorrelation tracked the
+  oracle's own ~0.05 throughout, vs. ~0.95 at GTZAN scale -- collapse looks like a property of
+  the multi-example training regime, not the architecture/loss in isolation). **Unplanned finding
+  while building the required MuQ-comparison table**: the trained MuQ Gate-3 checkpoint is
+  extremely sample-alignment-sensitive -- a 2-sample (83us) crop offset collapses its cosine
+  similarity from 0.99998 to 0.577, meaning that "successful" memorization is a narrow,
+  sample-exact overfit, not a phase-tolerant content-level fit. All 11 pre-training integrity
+  checks passed (alignment, caching determinism, gradient reach, checkpoint reproducibility,
+  etc.), run twice (disabled + online W&B modes) with byte-identical results, confirming
+  determinism. 14 new tests, full suite 117 passing. Live W&B run: `wandb.ai/
+  andrea-cogliati-university-of-rochester/muq-invertibility/runs/7kfiziym`. **Listening verdict
+  (2026-09-15), confirmed by ear: "the two audio excerpts are already great at 1000 steps. Almost
+  undistinguishable from the final version or the original. The early excerpts show signs of
+  artifacts, though."** Metrics and perception agree here (unlike several earlier findings in
+  this project) -- convergence is perceptually front-loaded (audible quality plateaus well before
+  step 3000, consistent with cosine already at 0.98 by step 1000), and the still-artifacted early
+  checkpoints match their still-far-from-converged metrics. Full write-up in
+  [[task04-spectrogram-gate3]].

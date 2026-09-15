@@ -1835,3 +1835,161 @@ above (both verified via the full existing test suite passing unchanged). Deleti
 directories and reverting the two modified files' diffs fully reverts this task's code. The W&B
 project/runs live on wandb.ai and are not affected by any local git rollback -- delete via the
 W&B UI/API separately if desired.
+
+## task04-spectrogram-gate3: Strong Success -- the pipeline memorizes near-perfectly; TASK-01/02's failure is generalization, not a basic defect
+
+**Context (`tasks/TASK-04.md`).** After [[spectrogram-positive-control]] and
+[[dense-spectrogram-positive-control]] found severe norm/variance collapse and near-zero
+waveform correlation at GTZAN scale, and [[task03-bluehive-wandb]] found the pipeline
+structurally biased toward a regression-to-the-mean solution under pure validation-MSE
+selection, this task asks the most basic remaining question: can the Spectrogram->DAC pipeline
+fit anything at all? Replaces the input of the successful two-excerpt MuQ-to-DAC memorization
+control (`experiment/muq-to-dac-temporal-conv`, cosine 0.9999-1.0000, confirmed by listening)
+with TASK-01/02's log-mel spectrogram, training on the exact same two fixed excerpts
+(`pop.00012`, `disco.00049`), architecture (`SpectrogramToDacTranslator`, unchanged), loss (MSE +
+0.1*cosine, unchanged), and hyperparameters (Adam lr=1e-3, betas=(0.9,0.999), 3000 steps,
+alternating presentation, seed=0) as that control.
+
+**The two excerpts, reused not recomputed -- and a real discovery in the process.** TASK-02's
+dense manifest already contains a crop at `t=14.00s` for both tracks (`crop_index=7`), 2 samples
+(83 microseconds) off the MuQ script's own exact center-crop formula. Building the required
+direct comparison against the MuQ checkpoint surfaced that this tiny offset is **not** negligible
+for that model: evaluating the trained MuQ checkpoint on the 2-sample-shifted crop instead of its
+own exact training crop collapsed its cosine similarity from 0.99998 to 0.577 -- discovered by
+running the comparison, not assumed, and corrected before trusting any number (the MuQ side of
+every reported comparison below uses its own exact center crop; this task's own training/eval
+always uses one crop consistently, so the offset never affected its own numbers). **This is
+itself a meaningful, unplanned finding**: the "successful" MuQ Gate-3 memorization is an
+extremely narrow, sample-exact overfit to two specific input vectors, not any kind of
+content-level or phase-tolerant fit -- worth remembering when interpreting what "the pipeline can
+memorize" means for either model.
+
+**Pre-training integrity checks: all 11 passed** (tasks/TASK-04.md's exact numbered list) --
+repeated cache loads identical, spectrogram/DAC-target caching both independently reproduced
+from source audio within 1e-3 tolerance, input/target frame alignment (150 frames each),
+model-output-shape match, finite loss and gradient reach to all three submodules (mel
+projection/translator/output layer) over a 5-step warmup, frozen DAC (0 trainable params),
+non-silent oracle decode, and checkpoint save/reload exact-prediction reproducibility. Run twice
+(a `--wandb-mode disabled` dry run, then the real `--wandb-mode online` run) with byte-identical
+results both times, confirming determinism.
+
+**Training: near-perfect convergence, matching the MuQ result's shape and speed.** cosine
+similarity: 0.15 (step 1) -> 0.59 (step 250) -> 0.98 (step 1000) -> 0.9998 (step 3000); mean MSE:
+40.5 -> 12.4 -> 0.68 -> 0.0069. 402.85s total (134 ms/step -- slower per-step than the MuQ
+script's 6.04ms, expected: no `repeat_interleave` fusion, plus per-step full two-example
+diagnostic evaluation this task requires). Best-by-MSE/cosine checkpoint at step 2536 (of 3000) --
+**not** an early-lucky-dip this time, unlike every GTZAN-scale experiment in this investigation:
+the model keeps improving for most of the budget, consistent with this being a well-posed,
+non-collapsing optimization problem at this (tiny) scale.
+
+**Result -- near-perfect memorization, matching or exceeding the MuQ control (best checkpoints,
+step 2536 spectrogram vs. step 3000 MuQ, its own final/best-available checkpoint):**
+
+| metric | MuQ Gate-3 | Spectrogram Gate-3 |
+| --- | --- | --- |
+| MSE | 0.001936 | 0.000547 |
+| cosine similarity | 0.99996 | 0.99999 |
+| norm ratio | 1.0038 | 0.9999 |
+| variance ratio | 1.0073 | 0.9998 |
+| prediction lag-1 autocorrelation | 0.0474 | 0.0528 |
+| oracle lag-1 autocorrelation | 0.0482 | 0.0529 |
+| STFT distance to oracle | 0.0415 | 0.0145 |
+| waveform correlation to oracle | 0.99994 | 0.99999 |
+
+**Direct comparison across all four experiments in this line, per this task's required table
+(training-set metrics for TASK-01/02, at their own validation-MSE-selected checkpoints -- labeled
+as training metrics, not validation, per this task's explicit "do not compare a training metric
+from one experiment against a validation metric from another without labeling the distinction"
+instruction):**
+
+| metric | MuQ Gate-3 | Spectrogram Gate-3 | TASK-01 (train) | TASK-02 (train) |
+| --- | --- | --- | --- | --- |
+| training crops | 2 | 2 | 1584 | 11873 |
+| total unique audio | 4.0s | 4.0s | 3168s | 23746s |
+| best checkpoint step | 3000 | 2536 | 1000 | 1000 |
+| training MSE | 0.001936 | 0.000547 | 16.466 | 16.394 |
+| training cosine | 0.9999635 | 0.9999857 | 0.2954 | 0.2908 |
+| norm ratio | 1.0038 | 0.9999 | 0.3598 | 0.3186 |
+| variance ratio | 1.0073 | 0.9998 | 0.1072 | 0.0835 |
+| prediction lag-1 autocorr | 0.0474 | 0.0528 | 0.9677 | 0.9487 |
+| oracle lag-1 autocorr | 0.0482 | 0.0529 | 0.0873 | 0.0877 |
+| STFT distance to oracle | 0.0415 | 0.0145 | 3.020 | 3.637 |
+| waveform correlation to oracle | 0.99994 | 0.99999 | 0.0004 | -0.0012 |
+
+**Interpretation -- Strong Success, per this task's own pre-registered rule.** Every criterion
+listed for "Strong Success" is met: training MSE/cosine approach (here, meet or exceed) the MuQ
+result; prediction norm, variance, and temporal dynamics (lag-1 autocorrelation 0.053 vs.
+oracle's 0.053) closely track the oracle; waveform correlation is 0.99999; both excerpts are
+memorized evenly (1500/1500 presentations, and per-example metrics -- not shown above but in
+`artifacts/task04_spectrogram_gate3/report.json` -- confirm neither excerpt dominates). **The
+spectrogram/`SpectrogramToDacTranslator`/DAC-target/frozen-decoder pipeline can fit the
+post-RVQ DAC latent target on a tiny fixed dataset, decisively.** Combined with the two-example
+table row directly above the GTZAN-scale rows: the contrast is stark -- 2 training crops reach
+cosine 0.99999 and waveform correlation 0.99999, while 1584-11873 crops reach cosine ~0.29 and
+waveform correlation ~0. **This rules out data alignment, spectrogram preprocessing, the learned
+128->1024 projection, translator implementation, target extraction, loss computation, gradient
+flow, checkpoint restoration, and DAC decoding as explanations for TASK-01/02's failure** -- per
+this task's own H2 diagnostic list, none of those can be the cause, since all of them are
+exercised identically here and work. **The TASK-01/02 failures are failures of generalization
+and/or of this training regime at GTZAN scale (interacting with the regression-to-the-mean
+checkpoint-selection mechanism [[task03-bluehive-wandb]] already identified), not a basic
+inability of this pipeline to optimize or decode.**
+
+**Answering this task's final questions directly:**
+
+> Can the pipeline nearly perfectly memorize the same two excerpts as the MuQ control? **Yes** --
+> matching or exceeding it on every latent and audio metric.
+
+> Does low training loss correspond to restored norm/variance/temporal dynamics? **Yes, at this
+> scale** -- norm ratio 0.9999, variance ratio 0.9998, lag-1 autocorrelation within 0.0001 of the
+> oracle's own. (At GTZAN scale, per TASK-01/02, the answer is no -- low-ish training loss
+> coexists with severe collapse; this experiment shows the loss/metric relationship itself is not
+> inherently broken, only broken at scale.)
+
+> Does better latent fitting produce audio matching the DAC oracle? **Yes** -- waveform
+> correlation 0.99999, STFT distance 0.0145, and the listening package (14 WAVs, `artifacts/
+> task04_spectrogram_gate3/`) is available for direct confirmation.
+
+> If it failed, where? **It did not fail** -- H1 confirmed, H2 (implementation-failure hypothesis)
+> rejected.
+
+> What do the trajectories reveal about when collapse/over-smoothing emerge? **They don't emerge
+> at this scale at all** -- lag-1 autocorrelation stays near the oracle's own low value throughout
+> convergence (0.053 final vs. ~0.05 oracle), never approaching the ~0.95 seen in TASK-01/02.
+> Combined with [[task03-bluehive-wandb]]'s regression-to-the-mean finding, the natural reading is
+> that collapse is a property of the *multi-example* training regime (where matching the dataset
+> mean is a cheap MSE-reducing shortcut unavailable when there is effectively only one target
+> per step to fit exactly), not of the architecture or loss in isolation.
+
+**Listening verdict (2026-09-15): confirmed by ear, matching the metrics.** User's report on the
+4 WAVs sent (`pop.00012` reference / DAC oracle / best-by-MSE (step 2536) / untrained step-0):
+"the two audio excerpts are already great at 1000 steps. Almost undistinguishable from the final
+version or the original. The early excerpts show signs of artifacts, though." This confirms two
+things directly: (1) the near-perfect metrics reflect genuinely near-perfect perceptual quality,
+not a metric/perception divergence of the kind seen repeatedly elsewhere in this project (see
+[[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]) -- the Strong Success verdict above holds by
+ear, not just by number; (2) convergence is perceptually front-loaded, consistent with the
+measured curve (cosine already 0.98 at step 1000, 0.9998 by step 3000) -- audible quality
+plateaus well before the nominal "final" checkpoint, while the earliest checkpoints (step 0/250,
+still far from converged) carry audible artifacts as expected. Per this task's explicit "stop
+after answering these questions" instruction: no further experiment launched from here without
+direction.
+
+**Minor logging quirk, documented not fixed:** the post-hoc `best_by_mse` audio re-log (step
+2536) after the training loop already advanced W&B's step counter to 3000 triggers a harmless
+"steps must be monotonically increasing" W&B warning; the scalar log for that specific out-of-
+order step is dropped, but the WAV file itself is written locally and uploaded as an artifact
+regardless -- no data lost, cosmetic only.
+
+**Consequences.** New files: `data/manifests/gate3_spectrogram_two_excerpt.csv` (tracked),
+`src/muq_inversion/gate3_spectrogram_common.py`, `scripts/train_spectrogram_gate3_wandb.py`,
+`tests/test_spectrogram_gate3.py` (14 new tests, full suite now 117 passing). No TASK-01/02/03
+file modified. New artifacts: `artifacts/task04_spectrogram_gate3/report.json` + 14 listening
+WAVs (git-ignored), `runs/task04_spectrogram_gate3/checkpoints/{step0,best_by_mse,best_by_cosine,
+best_by_wav_corr,final,periodic}.pt` (git-ignored). Live W&B run:
+`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility/runs/7kfiziym` (group
+`spectrogram-gate3`, job_type `memorization-control`).
+
+**Rollback plan.** Entirely additive; no TASK-01/02/03 file was modified. Deleting the four new
+files and the two new artifact/run directories fully reverts this task's local footprint; the
+W&B run remains on wandb.ai independent of any local rollback.
