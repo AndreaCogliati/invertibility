@@ -1,13 +1,15 @@
-"""Pure, testable helpers for the spectrogram Gate-3 memorization control
-(`tasks/TASK-04.md`, `scripts/train_spectrogram_gate3_wandb.py`).
+"""Pure, testable helpers for the spectrogram Gate-3 memorization control (`tasks/TASK-04.md`,
+`scripts/train_spectrogram_gate3_wandb.py`) and its scaling-curve follow-up (`tasks/TASK-05.md`,
+`scripts/train_gate3_scale_wandb.py`).
 
-Kept separate from the training script, mirroring this project's existing convention
+Kept separate from the training scripts, mirroring this project's existing convention
 (`gate4_common.py`, `layer_sweep_common.py`) -- so the metric/gradient/payload logic can be
 unit-tested without loading any model, cache, or W&B connection.
 """
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 from pathlib import Path
 
@@ -36,21 +38,36 @@ class ExampleData:
     dac: torch.Tensor
 
 
-def load_examples(device: torch.device) -> dict[str, ExampleData]:
-    """Loads both fixed excerpts directly from TASK-02's dense cache -- no new cache is built
-    for this task (see the training script's module docstring for why the exact crops are
-    already present and verified)."""
+def _cache_label(split: str, track_id: str, crop_start_seconds: float) -> str:
+    return f"{split}_{track_id}_t{crop_start_seconds:.1f}s"
+
+
+def load_examples_from_manifest(manifest_path: Path, device: torch.device) -> dict[str, ExampleData]:
+    """Loads an arbitrary set of examples (keyed by track_id) directly from TASK-02's dense
+    cache, given a manifest CSV with the standard `split,track_id,...,crop_start_seconds,...`
+    schema (`dense_crops.csv`, `gate3_scale_*.csv`, or this task's own two-excerpt manifest).
+    No new cache is built -- every crop this project's Gate-3 experiments use is already present
+    in `data/cache/dense/mel_dac_cache.pt` (verified at manifest-build time, not assumed here)."""
     if not DENSE_CACHE_PATH.exists():
-        raise SystemExit(f"{DENSE_CACHE_PATH} not found -- this task reuses TASK-02's dense cache")
+        raise SystemExit(f"{DENSE_CACHE_PATH} not found -- reuses TASK-02's dense cache")
     cache = torch.load(DENSE_CACHE_PATH, map_location=device, weights_only=False)
+    with open(manifest_path, newline="") as f:
+        rows = list(csv.DictReader(f))
     examples: dict[str, ExampleData] = {}
-    for track_id in TRACKS:
-        label = LABELS[track_id]
+    for row in rows:
+        track_id = row["track_id"]
+        label = _cache_label(row["split"], track_id, float(row["crop_start_seconds"]))
         if label not in cache["crops"]:
-            raise SystemExit(f"STOP CONDITION: {label} not found in {DENSE_CACHE_PATH} -- expected from TASK-02")
+            raise SystemExit(f"STOP CONDITION: {label} not found in {DENSE_CACHE_PATH} (manifest: {manifest_path})")
         entry = cache["crops"][label]
         examples[track_id] = ExampleData(track_id=track_id, mel=entry["mel"].to(device), dac=entry["dac"].to(device))
     return examples
+
+
+def load_examples(device: torch.device) -> dict[str, ExampleData]:
+    """Loads TASK-04's exact two fixed excerpts. Thin wrapper over
+    `load_examples_from_manifest` for backward compatibility with TASK-04's own code/tests."""
+    return load_examples_from_manifest(MANIFEST_PATH, device)
 
 
 def three_way_grad_norms(model: SpectrogramToDacTranslator) -> dict[str, float]:
@@ -139,3 +156,30 @@ def build_memorization_log_payload(
     for k, v in mean_metrics.items():
         payload[f"memorization/mean_{k}"] = v
     return payload
+
+
+def aggregate_metrics_across_examples(per_example: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    """`tasks/TASK-05.md`'s "mean, median, worst-case across examples" requirement. Reports
+    mean/median/min/max per metric rather than picking a single "worst" direction per metric
+    (which is worse -- min or max -- differs by metric: higher is worse for `mse`, lower is worse
+    for `cosine`), so callers/readers can interpret min or max as "worst" per their own metric.
+    Raises if `per_example` is empty or examples don't share the same metric keys, so a partial
+    per-example dict (e.g. one example's decode-based metrics missing) fails loudly rather than
+    silently aggregating over a mismatched subset."""
+    if not per_example:
+        raise ValueError("per_example must be non-empty")
+    metric_names = set(next(iter(per_example.values())).keys())
+    for track_id, metrics in per_example.items():
+        if set(metrics.keys()) != metric_names:
+            raise ValueError(f"{track_id} has metric keys {set(metrics.keys())}, expected {metric_names}")
+
+    aggregated: dict[str, dict[str, float]] = {}
+    for metric in metric_names:
+        values = np.array([per_example[t][metric] for t in per_example])
+        aggregated[metric] = {
+            "mean": float(np.mean(values)),
+            "median": float(np.median(values)),
+            "min": float(np.min(values)),
+            "max": float(np.max(values)),
+        }
+    return aggregated

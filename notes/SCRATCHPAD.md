@@ -1023,3 +1023,62 @@ Confirms the metrics by ear -- Strong Success holds perceptually, not just numer
 confirms perceptual convergence is front-loaded (matches cosine already at 0.98 by step 1000),
 and that early/unconverged checkpoints are audibly worse (matches their far-from-converged
 metrics). Recorded in notes/DECISIONS.md#task04-spectrogram-gate3 and notes/MEMORY.md.
+
+## 2026-09-15: TASK-05 (Gate-3 scaling curve, N=2/8/32/128/512)
+
+Goal: find where collapse begins between TASK-04's N=2 (perfect) and TASK-01/02's N~15000
+(collapsed).
+
+Key design decision: FIXED 20000-step max budget across all 5 levels (not scaled with N like
+TASK-02 did) -- otherwise every example could trivially memorize regardless of N, making the
+experiment unable to detect anything. Stop early on patience (best MSE no improvement >1e-5 in
+5000 steps).
+
+Manifest construction: round-robin across 10 genres alphabetically, deterministic track order,
+anchored at TASK-04's exact 2 tracks for N=2. All crops at crop_index=7 (t=14.0s) -- already in
+TASK-02's dense cache for every one of 999 tracks, so zero new precompute needed. Verified
+nesting (2⊂8⊂32⊂128⊂512) and genre balance in tests.
+
+Commands:
+```
+uv add matplotlib
+uv run python scripts/build_gate3_scale_manifests.py
+uv run python -u scripts/train_gate3_scale_wandb.py --levels 2 --wandb-mode disabled   # smoke, PASSED, 9000 steps, 666s
+uv run python -u scripts/train_gate3_scale_wandb.py --wandb-mode online   # real run, all 5 levels, ~53 min total
+uv run python scripts/plot_gate3_scale_figures.py
+uv run ruff check .; uv run pytest -q   # 130 passed
+```
+
+Results (best-by-MSE checkpoint per level):
+N=2:   mse=0.000005 cos=1.0000 norm=1.0000 var=1.0000 wav_corr=1.0000
+N=8:   mse=0.077636 cos=0.9980 norm=1.0025 var=1.0077 wav_corr=0.9970
+N=32:  mse=12.88     cos=0.5161 norm=0.4993 var=0.1773 wav_corr=0.4689
+N=128: mse=15.61     cos=0.3610 norm=0.3778 var=0.0630 wav_corr=0.0901
+N=512: mse=16.02     cos=0.3266 norm=0.3434 var=0.0480 wav_corr=0.0193
+
+Sharp break between N=8 and N=32 (>50% of the total range moves in one step), then decelerating
+decay N=32→128→512 approaching an asymptote. N=512's numbers already match TASK-01 (1584 crops)
+and TASK-02 (11873 crops) almost exactly -- the collapse regime is fully established by 512
+examples, ~23-30x less data than either GTZAN-scale run used.
+
+N=512's training itself was turbulent (huge finite spikes, mse up to 126000, norm_ratio up to
+39x) -- same instability pattern as TASK-01/02's GTZAN training, now reproduced at much smaller
+scale. Best checkpoint (step 3000/8000) unaffected since selection reloads from saved checkpoint,
+not the noisy final state.
+
+Full write-up: notes/DECISIONS.md#task05-gate3-scaling. Figures:
+artifacts/task05_gate3_scale/scaling_curve_main.png, scaling_curve_norm_variance_ratio.png.
+20 listening WAVs across the 5 levels, not yet reviewed.
+
+## 2026-09-16: TASK-05 listening verdict
+
+User's verdict on the 4 sent pop.00012 reconstructions (N=2/8/32/512): "the clips for N=32 are
+closer to those for N=128 and N=512 than to those for N=8. In other words, there's a small
+degradation after N=32, but the drop between N=8 and N=32 is dramatic."
+
+Confirms and sharpens the metric-based reading: by ear, N=32 already sounds like it belongs to
+the collapsed family (with N=128/512), not the near-perfect family (with N=2/8). The audible
+category boundary lines up exactly with the metric-located N=8-to-N=32 transition. The
+N=32-to-512 metric decline (waveform correlation 0.469 -> 0.019, >20x) is real numerically but
+comparatively minor perceptually. Recorded in notes/DECISIONS.md#task05-gate3-scaling and
+notes/MEMORY.md.

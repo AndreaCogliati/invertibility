@@ -390,3 +390,32 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   step 3000, consistent with cosine already at 0.98 by step 1000), and the still-artifacted early
   checkpoints match their still-far-from-converged metrics. Full write-up in
   [[task04-spectrogram-gate3]].
+- Gate-3 training-set-size scaling curve CONCLUDED (2026-09-15, `tasks/TASK-05.md`): trained the
+  exact TASK-04 pipeline at 5 nested training-set sizes (N=2/8/32/128/512, round-robin
+  genre-balanced, all crops already in TASK-02's dense cache -- no new precompute) with a FIXED
+  20000-step max budget across all levels (not scaled with N, a deliberate choice so per-example
+  exposure decreases as N grows -- otherwise every example could trivially memorize regardless of
+  N). **Result: a sharp collapse onset between N=8 and N=32, then asymptotic decay to the
+  GTZAN-scale ceiling by N=512.** N=2 and N=8 are statistically indistinguishable (both
+  near-perfect: norm ratio 1.00/1.00, waveform correlation 1.00/0.997). Between N=8 and N=32,
+  every collapse metric moves by more than half its entire range in one step (norm ratio 1.0025
+  -> 0.4993, variance ratio 1.0077 -> 0.1773, waveform correlation 0.997 -> 0.469). From N=32
+  onward the decline decelerates (norm ratio 0.4993 -> 0.3778 -> 0.3434 at N=32/128/512),
+  approaching an asymptote. **By N=512, results (MSE 16.02, cosine 0.327, norm ratio 0.343,
+  waveform correlation 0.019) are already statistically indistinguishable from TASK-01's
+  1584-crop and TASK-02's 11873-crop full GTZAN runs (MSE 16.47/16.39, cosine 0.295/0.291, norm
+  ratio 0.36/0.32)** -- the entire collapse regime this investigation has characterized since
+  [[muq-to-dac-scale-data]] is fully established by ~512 examples, 23-30x fewer than either
+  GTZAN-scale experiment used. Neither pure Outcome A (gradual), B (sharp-to-final-state), nor C
+  (no collapse) -- closest to B but with an asymptotic tail, consistent with a capacity/
+  optimization boundary around 8-32 simultaneously-memorizable examples giving way to the
+  regression-to-the-mean mechanism ([[task03-bluehive-wandb]]) once individual memorization is no
+  longer achievable. Two required figures produced (`artifacts/task05_gate3_scale/
+  scaling_curve_main.png`, `scaling_curve_norm_variance_ratio.png`). 13 new tests, full suite 130
+  passing. **Listening verdict (2026-09-16), confirms and sharpens the metrics: "the clips for
+  N=32 are closer to those for N=128 and N=512 than to those for N=8... the drop between N=8 and
+  N=32 is dramatic."** By ear, N=32 already belongs to the "collapsed" perceptual family with
+  N=128/512, not the "near-perfect" family with N=2/8 -- the audible category boundary matches
+  the metric-located N=8-to-N=32 transition exactly, while the N=32-to-512 metric decline
+  (waveform correlation 0.469 -> 0.019, >20x) is comparatively minor perceptually. Full write-up
+  in [[task05-gate3-scaling]].

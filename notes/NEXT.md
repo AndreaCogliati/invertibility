@@ -2,102 +2,90 @@
 
 ## Current gate
 
-Spectrogram Gate-3 memorization control (`tasks/TASK-04.md`). **Result: Strong Success --
-Spectrogram->DAC memorizes two fixed training excerpts near-perfectly, matching or exceeding the
-successful MuQ Gate-3 control on every latent and audio metric -- confirmed by listening, not
-just by metric.** User's verdict (2026-09-15): "the two audio excerpts are already great at 1000
-steps. Almost undistinguishable from the final version or the original. The early excerpts show
-signs of artifacts, though." Full reasoning in [[DECISIONS.md#task04-spectrogram-gate3]]. Per
-this task's own explicit "stop after answering these questions" instruction, do not launch a
-larger experiment or new target formulation without direction.
+Gate-3 training-set-size scaling curve (`tasks/TASK-05.md`). **Result: sharp collapse onset
+between N=8 and N=32, then asymptotic decay reaching the GTZAN-scale ceiling by N=512 -- roughly
+23-30x fewer examples than either TASK-01 or TASK-02 used. Confirmed by listening, not just by
+metric**: user's verdict (2026-09-16) -- "the clips for N=32 are closer to those for N=128 and
+N=512 than to those for N=8... the drop between N=8 and N=32 is dramatic." The audible category
+boundary matches the metric-located transition exactly; the N=32-to-512 metric decline is
+perceptually minor by comparison. Full reasoning in [[DECISIONS.md#task05-gate3-scaling]]. This
+is the most direct evidence yet for where and how this investigation's collapse pathology
+emerges.
 
 **Conclusions reached this session (full reasoning in
-[[DECISIONS.md#task04-spectrogram-gate3]]):**
+[[DECISIONS.md#task05-gate3-scaling]]):**
 
-1. Reused TASK-02's dense cache directly for the two exact excerpts (`pop.00012`, `disco.00049`
-   at `t=14.00s`, 2 samples/83us off the MuQ script's own exact center crop) -- no new cache
-   built. Reused `SpectrogramToDacTranslator`, the MSE+0.1*cosine loss, and the MuQ Gate-3
-   script's exact optimizer/step-budget/presentation-schedule unchanged.
-2. **All 11 pre-training integrity checks passed** (cache determinism, spectrogram/DAC-target
-   recomputation from source audio, frame alignment, gradient reach to all three submodules,
-   frozen DAC, checkpoint save/reload reproducibility). Run twice (disabled-mode dry run, then
-   the real online W&B run) with byte-identical results.
-3. **Training converged to near-perfect memorization**: cosine 0.15 -> 0.9998 over 3000 steps,
-   best checkpoint (step 2536) reaching MSE 0.000547, cosine 0.99999, norm ratio 0.9999,
-   variance ratio 0.9998, waveform correlation 0.99999 -- matching or exceeding the MuQ Gate-3
-   control's own 0.001936 / 0.99996 / 1.0038 / 1.0073 / 0.99994.
-4. **Unplanned discovery while building the required MuQ comparison**: the trained MuQ Gate-3
-   checkpoint is extremely sample-alignment-sensitive (a 2-sample/83us crop offset collapses its
-   cosine from 0.99998 to 0.577) -- its "successful" memorization is a narrow, sample-exact
-   overfit, not a phase-tolerant fit. Corrected the comparison to evaluate MuQ on its own exact
-   crop before trusting any number.
-5. **This decisively rules out data alignment, spectrogram preprocessing, the 128->1024
-   projection, translator implementation, target extraction, loss computation, gradient flow,
-   checkpoint restoration, and DAC decoding as explanations for TASK-01/02's GTZAN-scale
-   failure** -- every one of those is exercised identically here and works. The failure is
-   generalization/training-regime-scale specific, not a basic pipeline defect.
-6. **Collapse never emerged at this scale**: lag-1 autocorrelation tracked the oracle's own
-   ~0.053 throughout training, vs. ~0.95 at GTZAN scale in TASK-01/02 -- reinforces
-   [[task03-bluehive-wandb]]'s regression-to-the-mean finding: collapse looks like a property of
-   the *multi-example* training regime (where matching the dataset mean is a cheap MSE shortcut
-   unavailable when there's effectively one target per step to fit exactly), not of the
-   architecture or loss in isolation.
+1. Built 5 nested, genre-balanced manifests (`gate3_scale_{2,8,32,128,512}.csv`) anchored at
+   TASK-04's exact 2 excerpts, all crops already present in TASK-02's dense cache (no new
+   precompute). Trained TASK-04's exact pipeline (architecture, loss, optimizer unchanged) with a
+   FIXED 20000-step max budget across all 5 levels -- deliberately NOT scaled with N, so
+   per-example exposure genuinely decreases as N grows (the variable the experiment needed to
+   isolate).
+2. **The scaling curve**: N=2/8 near-perfect (norm ratio ~1.0, waveform correlation ~1.0);
+   N=32 already substantially collapsed (norm ratio 0.50, waveform correlation 0.47); N=128/512
+   continuing to decay toward an asymptote (norm ratio 0.38/0.34, waveform correlation 0.09/0.02).
+3. **The N=8-to-N=32 transition is sharp** (every collapse metric moves by more than half its
+   total range in one step) -- not a smooth Hypothesis-A gradual decline. But the subsequent
+   N=32-to-512 decay is real and continuous, not a Hypothesis-B step-to-final-state either.
+4. **By N=512, results are already statistically indistinguishable from TASK-01's (1584 crops)
+   and TASK-02's (11873 crops) full GTZAN runs.** The collapse regime this investigation has
+   studied since [[muq-to-dac-scale-data]] is fully established by ~512 examples.
+5. Interpretation: a capacity/optimization boundary around 8-32 simultaneously-memorizable
+   examples, giving way to the regression-to-the-mean mechanism ([[task03-bluehive-wandb]]) once
+   individual-example memorization is no longer achievable -- ties together TASK-03's and
+   TASK-04's findings into one coherent mechanism story with a measured onset point.
 
 ## Exact last successful commands
 
 ```bash
-uv run python -u scripts/train_spectrogram_gate3_wandb.py --wandb-mode disabled   # dry run, PASSED, then fixed a crop-offset bug in the MuQ comparison
-uv run python -u scripts/train_spectrogram_gate3_wandb.py --wandb-mode disabled   # rerun after fix, PASSED, byte-identical training curve
-uv run python -u scripts/train_spectrogram_gate3_wandb.py --wandb-mode online     # the real run, PASSED, W&B run 7kfiziym
-uv run ruff check .    # all checks passed
-uv run pytest -q       # 117 passed (103 baseline + 14 new gate3-spectrogram tests)
+uv add matplotlib
+uv run python scripts/build_gate3_scale_manifests.py   # 5 manifests, verified nested/genre-balanced
+uv run python -u scripts/train_gate3_scale_wandb.py --levels 2 --wandb-mode disabled   # smoke test, PASSED
+uv run python -u scripts/train_gate3_scale_wandb.py --wandb-mode online                 # all 5 levels, PASSED, ~53 min total
+uv run python scripts/plot_gate3_scale_figures.py       # both required figures
+uv run ruff check .; uv run pytest -q                   # 130 passed
 ```
 
 2026-09-15, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown` (unbuffered `-u`),
-tracked by real PID and `Monitor`.
+tracked by real PID and a persistent `Monitor`.
 
 ## Run/checkpoint path
 
-- `data/manifests/gate3_spectrogram_two_excerpt.csv` (tracked) -- the two-excerpt manifest.
-- `src/muq_inversion/gate3_spectrogram_common.py` -- pure, tested helpers (metrics, gradient
-  breakdown, example loading, W&B payload construction).
-- `runs/task04_spectrogram_gate3/checkpoints/{step0,best_by_mse,best_by_cosine,best_by_wav_corr,
-  final,periodic}.pt` (git-ignored) -- all reloaded and reproducibility-verified after saving.
-- `artifacts/task04_spectrogram_gate3/report.json` -- full per-checkpoint metrics, per-example
-  breakdown, and the MuQ Gate-3 comparison (computed on MuQ's own exact crop).
-- `artifacts/task04_spectrogram_gate3/*.wav` (14 files, git-ignored) -- reference/dac_oracle/
-  step0/early/intermediate/final/best_by_mse reconstructions for both tracks.
-- Live W&B run: `wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility/runs/
-  7kfiziym` (project `muq-invertibility`, group `spectrogram-gate3`, job_type
-  `memorization-control`).
+- `data/manifests/gate3_scale_{2,8,32,128,512}.csv` (tracked).
+- `runs/task05_gate3_scale/n{N}/checkpoints/{best_by_mse,final}.pt` (git-ignored).
+- `artifacts/task05_gate3_scale/n{N}/report.json` -- full per-level metrics; `.../n{N}/*.wav` --
+  20 listening WAVs (pop.00012/disco.00049 reconstruction + oracle at every level).
+- `artifacts/task05_gate3_scale/scaling_summary.json` -- the cross-level summary table.
+- `artifacts/task05_gate3_scale/scaling_curve_main.png`,
+  `scaling_curve_norm_variance_ratio.png` -- the two required deliverable figures.
+- Five live W&B runs, group `gate3-scaling`: `wandb.ai/
+  andrea-cogliati-university-of-rochester/muq-invertibility` (`gate3_scale_{2,8,32,128,512}`).
 
 ## Next command
 
-**Blocked on user direction**, per this task's own explicit "stop after answering these
-questions" instruction. With TASK-01 (representation), TASK-02 (data coverage), and TASK-04
-(basic pipeline capability) all now addressed, and TASK-03 (BlueHive reproduction) partially
-handed off, the live remaining hypotheses for this investigation's GTZAN-scale saturation are:
+**Blocked on user direction.** This task's own scope explicitly excludes optimization/redesign --
+diagnosis only. With the collapse onset now localized to N=8-32, the natural next directions
+(not yet authorized) are:
 
-- **The training/objective formulation at multi-example scale** -- most directly evidence-backed
-  now: TASK-03's regression-to-the-mean finding plus TASK-04's "collapse doesn't happen with one
-  example, does happen with many" contrast both point here. A loss/target reformulation that
-  doesn't reward the dataset-mean solution as cheaply (per-frame relative error, whitened
-  latents, something residual-VQ-aware) is the most pointed next experiment in this whole
-  investigation to date.
-- **The still-untested architecture/receptive-field-capacity axis** -- lower priority now, since
-  TASK-04 shows the existing architecture is not itself incapable of fitting the target.
-- **The pending BlueHive run** (see [[task03-bluehive-wandb]]) -- independent track, still needs
-  the user to execute `bluehive/run_task03.slurm` and report back.
+- **A dedicated N=16 (and perhaps N=12, N=24) run** to pinpoint the transition more precisely
+  within (8, 32] -- cheap, using the exact same pipeline/manifests-generation approach.
+- **The loss/target-reformulation direction** flagged after TASK-03/04 is now even more
+  specifically motivated: understanding *why* ~8-32 is the ceiling for this optimization loop
+  (batch size 1, no scheduler) could point directly at what to change -- e.g. does batching change
+  the threshold? Does a learning-rate schedule?
+- **Listening verdicts** for the 20 new WAVs would help confirm whether the N=32 "already
+  collapsed but not yet asymptotic" regime is audibly distinguishable from the N=512/GTZAN-scale
+  ceiling, or perceptually already just as bad.
 
 Do not start any of these without the user's go-ahead.
 
 ## Blockers
 
-1. **Decision needed from the user** on whether to pursue the loss/target-reformulation direction
-   now most directly pointed to by both TASK-03 and TASK-04's findings.
-2. **BlueHive job not yet run** -- still pending, see [[task03-bluehive-wandb]].
-3. **Listening verdicts for TASK-01's and TASK-02's 30-WAV packages** -- still pending. TASK-04's
-   own listening verdict is now in hand and confirms the metrics (see Current gate above).
+1. **Decision needed from the user** on which direction to pursue next (pinpointing the exact
+   threshold, loss reformulation, or something else).
+2. **Listening verdicts** for TASK-01's and TASK-02's WAV packages -- still pending (TASK-04's
+   and TASK-05's are now both confirmed by ear).
+3. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
 4. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
    untested, orthogonal to this branch's findings.
 5. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
@@ -111,20 +99,18 @@ Not yet reached, and not authorized to start.
 
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#task04-spectrogram-gate3]] first**, alongside
-  [[DECISIONS.md#task03-bluehive-wandb]] -- together they narrow this investigation's remaining
-  hypothesis space to essentially one axis: the training/objective formulation at multi-example
-  scale. Representation (TASK-01), data coverage (TASK-02), and basic pipeline capability
-  (TASK-04) are now all ruled out as the primary bottleneck.
-- The MuQ Gate-3 checkpoint's extreme sub-hop sample-alignment sensitivity (TASK-04's unplanned
-  finding) is worth remembering for any future experiment that reuses `runs/
-  muq_to_dac_temporal_conv/checkpoints/latest.pt` -- always evaluate it on the crop it was
-  actually trained on (exact center-crop formula in
-  `scripts/train_muq_to_dac_temporal_conv.py`), never a nearby one.
-- `src/muq_inversion/gate3_spectrogram_common.py` (metrics, gradient breakdown, example loading)
-  and `wandb_logging.py` (from TASK-03) are both generic enough to reuse for a future loss-
-  reformulation experiment without rewriting instrumentation from scratch.
-- The regression-to-the-mean / collapse-only-at-scale story (TASK-03 + TASK-04 combined) is now
-  this investigation's leading, well-evidenced explanation for the entire GTZAN-scale saturation
-  pattern seen since [[muq-to-dac-scale-data]] -- treat it as the working hypothesis for any
-  future experiment design in this line, not as one competing theory among several.
+- **Read [[DECISIONS.md#task05-gate3-scaling]] first.** It localizes this whole investigation's
+  collapse pathology to a specific, small training-set-size range (8-32 examples) for the first
+  time -- every earlier experiment either used far more data (TASK-01/02, GTZAN-scale) or far
+  less (TASK-04, N=2), never anything in between.
+- `src/muq_inversion/gate3_spectrogram_common.py`'s `load_examples_from_manifest` and
+  `aggregate_metrics_across_examples` are generic and reusable for any future N-example
+  experiment in this line (e.g. a follow-up N=16 pinpointing run) -- no new plumbing needed,
+  just a new manifest.
+- The fixed-step-budget-across-N design (this task's central methodological choice) is the
+  opposite of TASK-02's exposure-preserving convention -- don't default to scaling steps with N
+  for any future experiment in this specific line without checking which question is being asked
+  (does more data help fit better, vs. does more data cause collapse).
+- `scripts/plot_gate3_scale_figures.py` is a small, reusable read-only plotting script (matplotlib,
+  new dependency this session) -- rerun it directly against any future
+  `scaling_summary.json`-shaped report without modification if the schema doesn't change.

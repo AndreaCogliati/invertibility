@@ -1993,3 +1993,125 @@ best_by_wav_corr,final,periodic}.pt` (git-ignored). Live W&B run:
 **Rollback plan.** Entirely additive; no TASK-01/02/03 file was modified. Deleting the four new
 files and the two new artifact/run directories fully reverts this task's local footprint; the
 W&B run remains on wandb.ai independent of any local rollback.
+
+## task05-gate3-scaling: Sharp collapse onset between N=8 and N=32, then asymptotic decay to the GTZAN-scale ceiling by N=512
+
+**Context (`tasks/TASK-05.md`).** TASK-04 showed the Spectrogram->DAC pipeline can memorize N=2
+examples near-perfectly. TASK-01/02 showed severe collapse at N~2000-12000 GTZAN training crops.
+The transition point between those two regimes was completely unknown. This experiment trains
+the exact TASK-04 pipeline (unchanged architecture, loss, optimizer) at five nested training-set
+sizes -- N=2, 8, 32, 128, 512 -- to locate it directly.
+
+**Dataset construction, documented per this task's explicit requirement
+(`scripts/build_gate3_scale_manifests.py`).** Level 1 is exactly TASK-04's two excerpts
+(`pop.00012`, `disco.00049`), for direct continuity. Every example uses `crop_index=7` (t=14.0s)
+for its track -- the same crop position as TASK-04, already cached in TASK-02's dense cache for
+all 999 GTZAN tracks, so **no new precompute step was needed at all** (verified before training:
+all 512 required crops present). Additional examples were chosen by round-robin across GTZAN's 10
+genres in alphabetical order, each contributing train-split tracks in ascending `track_id` order,
+skipping already-selected tracks -- giving genre counts within 1-2 tracks of the ideal `N/10` at
+every level and guaranteeing the nesting property (`2 subset 8 subset 32 subset 128 subset 512`)
+by construction, not by post-hoc filtering. Verified: all four subset relationships hold, no
+duplicate tracks per level, all tracks are train-split. 13 new tests
+(`tests/test_gate3_scale_manifests.py`, `tests/test_gate3_scale_common.py`).
+
+**Step budget: fixed across all five levels, NOT scaled with N -- a deliberate, load-bearing
+design choice, documented in the training script's own module docstring.** TASK-02 scaled steps
+with crop count specifically to preserve per-crop *exposure* and avoid confounding "more data"
+with "less trained" -- the opposite is needed here: a fixed budget so per-example exposure
+genuinely decreases as N grows, since that's the exact variable this task's three hypotheses are
+about. Scaling steps with N would have let every example memorize deeply regardless of N,
+trivially producing "no collapse at any N" (Outcome C) by construction. `MAX_STEPS=20000`,
+stopping early at the first of (A) best mean training MSE improves by <1e-5 for 5000 consecutive
+steps (checked every 250 steps), or (C) max steps reached -- every level actually stopped via (A):
+N=2 at step 9000, N=8 at 9750, N=32/128/512 all at 8000.
+
+**Per-step cost kept independent of N** (critical for N=512's tractability): per-step logging
+touches only the one example trained that step; the full-N latent-only diagnostic pass (no DAC
+decode) and the fixed-2-example decode-based audio metrics both run only every 250 steps. Total
+wall time for all 5 levels: ~3200s (~53 minutes), see per-level timings below.
+
+**Result -- the scaling curve (best-by-MSE checkpoint per level, mean across all N examples in
+that level; `scripts/plot_gate3_scale_figures.py` -> `artifacts/task05_gate3_scale/
+scaling_curve_main.png`, `scaling_curve_norm_variance_ratio.png`):**
+
+| N | steps run (stop reason) | training time | MSE | cosine | norm ratio | variance ratio | lag-1 AC (pred) | waveform corr | STFT dist |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2 | 9000 (patience) | 660s | 0.000005 | 1.0000 | 1.0000 | 1.0000 | 0.053 | 1.0000 | 0.0013 |
+| 8 | 9750 (patience) | 716s | 0.077636 | 0.9980 | 1.0025 | 1.0077 | 0.070 | 0.9970 | 0.2377 |
+| 32 | 8000 (patience) | 592s | 12.880553 | 0.5161 | 0.4993 | 0.1773 | 0.529 | 0.4689 | 1.8304 |
+| 128 | 8000 (patience) | 601s | 15.610659 | 0.3610 | 0.3778 | 0.0630 | 0.714 | 0.0901 | 2.4388 |
+| 512 | 8000 (patience) | 670s | 16.023537 | 0.3266 | 0.3434 | 0.0480 | 0.776 | 0.0193 | 2.8103 |
+
+**For scale: TASK-01's full ~1584-crop and TASK-02's full ~11873-crop GTZAN training runs
+reached MSE 16.47/16.39, cosine 0.295/0.291, norm ratio 0.36/0.32 -- N=512 in this experiment
+(16.02 / 0.327 / 0.343) is already statistically indistinguishable from both.** The entire
+"collapse regime" this investigation has been characterizing since [[muq-to-dac-scale-data]] is
+fully established by 512 training examples -- roughly 23-30x fewer than either GTZAN-scale
+experiment used.
+
+**Interpretation -- neither pure Outcome A, B, nor C: a sharp initial transition (Outcome B)
+followed by asymptotic decay toward the GTZAN-scale ceiling (an Outcome-A-like tail), not a
+uniformly gradual decline from N=2.** N=2 and N=8 are statistically indistinguishable (both
+near-perfect: norm ratio 1.00/1.00, waveform correlation 1.00/0.997) -- adding 6 more examples
+cost essentially nothing. **Between N=8 and N=32, every collapse metric moves by more than half
+its entire N=2-to-N=512 range in a single step**: norm ratio 1.0025 -> 0.4993 (a 50-percentage-
+point drop), variance ratio 1.0077 -> 0.1773 (an 83% relative drop), waveform correlation 0.997
+-> 0.469. This is a genuinely sharp threshold, not a smooth Hypothesis-A curve -- there is no
+N=16 data point in this design, so the transition is known to be sharp *somewhere* in (8, 32],
+not pinpointed further. **From N=32 onward, decline continues but decelerates sharply** (norm
+ratio 0.4993 -> 0.3778 -> 0.3434, variance ratio 0.1773 -> 0.0630 -> 0.0480), consistent with
+approaching an asymptote rather than continuing to collapse without bound -- and that asymptote
+is quantitatively the same ceiling TASK-01/02 already measured at ~30x more data.
+
+**Per this task's own interpretation rules, this is closest to Outcome B** (a sharp threshold,
+"suggests capacity, optimization, or target-complexity limits") **but with an important
+refinement**: the threshold is not a step-function to the *final* collapsed state -- N=32 is
+already substantially collapsed but measurably better than N=512 on every metric (e.g. waveform
+correlation 0.469 vs. 0.019). The full picture is: **a sharp onset (between 8 and 32 examples)
+into a regime that then decays asymptotically toward a hard ceiling reached by ~512 examples**,
+after which more data (per TASK-02's own finding, up to 11873 crops) produces no further change.
+Combined with [[task03-bluehive-wandb]]'s regression-to-the-mean finding and [[task04-spectrogram-gate3]]'s
+"collapse doesn't happen with one target per step, does happen with many": the sharp onset between
+8 and 32 is consistent with a genuine capacity/optimization boundary (an unbatched, single-
+gradient-step-per-example SGD loop can track a small number of distinct per-example memorized
+solutions, but not tens of them, under this loss), while the subsequent asymptotic decay toward
+the mean-prediction ceiling is the regression-to-the-mean mechanism reasserting itself once
+individual-example memorization is no longer achievable.
+
+**Listening verdict (2026-09-16): the perceptual transition is even sharper than the metrics
+alone suggest.** User's report on the 4 `pop.00012` reconstructions sent (N=2/8/32/512): "the
+clips for N=32 are closer to those for N=128 and N=512 than to those for N=8. In other words,
+there's a small degradation after N=32, but the drop between N=8 and N=32 is dramatic." This
+refines the metric-based reading above: by ear, N=32 already sounds like it belongs to the
+"collapsed" family (N=32/128/512), not the "near-perfect" family (N=2/8) -- the audible category
+boundary sits at the same N=8-to-N=32 transition the metrics locate, and the audible difference
+*within* the collapsed family (N=32 -> 128 -> 512, where waveform correlation still drops
+numerically from 0.469 to 0.019, a >20x change) is comparatively minor perceptually. This
+strengthens rather than complicates the "sharp onset, then a long asymptotic tail" interpretation
+above: the tail is real in the metrics but perceptually subtle, while the N=8/N=32 boundary is
+both metrically and perceptually the dominant event in this scaling curve.
+
+20 WAVs total (`pop.00012`/`disco.00049` reconstruction + DAC oracle at every one of the 5
+levels), `artifacts/task05_gate3_scale/n{2,8,32,128,512}/`.
+
+**Consequences.** New files: `scripts/build_gate3_scale_manifests.py`,
+`scripts/train_gate3_scale_wandb.py`, `scripts/plot_gate3_scale_figures.py`,
+`data/manifests/gate3_scale_{2,8,32,128,512}.csv` (tracked), `tests/test_gate3_scale_manifests.py`,
+`tests/test_gate3_scale_common.py` (13 new tests, full suite now 130 passing). Extended
+additively: `src/muq_inversion/gate3_spectrogram_common.py` gained
+`load_examples_from_manifest` (generalizes TASK-04's `load_examples`, which is now a thin
+wrapper -- verified unchanged behavior via TASK-04's existing tests) and
+`aggregate_metrics_across_examples` (mean/median/min/max across N examples). `pyproject.toml`/
+`uv.lock` gained `matplotlib` (for this task's required scaling figures -- no other project code
+needed a plotting dependency before). No TASK-01/02/03/04 file modified. New artifacts:
+`artifacts/task05_gate3_scale/{n2,n8,n32,n128,n512}/report.json` + listening WAVs, `artifacts/
+task05_gate3_scale/scaling_summary.json`, two PNG figures, `runs/task05_gate3_scale/n{N}/
+checkpoints/{best_by_mse,final}.pt`. Five live W&B runs under group `gate3-scaling`:
+`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility` (`gate3_scale_{2,8,32,128,512}`).
+
+**Rollback plan.** Entirely additive except the two new `gate3_spectrogram_common.py` functions
+(both backward-compatible, verified via the existing TASK-04 test suite passing unchanged) and
+the `matplotlib` dependency addition. Deleting the new files/directories and reverting
+`gate3_spectrogram_common.py`'s diff fully reverts this task's code. The five W&B runs live on
+wandb.ai independent of any local rollback.
