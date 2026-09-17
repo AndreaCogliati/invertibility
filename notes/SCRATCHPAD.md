@@ -1082,3 +1082,96 @@ category boundary lines up exactly with the metric-located N=8-to-N=32 transitio
 N=32-to-512 metric decline (waveform correlation 0.469 -> 0.019, >20x) is real numerically but
 comparatively minor perceptually. Recorded in notes/DECISIONS.md#task05-gate3-scaling and
 notes/MEMORY.md.
+
+## 2026-09-16: TASK-06 N=32 compute-controlled micro-ablation
+
+Hypothesis: TASK-05's fixed-20000-step-budget design confounds "N grows" with "per-example
+exposure shrinks." Does N=32 recover if given N=8-equivalent (or more) per-example exposure,
+holding N fixed at 32?
+
+Checked TASK-05's checkpoint save code first -- confirmed it stores only `{"step",
+"model_state_dict"}`, no optimizer/RNG state, so a true resume from the 8000-step checkpoint is
+impossible. Used same-seed deterministic replay instead (documented in the new script's
+docstring) and reused TASK-05's actual N=32 report unchanged for the "20k" row rather than
+retraining (it stopped at step 8000 via patience, not the full 20000 -- noted explicitly).
+
+Benchmarked raw per-step cost before committing to the multi-hour run: ~38.5ms/step
+training-only, wandb.log() overhead ~0.09ms/call (negligible). Ran a --budget 500 smoke test
+first (temporarily added to argparse choices, reverted after) -- passed cleanly, 55.34s, correct
+report.json shape (checkpoint_history len=5, right metric keys). Cleaned up smoke artifacts before
+the real run.
+
+Disabled early stopping (patience) entirely for the 80k/320k runs -- TASK-05's own 5000-step
+patience window, reused naively, would likely have killed these runs early during one of the
+large turbulent dips this pipeline consistently shows at scale (confirmed this concern was
+justified: both runs show >10x MSE swings within a few thousand steps throughout, e.g. 320k step
+128000 mse=11.4 -> step 132000 mse=305.8).
+
+Commands:
+```
+uv run python -u scripts/train_gate3_n32_compute_ablation.py --budget 80000 --wandb-mode online
+uv run python -u scripts/train_gate3_n32_compute_ablation.py --budget 320000 --wandb-mode online
+uv run python scripts/plot_gate3_n32_compute_ablation.py
+uv run ruff check .; uv run pytest -q   # 133 passed
+```
+Launched as one chained background job (`... --budget 80000 ... && ... --budget 320000 ...`),
+monitored via persistent Monitor + periodic ScheduleWakeup rather than continuous polling. 80k:
+6257s (104 min). 320k: 24249s (6.7h). Total wall time both runs: ~8.4 hours.
+
+Results (best-by-MSE checkpoint per budget, mean across all 32 examples):
+```
+             best step  reps/example  mse      cosine  norm    var     wav_corr  stft_dist
+20k (TASK-05,  3000       94          12.881   0.516   0.499   0.177   0.469*    1.830*
+ patience@8000)
+80k            57000      1781        10.763   0.609   0.644   0.377   0.629     1.701
+320k           88000      2750        10.252   0.633   0.656   0.403   0.666     1.588
+N=8 (ref)       4750       594        0.078    0.998   1.003   1.008   0.997*    0.238*
+```
+(*20k/N=8 wav_corr/stft computed on fixed 2-track subset only, not all N -- TASK-05 didn't decode
+audio for every example every checkpoint.)
+
+Key finding: 80k's best checkpoint ALREADY exceeds N=8's needed per-example exposure by 3x (1781
+vs. 594 reps), 320k by 4.6x (2750 vs. 594) -- and N=32 still isn't close to N=8's quality. So
+"just needs more steps" is not the right story, even though more steps clearly helped
+(0.469->0.629->0.666 wav_corr).
+
+Per-example ranking (via new `rank_examples_by_metric`, sorted worst-to-best):
+- Worst at 80k: classical.00003 (0.315). Worst at 320k: classical.00003 again (0.276, WORSE
+  despite 4x compute).
+- Best at 80k: pop.00002 (0.875). Best at 320k: pop.00002 again (0.897, improved).
+- Mean/median rose substantially 80k->320k; worst-case flat-to-down. Compute helps the easy
+  examples, not the hard one. This is the strongest evidence in the whole write-up for
+  "interference/capacity" over "just needs more compute."
+
+320k's own trajectory: best-by-MSE checkpoint found at step 88000 (right after the 80k
+endpoint), then NO new global best for the remaining 232000 steps, despite several close local
+peaks (steps 188000/252000/300000 all ~0.60 wav_corr, never beating 88000's 0.666). Noisy
+plateau, not continued scaling.
+
+Answered TASK-06's four required questions directly in notes/DECISIONS.md#task06-n32-compute-ablation
+(reproduced there in full). Stopped there per the task's own explicit instruction not to propose
+a next experiment.
+
+Figure: artifacts/task06_n32_compute_ablation/per_example_waveform_correlation.png (3 panels,
+20k/80k/320k, sorted worst-to-best, worst in red / best in green).
+
+Full write-up in notes/DECISIONS.md#task06-n32-compute-ablation and notes/MEMORY.md.
+
+## 2026-09-17: TASK-06 listening verdict
+
+User's verdict on the sent WAVs (80k best/worst, 320k best/worst, figure): "the best audio was
+generated at 80K steps. The audio from 320K is generally worse."
+
+This is the first metric/perception divergence in this investigation -- 320k's mean waveform
+correlation (0.666) is higher than 80k's (0.629), but 320k sounds worse. Two candidate
+explanations, not disambiguated: (1) the 320k WAVs sent were from its final-step checkpoint (step
+320000, wav_corr_mean=0.228 in the middle of a trough), not its actual best-by-MSE checkpoint
+(step 88000, wav_corr_mean=0.666) -- so the A/B comparison as heard may not have compared best-vs-
+best at all; (2) waveform correlation may simply track perceptual quality less tightly in this
+collapse-adjacent regime than in the near-perfect N=2/8 regime where TASK-04/05's listening
+verdicts agreed with the metrics. Recorded in notes/DECISIONS.md#task06-n32-compute-ablation and
+notes/MEMORY.md. Does not change the core conclusion (partial, plateauing recovery with
+preferential per-example memorization) but flags 80k, not 320k, as this experiment's
+best-sounding result, and flags checkpoint-selection-for-listening as a methodological gap worth
+fixing in any future compute-ablation-style task (always export best-by-MSE audio at every
+milestone, not just fixed-step milestones).

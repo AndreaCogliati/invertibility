@@ -419,3 +419,34 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   the metric-located N=8-to-N=32 transition exactly, while the N=32-to-512 metric decline
   (waveform correlation 0.469 -> 0.019, >20x) is comparatively minor perceptually. Full write-up
   in [[task05-gate3-scaling]].
+- N=32 compute-controlled micro-ablation CONCLUDED (2026-09-16, `tasks/TASK-06.md`): held N=32
+  fixed (TASK-05's exact manifest/architecture/loss) and varied only step budget -- 20k (TASK-05's
+  run reused unchanged, patience-stopped at 8000), 80k, 320k -- to separate "undertraining" from
+  "genuine capacity/interference boundary" as explanations for the N=8->N=32 collapse. **Result:
+  partial, not full, recovery -- and the key comparison is per-example repetition count, not raw
+  steps.** 80k's best checkpoint (step 57000) already gives each of the 32 examples 1781
+  repetitions -- 3x more than N=8's best checkpoint needed (594 reps); 320k's best checkpoint
+  (step 88000) gives 2750 reps, 4.6x N=8's. Despite that, N=32 plateaus far below N=8: cosine 0.63
+  / waveform correlation 0.67 / norm ratio 0.66 at 320k, vs. N=8's cosine 0.998 / waveform
+  correlation 0.997 / norm ratio 1.003. Waveform correlation did rise substantially from the
+  original 20k number (0.469 -> 0.629 -> 0.666), so compute is not irrelevant -- but returns are
+  strongly diminishing (320k found no new global-best checkpoint past step 88000 despite 232000
+  more steps of noisy oscillation). **Per-example ranking is stable and reveals preferential
+  memorization, not uniform improvement**: `classical.00003` is the single worst example at both
+  80k and 320k and does not improve with 4x more compute (0.315 -> 0.276, slightly worse), while
+  `pop.00002` is consistently best and does improve (0.875 -> 0.897) -- the mean/median rise is
+  driven by the easier subset of the 32 examples, not a uniform lift. Conclusion: the N=8->N=32
+  boundary is best explained by genuine interference/capacity competition among examples, not
+  compute and not regression-to-the-mean -- exposure explains part of the *original* fixed-budget
+  collapse but not the residual gap to N=8, which persists even at 5x N=8's needed per-example
+  exposure. Required figure: `artifacts/task06_n32_compute_ablation/
+  per_example_waveform_correlation.png`. Full 133-test suite passing (1 new test file, 3 tests,
+  `rank_examples_by_metric` added to `gate3_spectrogram_common.py`). Two live W&B runs under group
+  `gate3-n32-compute-ablation`. Total compute: 80k run 6257s, 320k run 24249s (~6.7h). **Listening
+  verdict (2026-09-17), diverges from the metrics for the first time in this investigation: "the
+  best audio was generated at 80K steps. The audio from 320K is generally worse,"** despite 320k's
+  higher mean waveform correlation (0.666 vs. 0.629 for 80k). Likely partly an artifact of which
+  checkpoint the sent WAVs came from (320k's clips were its final-step checkpoint, a low point in
+  that run's oscillation, not its best-by-MSE checkpoint at step 88000) and partly a reminder that
+  this task's objective metrics are diagnostics, not proof of perceptual fidelity, especially in
+  this collapse-adjacent regime. Full write-up in [[task06-n32-compute-ablation]].

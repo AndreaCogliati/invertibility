@@ -183,3 +183,10 @@ def aggregate_metrics_across_examples(per_example: dict[str, dict[str, float]]) 
             "max": float(np.max(values)),
         }
     return aggregated
+
+
+def rank_examples_by_metric(per_example: dict[str, dict[str, float]], key: str = "waveform_correlation_to_oracle") -> list[str]:
+    """`tasks/TASK-06.md`'s "identify best/median/worst example" requirement. Returns track IDs
+    sorted by `key`, ascending (worst first, best last) -- the caller picks `ranking[0]` (worst),
+    `ranking[len//2]` (median), `ranking[-1]` (best)."""
+    return sorted(per_example.keys(), key=lambda t: per_example[t][key])

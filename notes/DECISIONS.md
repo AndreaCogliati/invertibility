@@ -2115,3 +2115,141 @@ checkpoints/{best_by_mse,final}.pt`. Five live W&B runs under group `gate3-scali
 the `matplotlib` dependency addition. Deleting the new files/directories and reverting
 `gate3_spectrogram_common.py`'s diff fully reverts this task's code. The five W&B runs live on
 wandb.ai independent of any local rollback.
+
+## task06-n32-compute-ablation: Compute alone does not explain the N=8->N=32 collapse -- partial recovery, not full recovery, plateauing far short of N=8
+
+**Context (`tasks/TASK-06.md`).** [[task05-gate3-scaling]] found a sharp collapse onset between
+N=8 (near-perfect memorization) and N=32 (already substantially collapsed), using a *fixed*
+20000-step budget with 5000-step patience early stopping across all five N levels. That design
+confounds two variables that both change with N under a fixed budget: per-example training
+*exposure* (steps/N) and dataset *size*. This task holds N=32 fixed and varies only the step
+budget -- 20k (reused from TASK-05 unchanged), 80k, 320k -- to isolate whether the N=32 collapse
+is an undertraining artifact (Hypothesis A: full recovery with enough steps) or a genuine
+capacity/interference boundary that resists added compute (Hypothesis C), or something between
+(Hypothesis B: partial recovery, plateauing below N=8's level).
+
+**Resume policy, documented as required.** TASK-05's checkpoints store only
+`{"step", "model_state_dict"}` -- no optimizer or RNG state -- so a numerically faithful resume
+from the 20k/8000-step checkpoint was not possible. Substituted a same-seed deterministic replay
+(`torch.manual_seed(0)`, same manifest, same architecture/loss/optimizer config), which is
+mathematically equivalent to resuming given TASK-05's own run was itself fully deterministic from
+the same starting point. The "reuse 20k" instruction is satisfied by reusing TASK-05's actual
+N=32 report unchanged (it ran 8000 of its nominal 20000-step budget, stopping via patience) rather
+than retraining a duplicate; this is called out explicitly rather than silently treated as a full
+20k run. Early stopping (patience) was **deliberately disabled** for the 80k/320k runs -- reusing
+TASK-05's 5000-step patience window would very plausibly have triggered a premature stop during
+one of this run's characteristic multi-thousand-step turbulent dips, defeating the experiment's
+purpose of observing the full requested compute budget.
+
+**Result -- comparison table (all rows: best-by-MSE checkpoint, mean across all 32 examples;
+worst-case = min, since higher-is-better for every metric shown):**
+
+| budget | best step | steps/example | MSE | cosine | norm ratio | variance ratio | waveform corr | STFT dist | worst wav corr | worst norm ratio | worst var ratio |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 20k (TASK-05 reused, patience-stopped @ 8000) | 3000 | 94 | 12.881 | 0.516 | 0.499 | 0.177 | 0.469\* | 1.830\* | 0.385\* | 0.407 | 0.082 |
+| 80k | 57000 | 1781 | 10.763 | 0.609 | 0.644 | 0.377 | 0.629 | 1.701 | 0.315 | 0.512 | 0.155 |
+| 320k | 88000 | 2750 | 10.252 | 0.633 | 0.656 | 0.403 | 0.666 | 1.588 | 0.276 | 0.517 | 0.162 |
+| *for reference:* N=8 @ N=32's fixed-20k-budget design ([[task05-gate3-scaling]]) | 4750 | 594 | 0.078 | 0.998 | 1.003 | 1.008 | 0.997\* | 0.238\* | 0.997\* | 0.991 | 0.989 |
+
+\*20k's and N=8's waveform-correlation/STFT-distance figures are computed on TASK-05's fixed
+2-track subset only (`pop.00012`/`disco.00049`), not all 32/8 examples -- TASK-05 did not decode
+audio for every example at every checkpoint. 80k/320k decode and report waveform correlation for
+all 32 examples per this task's own diagnostic requirement (`artifacts/
+task06_n32_compute_ablation/per_example_waveform_correlation.png`).
+
+**The key comparison is per-example repetition count, not raw step count.** N=8's best checkpoint
+saw each example ~594 times. N=32's 80k-budget best checkpoint (1781 reps/example) already
+exceeds that by 3x, and the 320k-budget best checkpoint (2750 reps/example) exceeds it by nearly
+5x -- yet neither comes remotely close to N=8's near-perfect memorization (cosine 0.998, waveform
+correlation 0.997, norm/variance ratio ~1.0 for N=8, vs. cosine 0.63, waveform correlation 0.67,
+norm ratio 0.66, variance ratio 0.40 for N=32 @ 320k).
+
+**Per-example behavior: the worst example does not improve with compute; the model
+preferentially improves a subset.** `classical.00003` is the single worst-correlated example at
+every measured budget (worst at 80k: 0.315; worst at 320k: 0.276 -- *slightly lower*, not
+better), while `pop.00002` is consistently best or near-best (0.875 at 80k, 0.897 at 320k). Mean
+and median waveform correlation both improve substantially from 80k to 320k, but the worst-case
+value is flat to slightly worse. This is the signature of *preferential memorization of a subset*
+under added compute, not uniform improvement across all 32 examples -- consistent with genuine
+inter-example interference/capacity competition, not merely "everything needs more steps."
+
+**Training dynamics.** Both 80k and 320k show large-amplitude turbulent oscillation throughout
+the entire run (mean MSE swinging between ~10 and >500 within a handful of 4000-step checkpoint
+intervals, e.g. step 128000 MSE=11.4 -> step 132000 MSE=305.8 -> step 140000 MSE=62.9), consistent
+with every other large/long run in this investigation ([[task05-gate3-scaling]],
+[[muq-to-dac-scale-data]]). Critically, the 320k run's best-by-MSE checkpoint (step 88000) was
+found only marginally past the 80k run's own endpoint, and **no further global optimum was found
+in the remaining 232000 steps** despite many subsequent local peaks approaching it (e.g. step
+188000 wav_corr_mean=0.602, step 252000 wav_corr_mean=0.602, step 300000 wav_corr_mean=0.599 --
+all close to but never exceeding 88000's 0.666). This is a noisy plateau, not continued scaling
+with compute.
+
+**Answers to this task's four required questions.**
+
+1. *Is N=32's collapse caused primarily by insufficient optimization exposure?* Partially, but
+   not primarily. The 20k->80k jump (94 -> 1781 reps/example) produced the largest single gain
+   (waveform correlation 0.469 -> 0.629), showing exposure is a real contributing factor. But the
+   80k->320k jump (1781 -> 2750 reps/example) produced only a marginal, noisy gain (0.629 ->
+   0.666), and even 320k's exposure (2750 reps/example, 4.6x N=8's) leaves a large residual gap to
+   N=8's near-perfect result. Exposure explains part of the original fixed-20000-step collapse,
+   not the collapse itself.
+2. *Does N=32 recover if given ~N=8/N=2-equivalent exposure?* No -- and this is measured directly,
+   not extrapolated. 80k's best checkpoint already gives each of the 32 examples 3x more
+   repetitions than N=8's best checkpoint needed, and 320k gives nearly 5x more; N=32 still
+   plateaus at cosine 0.63 / waveform correlation 0.67, nowhere near N=8's 0.998 / 0.997.
+3. *Do all examples improve together, or does the model preferentially memorize a subset?* The
+   latter. The worst example (`classical.00003`) is stable in rank across 80k and 320k and does
+   not improve with 4x more compute (0.315 -> 0.276), while the best example does (0.875 ->
+   0.897) and the mean/median rise substantially. Improvement under added compute is concentrated
+   in the easier subset of the 32 examples, not distributed uniformly.
+4. *Is the N=8->N=32 boundary better explained by compute, interference, capacity, or
+   regression-to-the-mean?* Interference/capacity, not compute and not regression-to-the-mean.
+   Compute matters (20k->80k proves that) but has strongly diminishing, then flat, returns that
+   plateau far short of N=8's solution even at 5x N=8's needed per-example exposure.
+   Regression-to-the-mean ([[task03-bluehive-wandb]]'s mechanism) doesn't fit either: scores here
+   are far above degenerate dataset-mean levels and the best/median/worst example identities are
+   consistent and structured across budgets, not degenerate. The stable identity of the hardest
+   example combined with a compute-resistant plateau is the signature of examples competing for
+   limited representational capacity within this architecture (15.9M parameters, 13-frame
+   receptive field, one gradient step per example per training step) -- some examples lose that
+   competition persistently, regardless of how long training continues.
+
+**Per this task's own instruction: stopping here without proposing a next experiment.**
+
+**Consequences.** New files: `scripts/train_gate3_n32_compute_ablation.py`,
+`scripts/plot_gate3_n32_compute_ablation.py`, `tests/test_gate3_n32_compute_ablation.py`.
+Extended additively: `src/muq_inversion/gate3_spectrogram_common.py` gained
+`rank_examples_by_metric` (best/median/worst example identification by any per-example metric,
+ascending sort). No TASK-01-05 file modified; `data/manifests/gate3_scale_32.csv` reused
+unchanged (read-only). New artifacts: `artifacts/task06_n32_compute_ablation/budget_{80000,320000}/
+report.json` + listening WAVs at steps {20000,40000,80000,160000,320000} (best/median/worst/fixed-
+subset), `artifacts/task06_n32_compute_ablation/per_example_waveform_correlation.png`,
+`runs/task06_n32_compute_ablation/budget_{80000,320000}/checkpoints/{best_by_mse,final}.pt`. Two
+live W&B runs under group `gate3-n32-compute-ablation`:
+`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility` (`n32_80k_*`, `n32_320k_*`).
+Total training time: 80k = 6257s (~104 min), 320k = 24249s (~6.7 hours).
+
+**Rollback plan.** Entirely additive except the one new `gate3_spectrogram_common.py` function
+(backward-compatible, verified via the full 133-test suite passing including all prior tasks'
+tests unchanged). Deleting the new files/directories and reverting
+`gate3_spectrogram_common.py`'s diff fully reverts this task's code. The two W&B runs live on
+wandb.ai independent of any local rollback.
+
+**Listening verdict (2026-09-17): metrics and perception disagree here -- 80k sounds better than
+320k, despite 320k's higher mean waveform correlation (0.666 vs. 0.629).** User's report on the
+sent WAVs: "the best audio was generated at 80K steps. The audio from 320K is generally worse."
+This is a genuine metric/perception divergence, unlike TASK-04/TASK-05 where the two agreed. Two
+non-exclusive explanations, neither yet tested: (1) the WAVs sent for 320k were from its *final*
+checkpoint (step 320000, wav_corr_mean=0.228 -- a low point in the run's characteristic
+oscillation), not its best-by-MSE checkpoint (step 88000, wav_corr_mean=0.666) -- so the
+comparison as heard may not reflect 320k's best-achieved quality at all, only where the noisy
+trajectory happened to land at the step budget's end; (2) even setting that aside, the
+"best"/"worst"/aggregate waveform-correlation metric this task relies on may not track perceptual
+quality as tightly at this collapse-adjacent operating point as it does in the near-perfect (N=2/8)
+regime -- consistent with this investigation's broader, repeated finding that objective latent/
+waveform metrics are diagnostics, not proof of perceptual fidelity (per `CLAUDE.md`'s own
+"Evaluation and Controls" section). This does not change the core conclusion (compute produces
+real but incomplete, plateauing recovery, with a stable preferentially-memorized subset) but adds
+an important caveat: **the 80k budget, not 320k, is this experiment's best-sounding result**, and
+any future comparison must control for which checkpoint (best-by-MSE vs. final-step) is actually
+being played, since this run's turbulence means those can differ enormously.
