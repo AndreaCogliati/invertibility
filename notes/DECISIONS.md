@@ -2372,3 +2372,158 @@ compatible, verified via the full test suite passing unchanged, and via its own 
 check against `DacModel.encode()` before being trusted). Deleting the new files and reverting
 `dac_encoder.py`'s diff fully reverts this task's code. No training run, checkpoint, or W&B run
 was created by this task.
+
+## task08-dac-latent-vs-audio-shift: DAC latent instability does not translate into reconstructed-audio instability -- Outcome A, strongly supported
+
+**Context (`tasks/TASK-08.md`).** [[task07-dac-shift-sensitivity]] showed DAC's
+`quantized_representation` collapses toward the random-pair floor within a fraction of one DAC
+frame of input shift, while candidate translator inputs (log-mel, MuQ) stay comparatively
+invariant at the same shifts. That result only measured latent-space distance. This task measures
+the second half of the pipeline: does a large latent-space change from a tiny shift actually
+produce a large change in the *reconstructed audio*, or does DAC's decoder smooth the instability
+back out before it reaches the waveform? Two hypotheses were at stake: Hypothesis A (latents
+unstable, audio stable -- the latent is a poor regression target even though DAC reconstructs
+correctly) vs. Hypothesis B (latents unstable, audio unstable -- the instability is physically
+meaningful). No MuQ, no translator, no training -- frozen DAC encoder-decoder only, same
+constraint as TASK-07.
+
+**Method.** Reused TASK-07's exact 40-crop set unchanged (same manifest, same
+`select_stratified_tracks(..., split="val", tracks_per_genre=2)` call, same crop-start seconds
+{5.0, 15.0}) -- verified identical to TASK-07's own reported crop list at runtime (`crop_ids ==
+sorted(task07_report["crops"]["used"])`), not just assumed from calling the same deterministic
+function again. Shift schedule per this task's own specification: 0, 1, 2, 4, 8, 16, 32, 64, 128,
+256, 512, 1024 samples, both directions for every nonzero magnitude (512/1024 are new, beyond
+TASK-07's original 1-256 range). For each crop and shift, both the canonical and shifted crop were
+independently encoded and decoded through the full frozen DAC pipeline, producing two
+reconstructed waveforms (measured length 47992 samples for a 48000-sample input -- 8 samples
+shorter, not assumed equal). The two reconstructions are offset by the same number of samples as
+their inputs; `align_shifted_pair` (new, `dac_shift_sensitivity_common.py`) crops the
+non-overlapping edge from whichever one leads before any audio-domain metric is computed, per this
+task's explicit alignment requirement. The identical alignment-then-compare procedure was also
+applied directly to the *raw* (pre-DAC) waveform pair, as the required reference comparison.
+SI-SDR was not computed: `grep -rniE "si.sdr|si_sdr"` across `src/`, `scripts/`, `tests/` found no
+existing implementation anywhere in this project, and the task's own instruction is to reuse one,
+not add a new dependency solely for this metric -- stated explicitly in the JSON report rather than
+silently omitted. Total runtime: 93 seconds (40 crops x 12 shift values x 2 directions x DAC
+encode+decode+three audio metrics, well inside a reasonable budget with no cost warning needed).
+
+**A note on the raw-reference numbers being exactly 1.0/0.0 at every shift -- expected, not a
+bug.** Once `align_shifted_pair` crops the non-overlapping edge, the "canonical" and "shifted" raw
+excerpts are literally the same slice of the same underlying digital waveform (an integer-sample
+shift of raw audio is perfectly invertible by cropping -- no interpolation, no information loss).
+So the raw-reference row reads exactly waveform_correlation=1.0, log-mel cosine=1.0, STFT
+distance=0.0 at every tested shift, by construction. This is the correct, informative trivial
+control: it proves the source signal carries zero inherent ambiguity near a shifted crop boundary,
+so any reconstruction-quality gap observed in the DAC condition below is caused entirely by DAC's
+own encode-decode process, not by any genuine ambiguity in what "the audio should be."
+
+**Result -- reconstructed-audio similarity stays high and essentially flat across the entire shift
+range where latent similarity collapses from 1.0 to near 0:**
+
+| shift (samples) | latent cosine (mean) | DAC recon waveform corr | DAC recon log-mel cosine | DAC recon STFT distance | raw-reference (all metrics) |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 1.000 | 1.000 | 1.000 | 0.000 | 1.000 / 1.000 / 0.000 |
+| 1 | 0.716 | 0.958 | 0.990 | 0.653 | 1.000 / 1.000 / 0.000 |
+| 2 | 0.572 | 0.955 | 0.989 | 0.708 | 1.000 / 1.000 / 0.000 |
+| 4 | 0.290 | 0.959 | 0.988 | 0.724 | 1.000 / 1.000 / 0.000 |
+| 8 | 0.207 | 0.964 | 0.989 | 0.698 | 1.000 / 1.000 / 0.000 |
+| 16 | 0.157 | 0.964 | 0.989 | 0.702 | 1.000 / 1.000 / 0.000 |
+| 32 | 0.155 | 0.964 | 0.989 | 0.701 | 1.000 / 1.000 / 0.000 |
+| 64 | 0.132 | 0.964 | 0.989 | 0.705 | 1.000 / 1.000 / 0.000 |
+| 128 | 0.116 | 0.963 | 0.988 | 0.709 | 1.000 / 1.000 / 0.000 |
+| 256 | 0.118 | 0.963 | 0.988 | 0.709 | 1.000 / 1.000 / 0.000 |
+| 512 | 0.101 | 0.963 | 0.988 | 0.709 | 1.000 / 1.000 / 0.000 |
+| 1024 | 0.087 | 0.963 | 0.988 | 0.712 | 1.000 / 1.000 / 0.000 |
+
+(Every value is a mean over all 40 crops and both shift directions; no direction asymmetry
+exceeded the 0.05 threshold at any shift/metric.) **Waveform correlation and log-mel cosine
+similarity are essentially constant (0.955-0.964 and 0.988-0.990 respectively) from shift=1 all
+the way to shift=1024**, showing no discernible trend as latent similarity falls by an order of
+magnitude across the same range. STFT distance is a partial exception -- it jumps from 0 to ~0.65
+at the smallest shift (1 sample) and then stays roughly flat around 0.70 out to 1024 samples; this
+metric is evidently far more sensitive to any misalignment at all (consistent with its
+spectral-convergence term's known sensitivity to phase/alignment), but it too shows no
+*progressive* collapse tracking the latent curve -- it saturates immediately rather than degrading
+gradually alongside the latent.
+
+**Correlation analysis (Pearson/Spearman between latent cosine similarity and each audio metric,
+480 crop/shift points):**
+
+| audio metric | Pearson r | Spearman rho |
+| --- | --- | --- |
+| waveform correlation | 0.203 (p=7.6e-6) | 0.229 (p=4.1e-7) |
+| log-mel cosine similarity | 0.525 (p=2.5e-35) | 0.346 (p=6.5e-15) |
+| STFT similarity (derived, 1/(1+distance)) | 0.742 (p=5.7e-85) | 0.334 (p=6.4e-14) |
+
+All correlations are statistically significant at this sample size (as expected with n=480), but
+every Spearman rho is weak (0.23-0.35) -- latent cosine similarity explains only a small fraction
+of the rank-ordering of reconstruction-audio similarity. The Pearson/Spearman divergence for STFT
+similarity (0.74 vs. 0.33) indicates the linear correlation there is driven by a few high-leverage
+points (likely per-crop STFT-baseline differences), not a genuine monotonic latent-to-audio
+relationship. Figure 3 (`figure3_latent_vs_audio_similarity.png`) shows this directly: waveform
+correlation values cluster tightly in the 0.85-1.0 band across the *entire* 0-1.0 latent-cosine
+range, with no visible slope.
+
+**Answers to this task's five required questions.**
+
+1. *How much audio change results from the latent changes observed in TASK-07?* Very little.
+   Latent cosine similarity falls by roughly an order of magnitude (0.72 -> 0.09) across the
+   tested shift range, while reconstructed-audio waveform correlation stays within a 1-percentage-
+   point band (0.955-0.964) and log-mel cosine similarity within a 0.2-percentage-point band
+   (0.988-0.990) across that same range.
+2. *Does DAC latent similarity predict DAC reconstruction similarity?* Only weakly. Spearman rho
+   is 0.23-0.35 across all three audio metrics -- statistically real but practically a poor
+   predictor; most of reconstruction-audio similarity's variation is not explained by latent
+   cosine similarity.
+3. *Are DAC latents substantially more sensitive than the reconstructed audio itself?* Yes,
+   dramatically. The raw-reference control (exactly 1.0/1.0/0.0 at every shift, by construction --
+   see above) proves the underlying signal carries no inherent shift ambiguity, so the small,
+   flat gap between DAC reconstruction and that perfect control is entirely attributable to DAC's
+   own encode-decode process -- and that gap is far smaller, and does not grow with shift, unlike
+   the latent's own near-total collapse over the same range.
+4. *Is DAC latent distance a meaningful proxy for perceptual or reconstruction distance?* Not a
+   good one, at this sub-frame shift scale. A translator penalized by MSE against this latent
+   would be penalized heavily for sub-frame misalignments that barely affect what a listener (or
+   any of the three audio-domain metrics used here) would perceive as different reconstructed
+   audio.
+5. *Do these results strengthen or weaken the target-mismatch explanation for TASK-01 through
+   TASK-06?* They strengthen it substantially, and sharpen it. TASK-07 alone only showed the
+   target was fragile in a way inputs are not; this task additionally shows that fragility is
+   *not* tracking anything that matters for reconstruction quality -- meaning the ambiguity a
+   shift-invariant input imposes is not merely "annoying" but is regression noise imposed on top
+   of a target whose extra sensitivity is largely reconstruction-irrelevant. This is direct
+   evidence for Outcome A (per this task's own interpretation rules): "DAC latent geometry is
+   poorly aligned with perceptual similarity. The latent is a poor regression target even though
+   DAC reconstructs correctly."
+
+**Per this task's own explicit instruction: stopping after answering these questions, no
+follow-up experiment proposed.**
+
+**Listening package produced, not yet reviewed by the user.** `artifacts/
+task08_dac_latent_vs_audio_shift/listening/` contains, for 2 deterministically-selected
+representative crops (`select_listening_crops`: alphabetically first and the sorted-list midpoint,
+for genre spread) x shifts {0, 2, 8, 32, 128}: original audio, shifted audio, DAC reconstruction
+at shift 0, DAC reconstruction at shift k, and the aligned difference signal. Given this task's
+quantitative evidence is unusually consistent across three independent audio metrics (unlike
+several earlier findings in this project where objective metrics and perception diverged -- see
+[[task06-n32-compute-ablation]]'s listening-verdict divergence), a listening check would mainly
+serve as confirmation rather than being load-bearing for the interpretation above, but is offered
+for the user's own verdict.
+
+**Consequences.** New files: `scripts/analyze_dac_latent_vs_audio_shift.py`, 26 new tests appended
+to `tests/test_dac_shift_sensitivity_common.py` (full suite now 159 passing, up from 133 before
+TASK-07/145 after TASK-07). Extended additively: `src/muq_inversion/dac_shift_sensitivity_common.py`
+gained `crop_id`, `slice_shifted`, `load_padded_crops` (generalized from TASK-07's script-local
+versions, parameterized by `max_shift` instead of a module constant, so TASK-07's own script did
+not need to be touched), `align_shifted_pair`, `l2_distance_per_frame`, and `correlate_metrics`
+(thin wrapper over `scipy.stats`, already a project dependency -- no new dependency added). No
+TASK-01-07 file modified; no checkpoint, manifest, or cache touched (read-only diagnostic, no
+training). New artifacts: `artifacts/task08_dac_latent_vs_audio_shift/
+latent_vs_audio_shift_report.json`, three required figures, and the listening package described
+above. Total run time: 93 seconds.
+
+**Rollback plan.** Entirely additive except the three new pure functions in
+`dac_shift_sensitivity_common.py` (backward-compatible, verified via the full 159-test suite
+passing including every prior task's tests unchanged). Deleting the new files and reverting that
+module's diff fully reverts this task's code. No training run, checkpoint, or W&B run was created
+by this task.

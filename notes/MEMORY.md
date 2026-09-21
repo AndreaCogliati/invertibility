@@ -477,3 +477,30 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   checkpoint, no cache/manifest modified. Figure: `artifacts/task07_dac_shift_sensitivity/
   shift_sensitivity.png`. 12 new tests, full suite 145 passing. Total run time: 27 seconds. Full
   write-up in [[task07-dac-shift-sensitivity]].
+- DAC latent-vs-audio shift diagnostic CONCLUDED (2026-09-21, `tasks/TASK-08.md`, extends
+  [[task07-dac-shift-sensitivity]]): measured whether TASK-07's latent-space shift fragility
+  actually translates into reconstructed-audio instability, on the exact same 40-crop set, frozen
+  DAC encoder-decoder only, no MuQ/translator/training. **Result: Outcome A, strongly supported --
+  DAC latent similarity collapses by an order of magnitude (0.72 -> 0.09 cosine) across shifts
+  1-1024 samples, while reconstructed-audio similarity stays essentially flat over that same
+  range** (waveform correlation 0.955-0.964, log-mel cosine similarity 0.988-0.990, no
+  discernible trend). Correlation analysis across 480 crop/shift points: Spearman rho between
+  latent cosine similarity and audio similarity is only 0.23-0.35 across all three audio metrics
+  (statistically real at this n, but a weak predictor practically) -- Figure 3 shows waveform
+  correlation clustering tightly in a narrow 0.85-1.0 band across the *entire* 0-1.0 latent-cosine
+  range, no visible slope. **A raw-waveform reference control (shift the pre-DAC audio, then
+  align) reads exactly 1.0/1.0/0.0 at every tested shift, by construction** (an integer-sample
+  shift is perfectly invertible by cropping, so the source signal carries zero inherent shift
+  ambiguity) -- proving the small, shift-independent gap between DAC reconstruction and this
+  perfect control is entirely attributable to DAC's own encode-decode process, not to any genuine
+  ambiguity in "what the audio should be." **This strengthens and sharpens the target-mismatch
+  explanation for TASK-01 through TASK-06**: DAC's latent target isn't merely fragile in a way
+  inputs aren't (TASK-07) -- that extra fragility is largely reconstruction-irrelevant, meaning a
+  shift-invariant translator input is penalized by MSE for sub-frame misalignments that barely
+  affect what any of the three audio-domain metrics used here would call "different audio." Per
+  this task's explicit instruction, stopped after answering its five required questions, no
+  follow-up experiment proposed. SI-SDR not computed (no existing implementation in this project,
+  task instruction is to reuse one rather than add a new dependency). 26 new tests, full suite 159
+  passing. Total run time: 93 seconds. Listening package produced
+  (`artifacts/task08_dac_latent_vs_audio_shift/listening/`), not yet reviewed by the user. Full
+  write-up in [[task08-dac-latent-vs-audio-shift]].

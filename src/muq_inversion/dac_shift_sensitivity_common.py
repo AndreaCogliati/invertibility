@@ -1,9 +1,16 @@
 """Pure, testable helpers for `tasks/TASK-07.md`'s DAC shift/polarity sensitivity diagnostic
-(`scripts/analyze_dac_shift_sensitivity.py`).
+(`scripts/analyze_dac_shift_sensitivity.py`) and its audio-domain extension
+(`tasks/TASK-08.md`, `scripts/analyze_dac_latent_vs_audio_shift.py`).
 
-Kept separate from the script, mirroring this project's existing convention (`gate4_common.py`,
+Kept separate from the scripts, mirroring this project's existing convention (`gate4_common.py`,
 `gate3_spectrogram_common.py`) -- so track selection, frame-alignment, and similarity/agreement
 logic can be unit-tested without loading any model or audio file.
+
+`load_padded_crops`/`slice_shifted`/`crop_id` below generalize TASK-07's script-local versions of
+the same logic (parameterized by `max_shift` instead of a module constant) so TASK-08 can reuse
+identical crop-extraction behavior at a larger margin (1024 vs. TASK-07's 256 samples) without
+duplicating or modifying TASK-07's own script, per TASK-08's "do not modify any existing
+experiment" instruction.
 """
 
 from __future__ import annotations
@@ -14,7 +21,11 @@ import itertools
 import random
 from pathlib import Path
 
+import numpy as np
 import torch
+from scipy import stats
+
+from muq_inversion.audio import load_resample_validate
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,3 +100,109 @@ def sample_cross_track_pairs(crop_ids: list[str], track_of_crop: dict[str, str],
         raise ValueError(f"only {len(all_pairs)} cross-track pairs available, need {n_pairs}")
     rng = random.Random(seed)
     return rng.sample(all_pairs, n_pairs)
+
+
+def crop_id(track_id: str, crop_start: float) -> str:
+    return f"{track_id}_t{crop_start:.1f}s"
+
+
+def slice_shifted(buffer: torch.Tensor, shift: int, crop_samples: int, max_shift: int) -> torch.Tensor:
+    """buffer: (crop_samples + 2*max_shift,), a padded real-audio window (see `load_padded_crops`).
+    shift=0 is the canonical crop; a nonzero `shift` re-slices the same buffer `shift` samples
+    later (positive) or earlier (negative) -- never `torch.roll`/wraparound, matching TASK-07's
+    "real-audio margin, not circular wraparound" design."""
+    start = max_shift + shift
+    return buffer[start : start + crop_samples]
+
+
+def load_padded_crops(
+    tracks: list[TrackSpec],
+    raw_audio_root: Path,
+    sample_rate: int,
+    crop_start_seconds: list[float],
+    crop_samples: int,
+    max_shift: int,
+) -> tuple[dict[str, torch.Tensor], dict[str, str], list[str]]:
+    """Returns (crop_id -> padded buffer of length crop_samples+2*max_shift, crop_id -> track_id,
+    list of dropped crop_ids) -- a failing (non-finite) crop is dropped and logged, not fatal,
+    matching TASK-07's stop-condition-#2 policy. Generalizes TASK-07's script-local
+    `load_padded_crops` by taking `max_shift` as a parameter instead of a module constant, so a
+    caller needing a larger margin (TASK-08's shift schedule extends to 1024 samples, vs.
+    TASK-07's 256) gets identical crop-extraction behavior without duplicating or modifying
+    TASK-07's own script."""
+    buffers: dict[str, torch.Tensor] = {}
+    track_of_crop: dict[str, str] = {}
+    dropped: list[str] = []
+    for track in tracks:
+        waveform, _orig_sr = load_resample_validate(raw_audio_root / track.relative_path, sample_rate)
+        for crop_start in crop_start_seconds:
+            cid = crop_id(track.track_id, crop_start)
+            start = round(crop_start * sample_rate)
+            lo, hi = start - max_shift, start + crop_samples + max_shift
+            if lo < 0 or hi > len(waveform):
+                raise ValueError(
+                    f"STOP CONDITION: {track.track_id} crop at {crop_start}s needs samples "
+                    f"[{lo},{hi}) but track has only {len(waveform)} resampled samples"
+                )
+            buf = waveform[lo:hi]
+            if not np.all(np.isfinite(buf)):
+                print(f"dropping {cid}: non-finite samples in padded buffer")
+                dropped.append(cid)
+                continue
+            buffers[cid] = torch.from_numpy(buf.copy()).float()
+            track_of_crop[cid] = track.track_id
+    return buffers, track_of_crop, dropped
+
+
+def align_shifted_pair(a: torch.Tensor, b: torch.Tensor, shift: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """`tasks/TASK-08.md`'s required audio-alignment correction: `a` and `b` are two equal-length
+    1-D signals (e.g. DAC reconstructions), where `b`'s content started `shift` samples later in
+    absolute source-time than `a`'s (matching this module's `slice_shifted` sign convention).
+    Crops the non-overlapping edge from whichever signal leads, returning two equal-length
+    excerpts that cover the exact same underlying source-time span -- so a similarity metric on
+    the result reflects content difference, not the trivial fact that the two signals are offset
+    copies of (almost) the same audio. `shift=0` returns both signals unchanged. Raises if the
+    signals have no overlap left (`abs(shift) >= len(a)`)."""
+    if a.shape != b.shape:
+        raise ValueError(f"shape mismatch: {tuple(a.shape)} vs {tuple(b.shape)}")
+    n = a.shape[-1]
+    if abs(shift) >= n:
+        raise ValueError(f"shift {shift} leaves no overlap for length-{n} signals")
+    if shift == 0:
+        return a, b
+    overlap = n - abs(shift)
+    if shift > 0:
+        return a[..., shift : shift + overlap], b[..., 0:overlap]
+    k = -shift
+    return a[..., 0:overlap], b[..., k : k + overlap]
+
+
+def l2_distance_per_frame(a: torch.Tensor, b: torch.Tensor, frame_dim: int) -> float:
+    """Mean L2 (Euclidean) distance between `a` and `b` across all frames -- the literal
+    "Log-Mel Distance" metric `tasks/TASK-08.md` requires, alongside `cosine_similarity_per_frame`
+    (used for the same pair when a similarity, not a distance, is needed for a figure/correlation
+    axis). Same channels-first-vs-frames-first `frame_dim` convention as
+    `cosine_similarity_per_frame`."""
+    if a.shape != b.shape:
+        raise ValueError(f"shape mismatch: {tuple(a.shape)} vs {tuple(b.shape)}")
+    channel_dim = 1 if frame_dim == 2 else -1
+    per_frame = torch.linalg.vector_norm(a - b, dim=channel_dim)
+    return float(per_frame.mean().item())
+
+
+def correlate_metrics(x: list[float], y: list[float]) -> dict[str, float]:
+    """Pearson and Spearman correlation between two equal-length metric sequences --
+    `tasks/TASK-08.md`'s required "Additional Analysis" (latent similarity vs. audio similarity,
+    across all crop/shift points). Thin wrapper over `scipy.stats` (already a project dependency,
+    per this task's "do not add a new dependency" instruction) so the call site stays a single
+    line and the result is directly JSON-serializable (plain floats, not scipy result objects)."""
+    if len(x) != len(y):
+        raise ValueError(f"length mismatch: {len(x)} vs {len(y)}")
+    pearson = stats.pearsonr(x, y)
+    spearman = stats.spearmanr(x, y)
+    return {
+        "pearson_r": float(pearson.statistic),
+        "pearson_p": float(pearson.pvalue),
+        "spearman_r": float(spearman.statistic),
+        "spearman_p": float(spearman.pvalue),
+    }

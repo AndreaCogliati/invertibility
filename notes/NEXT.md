@@ -2,98 +2,102 @@
 
 ## Current gate
 
-DAC shift/polarity sensitivity diagnostic (`tasks/TASK-07.md`), a pre-training diagnostic on the
-frozen DAC encoder alone -- no MuQ, no translator, no training. **Result: DAC's own target is
-extremely shift-fragile while the candidate translator inputs (log-mel, MuQ) are comparatively
-shift-stable at the same shift magnitudes.** `quantized_representation`'s mean cosine similarity
-to its unshifted self drops to 0.716 at a single-*sample* shift and to 0.157 by 16 samples
-(approaching, but never fully reaching, the random-pair floor of 0.030, even at the largest tested
-shift of 256 samples -- still sub-frame relative to DAC's 320-sample hop). log-mel and MuQ stay
->=0.98/0.94 across the entire same range. Polarity flip (`x` vs. `-x`) produces *anti-correlated*
-latents (cosine -0.44 quantized), not merely dissimilar ones -- further apart than random unrelated
-crops. This confirms and generalizes TASK-04's unplanned 2-sample (83us) finding: the fragility is
-intrinsic to DAC's target, not an artifact of one trained checkpoint's overfit, and gives a
-structural explanation for the collapse pathology (a magnitude-only/phase-blind translator input
-cannot in principle determine this target uniquely) that is orthogonal to everything TASK-01
-through TASK-06 have already ruled out. Full reasoning and the complete shift-sweep table in
-[[DECISIONS.md#task07-dac-shift-sensitivity]]. Per this task's own explicit non-goal, **no
-conclusion is drawn here on whether to proceed with a complex-STFT rerun of TASK-05 -- that
-decision is the user's, from these numbers.**
+DAC latent-vs-audio shift diagnostic (`tasks/TASK-08.md`), extending TASK-07's latent-only
+finding through the DAC decoder. **Result: Outcome A, strongly supported -- DAC latent
+instability does not translate into reconstructed-audio instability.** On the exact same 40-crop
+set TASK-07 used, latent cosine similarity collapses from 1.0 to 0.09 across shifts of 1-1024
+samples, while reconstructed-audio waveform correlation stays flat at 0.955-0.964 and log-mel
+cosine similarity at 0.988-0.990 over that same range -- no discernible trend. Across 480
+crop/shift points, Spearman correlation between latent similarity and audio similarity is only
+0.23-0.35 for every audio metric tested: statistically real but practically a weak predictor. A
+raw-waveform reference control (shift the audio before any DAC involvement, then align) reads
+exactly 1.0/1.0/0.0 at every shift by construction, proving the small DAC-vs-perfect-control gap
+is entirely DAC's own encode-decode behavior, not genuine ambiguity in the source signal. Full
+reasoning, the complete shift-vs-both-domains table, and all five required question answers in
+[[DECISIONS.md#task08-dac-latent-vs-audio-shift]]. Per this task's own instruction, **stopped
+after answering its five required questions -- no next experiment proposed by this task.**
 
 **Conclusions reached this session (full reasoning in
-[[DECISIONS.md#task07-dac-shift-sensitivity]]):**
+[[DECISIONS.md#task08-dac-latent-vs-audio-shift]]):**
 
-1. Ran the shift sweep (k in {1,2,4,8,16,32,64,128,256} samples, both directions) and polarity
-   test on 40 GTZAN val-split crops (2/genre x 20 tracks x 2 crops), stratified and deterministic,
-   never overlapping any training set used elsewhere in this project. 27 seconds total runtime.
-2. **DAC's `quantized_representation` is severely shift-fragile at sub-frame magnitudes** --
-   collapses toward (not fully into) the random-pair floor by 16-32 samples, out of a 320-sample
-   frame hop.
-3. **The pre-quantizer (pre-RVQ) encoder output is somewhat more stable but not qualitatively
-   different** -- 0.945 at k=1 vs. quantized's 0.716, but it too collapses by k=8-16. RVQ
-   quantization amplifies an already-present continuous-encoder fragility; it does not create it.
-4. **Polarity flip produces anti-correlated latents**, not just dissimilar ones -- `x`/`-x` cosine
-   similarity is negative and codebook agreement is at or below the random-pair floor.
-5. **log-mel and MuQ are both comparatively near-invariant to the same shifts** -- this rules out
-   "the DAC target is just tracking an equivalently shifted input" as an alternative explanation,
-   and is the load-bearing evidence for the ambiguity-set argument this task set out to test.
-6. `DacModel.encoder`/`DacModel.quantizer` (already-public submodules) expose the pre-quantizer
-   stage cleanly -- verified to reproduce `DacModel.encode()` exactly, no monkeypatch needed, so
-   this task's first stop condition never triggered.
+1. Reused TASK-07's exact 40-crop set (verified identical at runtime against TASK-07's own report,
+   not just assumed), extended the shift schedule to include 0, 512, and 1024 samples.
+2. **Reconstructed-audio similarity is essentially flat across the entire shift range where latent
+   similarity collapses by an order of magnitude** -- the two do not move together.
+3. **The raw-reference control (exactly 1.0/1.0/0.0 at every shift) is the load-bearing evidence**:
+   it proves the underlying audio carries zero inherent shift ambiguity, isolating the small,
+   shift-independent DAC reconstruction gap as purely a property of DAC's own encode-decode
+   process, not of any genuine target ambiguity near a shifted crop boundary.
+4. **Latent cosine similarity is a weak predictor of reconstruction-audio similarity** (Spearman
+   rho 0.23-0.35 across three independent audio metrics, n=480) -- Figure 3 shows no visible slope.
+5. **This strengthens and sharpens the target-mismatch explanation** for TASK-01 through TASK-06:
+   the extra shift-fragility TASK-07 found in DAC's latent, beyond what candidate translator
+   inputs show, is now shown to be largely reconstruction-irrelevant -- a shift-invariant input is
+   being penalized by MSE for latent differences that mostly don't correspond to differences a
+   listener (or any of these three audio metrics) would perceive.
+6. SI-SDR was not computed -- no existing implementation found anywhere in this project, and the
+   task's own instruction was to reuse one rather than add a dependency for this metric alone.
 
 ## Exact last successful commands
 
 ```bash
-uv run python -u scripts/analyze_dac_shift_sensitivity.py
-uv run ruff check .; uv run pytest -q   # 145 passed
+uv run python -u scripts/analyze_dac_latent_vs_audio_shift.py
+uv run ruff check .; uv run pytest -q   # 159 passed
 ```
 
-2026-09-17, macOS, M4 Max, device=mps. Single foreground run, 27 seconds total (forward passes
-only, no gradients, no background job needed).
+2026-09-21, macOS, M4 Max, device=mps. Single foreground run, 93 seconds total (forward passes
+only, no gradients).
 
 ## Run/checkpoint path
 
 No checkpoints -- this task trains nothing. Artifacts:
 
-- `artifacts/task07_dac_shift_sensitivity/shift_sensitivity_report.json` -- every number
-  (shift sweep for DAC quantized/pre-quantizer/codebook-agreement, log-mel, MuQ; polarity
-  sensitivity; random-pair baseline; the exact 40-crop list with track IDs and crop start times).
-- `artifacts/task07_dac_shift_sensitivity/shift_sensitivity.png` -- the required figure (DAC
-  quantized + pre-quantizer vs. log-mel vs. MuQ, cosine similarity vs. shift magnitude, log-x,
-  with the random-pair baseline as a reference line).
-- No W&B run (this task doesn't use W&B -- no training loop to log).
+- `artifacts/task08_dac_latent_vs_audio_shift/latent_vs_audio_shift_report.json` -- every number
+  (per-shift summary for latent cosine + DAC-reconstruction audio metrics + raw-reference audio
+  metrics, the full correlation analysis, the 480-point crop/shift dataset underlying Figure 3).
+- `artifacts/task08_dac_latent_vs_audio_shift/figure1_latent_similarity_vs_shift.png` -- latent
+  curve, extended to 512/1024 samples beyond TASK-07's original range.
+- `artifacts/task08_dac_latent_vs_audio_shift/figure2_audio_similarity_vs_shift.png` -- DAC
+  reconstruction vs. raw-reference audio similarity, three metrics, vs. shift.
+- `artifacts/task08_dac_latent_vs_audio_shift/figure3_latent_vs_audio_similarity.png` -- the
+  required latent-vs-audio scatter, one point per crop/shift pair.
+- `artifacts/task08_dac_latent_vs_audio_shift/listening/` -- listening package for 2
+  representative crops x shifts {0,2,8,32,128}: original, shifted, DAC reconstruction (shift 0
+  and shift k), and the aligned difference signal. Not yet reviewed by the user.
+- No W&B run (no training loop to log).
 
 ## Next command
 
-**Blocked on user direction.** Per this task's explicit non-goal ("do not draw a final conclusion
-about whether to proceed with the complex-STFT TASK-05 rerun -- the decision on whether/how to
-proceed is the user's"), no next experiment is proposed here. The evidence this task produced
-(DAC target is shift-fragile at sub-frame magnitudes; candidate translator inputs are not) is the
-input to that decision, not the decision itself. If the user does want to proceed:
+**Blocked on user direction.** Per this task's own instruction ("stop after answering these
+questions... do not propose a follow-up experiment automatically"), no next experiment is
+proposed here. If the user wants to act on this and TASK-07's combined findings:
 
-- A complex-STFT (phase-aware) representation for the translator input, motivated directly by this
-  task's finding that magnitude-only inputs cannot in principle resolve DAC's sub-frame-sensitive
-  target -- this was the TASK-07 Context section's own motivating rationale for building this
-  diagnostic first.
-- Alternatively, investigating whether more precise crop-boundary alignment during data
-  preparation (rather than a representation change) narrows the practical impact of this
-  fragility, if the sensitivity is dominated by alignment noise already present in this project's
-  own crop-extraction pipeline.
+- A human listening pass on `artifacts/task08_dac_latent_vs_audio_shift/listening/` would confirm
+  (or challenge) the objective-metric conclusion above -- worth doing given this project's several
+  earlier metric/perception divergences (see [[task06-n32-compute-ablation]]), even though this
+  task's evidence is unusually consistent across three independent audio metrics already.
+- TASK-07's own still-open question -- whether to pursue a complex-STFT (phase-aware) translator
+  input -- is now informed by a further nuance: the shift-fragility that motivated that idea is
+  shown here to be substantially reconstruction-irrelevant, which may weaken (not strengthen) the
+  case for chasing sub-frame alignment precision specifically, even though the broader
+  target-mismatch explanation (representation choice vs. this MSE-latent-regression setup) is
+  reinforced.
 
 Do not start either without the user's go-ahead.
 
 ## Blockers
 
-1. **Decision needed from the user** on whether/how to proceed given this task's shift-sensitivity
-   findings (TASK-07 itself does not request one).
-2. **Listening verdicts** for TASK-01's and TASK-02's WAV packages -- still pending (TASK-04's,
-   TASK-05's, and TASK-06's are all now confirmed by ear; TASK-07 has no audio output to review).
-3. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
-4. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
+1. **Decision needed from the user** on how to weigh TASK-07 and TASK-08 together for any future
+   direction (neither task requests one).
+2. **Listening verdict for TASK-08's package** -- not yet reviewed by the user (unlike TASK-04
+   through TASK-06, which are all confirmed by ear).
+3. **Listening verdicts** for TASK-01's and TASK-02's WAV packages -- still pending.
+4. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
+5. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
    untested, orthogonal to this branch's findings.
-5. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
+6. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
    still dormant.
-6. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
+7. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
    the MuQ layer-sweep were never given -- not blocking, worth noting if any comes up again.
 
 ## Expected verification criteria for Gate 5
@@ -102,20 +106,17 @@ Not yet reached, and not authorized to start.
 
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#task07-dac-shift-sensitivity]] first.** It gives the clearest structural
-  explanation yet for why this project's collapse pathology exists: the DAC target this whole
-  investigation regresses against is intrinsically fragile to sub-frame input alignment in a way
-  none of the candidate translator inputs are, at the same shift magnitudes.
-- `src/muq_inversion/dac_encoder.py`'s new `FrozenDacEncoder.encode_stages` is the clean way to
-  get DAC's pre-quantizer output + per-stage codebook indices in one call, for any future
-  diagnostic needing them -- no monkeypatch, verified equivalent to `encode()`.
-- `src/muq_inversion/dac_shift_sensitivity_common.py`'s `select_stratified_tracks`,
-  `cosine_similarity_per_frame`, `codebook_agreement`, and `sample_cross_track_pairs` are generic
-  and reusable for any future shift/polarity/alignment-sensitivity diagnostic on any of this
-  project's three representations (DAC, log-mel, MuQ) -- no new plumbing needed.
-- This task's crop selection (val-split, `crop_start_seconds` in {5.0, 15.0}) deliberately never
-  overlaps any training manifest in this project -- keep that property if extending this
-  diagnostic (e.g. to more shift magnitudes or a MuQ polarity test) rather than reusing a training
-  crop.
-- `scripts/analyze_dac_shift_sensitivity.py` is read-only and fast (27s) -- safe to rerun directly
-  if the DAC checkpoint, GTZAN manifest, or shift magnitudes ever need revisiting.
+- **Read [[DECISIONS.md#task08-dac-latent-vs-audio-shift]] first**, alongside
+  [[DECISIONS.md#task07-dac-shift-sensitivity]] -- together they are the most direct evidence yet
+  that this investigation's collapse pathology has a structural, representation-level cause (a
+  fragile, reconstruction-irrelevant regression target), not purely an optimization/capacity one.
+- The raw-reference control reading exactly 1.0/1.0/0.0 at every shift is *correct*, not a bug --
+  see the dedicated note in [[DECISIONS.md#task08-dac-latent-vs-audio-shift]] before "fixing" it
+  in any future reuse of `align_shifted_pair`.
+- `src/muq_inversion/dac_shift_sensitivity_common.py` now holds the full toolkit for any future
+  shift/alignment diagnostic on any of this project's representations: track/crop selection,
+  padded-buffer shifting, per-frame cosine/L2 distance, codebook agreement, audio-domain
+  alignment (`align_shifted_pair`), and Pearson/Spearman correlation (`correlate_metrics`) -- no
+  new plumbing needed for a similar future diagnostic.
+- `scripts/analyze_dac_latent_vs_audio_shift.py` is read-only and fast (93s) -- safe to rerun
+  directly if the DAC checkpoint, GTZAN manifest, or shift schedule ever need revisiting.

@@ -10,10 +10,15 @@ import pytest
 import torch
 
 from muq_inversion.dac_shift_sensitivity_common import (
+    align_shifted_pair,
     codebook_agreement,
+    correlate_metrics,
     cosine_similarity_per_frame,
+    crop_id,
+    l2_distance_per_frame,
     sample_cross_track_pairs,
     select_stratified_tracks,
+    slice_shifted,
 )
 
 
@@ -119,3 +124,101 @@ def test_sample_cross_track_pairs_raises_if_too_few():
     track_of_crop = {"a1": "trackA", "a2": "trackA"}
     with pytest.raises(ValueError, match="only 0"):
         sample_cross_track_pairs(list(track_of_crop), track_of_crop, n_pairs=1, seed=0)
+
+
+def test_crop_id_format():
+    assert crop_id("blues.00014", 5.0) == "blues.00014_t5.0s"
+    assert crop_id("blues.00014", 15.0) == "blues.00014_t15.0s"
+
+
+def test_slice_shifted_canonical_is_middle_span():
+    buf = torch.arange(20).float()  # crop_samples=10, max_shift=5 -> buf length 20
+    canonical = slice_shifted(buf, 0, crop_samples=10, max_shift=5)
+    assert torch.equal(canonical, torch.arange(5, 15).float())
+
+
+def test_slice_shifted_positive_and_negative():
+    buf = torch.arange(20).float()
+    plus = slice_shifted(buf, 2, crop_samples=10, max_shift=5)
+    minus = slice_shifted(buf, -2, crop_samples=10, max_shift=5)
+    assert torch.equal(plus, torch.arange(7, 17).float())
+    assert torch.equal(minus, torch.arange(3, 13).float())
+
+
+def test_align_shifted_pair_zero_shift_unchanged():
+    a = torch.arange(10).float()
+    b = torch.arange(10, 20).float()
+    aligned_a, aligned_b = align_shifted_pair(a, b, 0)
+    assert torch.equal(aligned_a, a)
+    assert torch.equal(aligned_b, b)
+
+
+def test_align_shifted_pair_positive_shift_drops_correct_edges():
+    # b's content started 3 samples later than a's -- a's tail should match b's head.
+    a = torch.arange(10).float()
+    b = torch.arange(3, 13).float()  # literally a shifted by +3
+    aligned_a, aligned_b = align_shifted_pair(a, b, 3)
+    assert torch.equal(aligned_a, aligned_b)
+    assert len(aligned_a) == 7
+
+
+def test_align_shifted_pair_negative_shift_drops_correct_edges():
+    a = torch.arange(10).float()
+    b = torch.arange(-3, 7).float()  # b shifted by -3 relative to a
+    aligned_a, aligned_b = align_shifted_pair(a, b, -3)
+    assert torch.equal(aligned_a, aligned_b)
+    assert len(aligned_a) == 7
+
+
+def test_align_shifted_pair_shape_mismatch_raises():
+    a = torch.zeros(10)
+    b = torch.zeros(9)
+    with pytest.raises(ValueError, match="shape mismatch"):
+        align_shifted_pair(a, b, 1)
+
+
+def test_align_shifted_pair_no_overlap_raises():
+    a = torch.zeros(5)
+    b = torch.zeros(5)
+    with pytest.raises(ValueError, match="no overlap"):
+        align_shifted_pair(a, b, 5)
+
+
+def test_l2_distance_per_frame_identical_is_zero():
+    a = torch.randn(1, 128, 10)
+    assert l2_distance_per_frame(a, a, frame_dim=2) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_l2_distance_per_frame_known_value():
+    a = torch.zeros(1, 3, 1)
+    b = torch.zeros(1, 3, 1)
+    b[0, :, 0] = torch.tensor([3.0, 4.0, 0.0])  # norm = 5
+    assert l2_distance_per_frame(a, b, frame_dim=2) == pytest.approx(5.0)
+
+
+def test_l2_distance_per_frame_shape_mismatch_raises():
+    a = torch.randn(1, 128, 10)
+    b = torch.randn(1, 128, 9)
+    with pytest.raises(ValueError, match="shape mismatch"):
+        l2_distance_per_frame(a, b, frame_dim=2)
+
+
+def test_correlate_metrics_perfect_positive_correlation():
+    x = [1.0, 2.0, 3.0, 4.0, 5.0]
+    y = [2.0, 4.0, 6.0, 8.0, 10.0]
+    result = correlate_metrics(x, y)
+    assert result["pearson_r"] == pytest.approx(1.0)
+    assert result["spearman_r"] == pytest.approx(1.0)
+
+
+def test_correlate_metrics_perfect_negative_correlation():
+    x = [1.0, 2.0, 3.0, 4.0, 5.0]
+    y = [5.0, 4.0, 3.0, 2.0, 1.0]
+    result = correlate_metrics(x, y)
+    assert result["pearson_r"] == pytest.approx(-1.0)
+    assert result["spearman_r"] == pytest.approx(-1.0)
+
+
+def test_correlate_metrics_length_mismatch_raises():
+    with pytest.raises(ValueError, match="length mismatch"):
+        correlate_metrics([1.0, 2.0], [1.0])
