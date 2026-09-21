@@ -1175,3 +1175,65 @@ preferential per-example memorization) but flags 80k, not 320k, as this experime
 best-sounding result, and flags checkpoint-selection-for-listening as a methodological gap worth
 fixing in any future compute-ablation-style task (always export best-by-MSE audio at every
 milestone, not just fixed-step milestones).
+
+## 2026-09-17: TASK-07 DAC shift/polarity sensitivity diagnostic
+
+Motivation: TASK-04's unplanned finding (trained MuQ checkpoint's cosine similarity collapsed
+0.99998 -> 0.577 under a 2-sample/83us crop offset) never established whether the fragility is in
+DAC's own target or specific to that one trained model. This task isolates DAC alone, no
+training, to check before spending compute on a complex-STFT TASK-05 rerun.
+
+First checked whether DAC's pre-quantizer output is reachable without a `transformers`
+monkeypatch (task's stop condition #1). Read modeling_dac.py directly: `DacModel.encoder` and
+`DacModel.quantizer` are already public nn.Module submodules; `DacModel.encode()` is just
+`quantized_representation = self.encoder(input_values); self.quantizer(quantized_representation)`.
+Verified this composition reproduces `encode()`'s output exactly (`torch.allclose` on
+quantized_representation, `torch.equal` on audio_codes) before trusting it -- no monkeypatch
+needed, first stop condition never triggered. Added `FrozenDacEncoder.encode_stages()` wrapping
+this. n_codebooks measured from the loaded checkpoint's config = 32 (matches task's "32 stages"
+language, not assumed).
+
+Design decision on how to implement "shift the input by k samples": extract crops from a
+padded buffer with 256 samples (=MAX_SHIFT) of genuine surrounding audio on each side (crop
+starts chosen with much larger margin, e.g. 5.0s/15.0s into a 30s track), then a shift-by-k crop
+is a literal re-slice of that buffer -- never torch.roll/wraparound, never zero-padded. Both
+canonical and every shifted crop are full CROP_SAMPLES-length real-audio inputs -> same frame
+count always -> 0 frames ever need dropping for invalidity (documented explicitly rather than
+silently assumed, per the task's "say how many frames were dropped" requirement).
+
+Commands:
+```
+uv run python -u scripts/analyze_dac_shift_sensitivity.py   # 27s total, well under budget
+uv run ruff check .; uv run pytest -q   # 145 passed (12 new tests)
+```
+
+Results (mean cosine similarity to canonical, both directions averaged, no asymmetry >0.05
+threshold ever triggered):
+```
+shift(samples)  DAC quantized  DAC pre-quant  DAC codebook-stage0  log-mel  MuQ
+1               0.716          0.945          0.783                0.9994   0.9999
+2               0.572          0.827          0.626                0.9991   0.9998
+4               0.290          0.540          0.410                0.9987   0.9996
+8               0.207          0.334          0.212                0.9984   0.9993
+16              0.157          0.229          0.067                0.9981   0.9991
+32              0.155          0.230          0.024                0.9975   0.9981
+64              0.132          0.201          0.021                0.9959   0.9950
+128             0.116          0.174          0.019                0.9915   0.9833
+256             0.118          0.180          0.017                0.9802   0.9434
+random baseline 0.030          0.036          0.0025               --       --
+```
+Polarity (x vs -x): quantized cosine=-0.435, pre-quant cosine=-0.557 (NEGATIVE -- anti-correlated,
+not just dissimilar), codebook agreement 0.002/0.0003 (at/below random-pair floor).
+
+Striking result: DAC's own target collapses toward the random-pair floor by 16-32 samples (a
+small fraction of its own 320-sample/13.3ms frame hop), while log-mel and MuQ -- the two
+candidate translator inputs -- stay >0.98/0.94 across the ENTIRE tested range up to 256 samples.
+This directly rules out "the target is just tracking a shifted input" and confirms the ambiguity-
+set concern from the task's Context section: a magnitude-only/phase-blind input cannot in
+principle determine this target uniquely at sub-frame precision.
+
+Per the task's explicit non-goal, did NOT draw a conclusion about whether to pursue a complex-STFT
+rerun of TASK-05 -- reported the numbers only, left the decision to the user.
+
+Full write-up in notes/DECISIONS.md#task07-dac-shift-sensitivity and notes/MEMORY.md. Figure:
+artifacts/task07_dac_shift_sensitivity/shift_sensitivity.png.

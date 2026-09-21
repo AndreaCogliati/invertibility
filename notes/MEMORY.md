@@ -450,3 +450,30 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   that run's oscillation, not its best-by-MSE checkpoint at step 88000) and partly a reminder that
   this task's objective metrics are diagnostics, not proof of perceptual fidelity, especially in
   this collapse-adjacent regime. Full write-up in [[task06-n32-compute-ablation]].
+- DAC shift/polarity sensitivity diagnostic CONCLUDED (2026-09-17, `tasks/TASK-07.md`): tested the
+  frozen DAC encoder alone (no MuQ, no translator, no training) for sensitivity to small sub-frame
+  input time shifts and global polarity flip, on 40 GTZAN val-split crops never used in any
+  training set in this project. **Result: DAC's `quantized_representation` is extremely
+  shift-fragile (mean cosine similarity 0.716 at a 1-*sample* shift, 0.157 by 16 samples --
+  approaching but not fully reaching the random-pair floor of 0.030 -- and never fully reaching it
+  even at 256 samples, ~10.7ms, still sub-frame relative to DAC's 320-sample/13.3ms hop), while the
+  two candidate translator inputs are comparatively near-invariant at the same shifts (log-mel
+  >=0.98, MuQ >=0.94, across the entire tested range up to 256 samples).** The pre-quantizer
+  encoder output is somewhat more stable than the post-RVQ representation (0.945 at k=1 vs. 0.716)
+  but collapses similarly by k=8-16 -- the fragility is substantially present in DAC's own
+  continuous encoder, not purely an RVQ/codebook discretization artifact. **Polarity: `x` and `-x`
+  are not merely dissimilar but *anti-correlated* (cosine similarity -0.435 quantized, -0.557
+  pre-quantizer) -- further apart than random unrelated crops (0.030/0.036 baseline), not merely
+  indifferent to sign.** This directly confirms and generalizes TASK-04's unplanned 2-sample
+  (83us) MuQ-checkpoint finding: the fragility is intrinsic to DAC's own target, not an artifact of
+  one trained model's narrow overfit, and it is not tracked by an equivalently shifted input --
+  ruling out "the target is just following a shifted input" as an alternative explanation. This
+  gives a structural, orthogonal-to-everything-else-ruled-out explanation for the collapse
+  pathology this investigation has studied since [[muq-to-dac-scale-data]]: a magnitude-only/
+  phase-blind translator input (log-mel, MuQ) cannot in principle determine this target uniquely
+  at sub-frame precision, so MSE regression must average over the resulting ambiguity set. Per
+  this task's explicit non-goal, **no conclusion drawn on whether to proceed with a complex-STFT
+  rerun of TASK-05 -- that decision is the user's**. Read-only diagnostic: no training, no
+  checkpoint, no cache/manifest modified. Figure: `artifacts/task07_dac_shift_sensitivity/
+  shift_sensitivity.png`. 12 new tests, full suite 145 passing. Total run time: 27 seconds. Full
+  write-up in [[task07-dac-shift-sensitivity]].

@@ -32,6 +32,23 @@ from transformers import DacModel
 
 
 @dataclasses.dataclass(frozen=True)
+class DacEncodeStages:
+    """Both stages of `DacModel.encode()`, split apart -- `tasks/TASK-07.md`'s shift/polarity
+    diagnostic needs the pre-quantizer continuous encoding (to separate RVQ-induced fragility from
+    the underlying continuous encoder's own fragility) as well as the per-stage codebook indices,
+    neither of which `FrozenDacEncoder.encode()` exposes. Verified by direct comparison
+    (`scripts/analyze_dac_shift_sensitivity.py`'s own startup check) that
+    `pre_quantizer_encoding` -> `model.quantizer(...)` reproduces `model.encode(...)`'s
+    `quantized_representation`/`audio_codes` exactly -- no monkeypatch of `transformers`
+    internals needed, since both stages are already public submodules (`model.encoder`,
+    `model.quantizer`)."""
+
+    pre_quantizer_encoding: torch.Tensor  # (batch, 1024, num_frames), before RVQ
+    quantized_representation: torch.Tensor  # (batch, 1024, num_frames), after RVQ
+    audio_codes: torch.Tensor  # (batch, n_codebooks, num_frames), per-stage codebook indices
+
+
+@dataclasses.dataclass(frozen=True)
 class DacProbeResult:
     input_sample_rate: int
     input_num_samples: int
@@ -65,6 +82,24 @@ class FrozenDacEncoder:
         assert waveform_24khz.ndim == 2, "expected (batch, num_samples)"
         output = self.model.encode(waveform_24khz.unsqueeze(1).to(self.device))
         return output.quantized_representation
+
+    @torch.inference_mode()
+    def encode_stages(self, waveform_24khz: torch.Tensor) -> DacEncodeStages:
+        """waveform_24khz: (batch, num_samples) at 24 kHz. Returns the pre-quantizer encoding,
+        the post-RVQ `quantized_representation`, and per-stage `audio_codes` from a single
+        forward pass -- for `tasks/TASK-07.md`'s shift/polarity sensitivity diagnostic only;
+        `encode()` above remains the single-tensor path used everywhere else in this project."""
+        assert waveform_24khz.ndim == 2, "expected (batch, num_samples)"
+        input_values = waveform_24khz.unsqueeze(1).to(self.device)
+        pre_quantizer_encoding = self.model.encoder(input_values)
+        quantized_representation, audio_codes, _projected_latents, _commitment_loss, _codebook_loss = (
+            self.model.quantizer(pre_quantizer_encoding)
+        )
+        return DacEncodeStages(
+            pre_quantizer_encoding=pre_quantizer_encoding,
+            quantized_representation=quantized_representation,
+            audio_codes=audio_codes,
+        )
 
     @torch.inference_mode()
     def decode(self, quantized_representation: torch.Tensor) -> torch.Tensor:

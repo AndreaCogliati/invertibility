@@ -2253,3 +2253,122 @@ real but incomplete, plateauing recovery, with a stable preferentially-memorized
 an important caveat: **the 80k budget, not 320k, is this experiment's best-sounding result**, and
 any future comparison must control for which checkpoint (best-by-MSE vs. final-step) is actually
 being played, since this run's turbulence means those can differ enormously.
+
+## task07-dac-shift-sensitivity: DAC's own target is extremely shift-fragile while candidate translator inputs are comparatively shift-stable -- the ambiguity concern is real
+
+**Context (`tasks/TASK-07.md`).** TASK-04 surfaced, as an unplanned finding, that a trained MuQ
+Gate-3 checkpoint's cosine similarity collapsed from 0.99998 to 0.577 under a 2-sample (83
+microsecond) crop offset -- but that number was measured on a *trained model's output*, not on
+DAC's own target directly, so it left open whether the fragility originates in DAC itself or is
+an artifact of that specific trained checkpoint's narrow overfit. This task tests DAC directly, on
+the frozen encoder alone, no MuQ, no translator, no training: if DAC's target is intrinsically
+shift-fragile while a magnitude-only/phase-blind input (log-mel, MuQ) is comparatively
+shift-stable at the same shift magnitudes, then no such input can in principle determine the DAC
+target uniquely -- MSE regression must average over the resulting ambiguity set, which is a
+structural explanation for collapse that is orthogonal to every cause TASK-01 through TASK-06
+have ruled out (representation choice, data scale, MuQ layer depth, training compute).
+
+**Method.** 20 GTZAN val-split tracks (2/genre, deterministic ascending-`track_id` selection --
+`select_stratified_tracks`), 2 crops/track (2.0s each) = 40 crops, none overlapping any training
+set used elsewhere in this project. Each crop drawn with a 256-sample margin of genuine
+surrounding audio on both sides (not zero-padding or circular wraparound), so every shifted
+re-extraction at k in {1,2,4,8,16,32,64,128,256} samples (both directions) is a full-length,
+real-audio input producing the same frame count as the canonical crop -- confirmed 0 frames ever
+needed dropping for invalidity, documented rather than assumed
+(`scripts/analyze_dac_shift_sensitivity.py`'s module docstring). Pre-quantizer encoding obtained
+via `DacModel.encoder` + `DacModel.quantizer` called directly (both already public submodules);
+verified once that this composition reproduces `DacModel.encode()`'s `quantized_representation`/
+`audio_codes` exactly -- no `transformers` monkeypatch needed, so the task's first stop condition
+never triggered. `n_codebooks=32` measured from the loaded checkpoint's config, not assumed.
+Total run time: 27 seconds (well inside the task's "a few minutes" budget) -- forward passes only,
+batched per shift magnitude, no gradients.
+
+**Result -- DAC's `quantized_representation` collapses toward the random-pair floor within a
+single DAC frame's width of shift, while log-mel and MuQ stay near 1.0 across the entire tested
+range:**
+
+| shift (samples) | DAC quantized (mean cos) | DAC pre-quantizer (mean cos) | DAC codebook stage-0 agreement | log-mel (mean cos) | MuQ (mean cos) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 0.716 | 0.945 | 0.783 | 0.9994 | 0.9999 |
+| 2 | 0.572 | 0.827 | 0.626 | 0.9991 | 0.9998 |
+| 4 | 0.290 | 0.540 | 0.410 | 0.9987 | 0.9996 |
+| 8 | 0.207 | 0.334 | 0.212 | 0.9984 | 0.9993 |
+| 16 | 0.157 | 0.229 | 0.067 | 0.9981 | 0.9991 |
+| 32 | 0.155 | 0.230 | 0.024 | 0.9975 | 0.9981 |
+| 64 | 0.132 | 0.201 | 0.021 | 0.9959 | 0.9950 |
+| 128 | 0.116 | 0.174 | 0.019 | 0.9915 | 0.9833 |
+| 256 | 0.118 | 0.180 | 0.017 | 0.9802 | 0.9434 |
+| *random-pair baseline* | 0.030 | 0.036 | 0.0025 | -- | -- |
+
+(DAC's hop is 320 samples/frame at 24kHz, ~13.3ms -- every shift tested here, including the
+largest (256 samples, ~10.7ms), is still sub-frame. No direction asymmetry exceeded the 0.05
+threshold at any shift for any of the three representations -- reported means are the average of
++k and -k, per the task's own instruction.)
+
+**Is `quantized_representation` shift-fragile, and at what magnitude does it approach the
+random-pair floor?** Yes, severely -- a single-*sample* shift (1/24000 s) already drops mean
+cosine similarity to 0.716, and by 16 samples (0.67ms, still far under one DAC frame) it has
+collapsed to 0.157, close to but not fully into the random-pair baseline's range (0.030); it
+plateaus around 0.12-0.16 from k=16 onward and never fully reaches baseline even at the largest
+tested shift (256 samples). Codebook agreement collapses even faster and further: stage-0
+agreement falls from 0.78 (k=1) to 0.024 (k=32), and the 32-stage mean agreement (not tabulated
+above for space) is already indistinguishable from its own random-pair floor (0.0011) by k=8. So
+by any practical measure, a shift as small as 8-32 samples -- a tiny fraction of one 320-sample
+DAC frame -- is enough to make the shifted and unshifted latents look like two unrelated audio
+clips to DAC's own codebooks.
+
+**Is the pre-quantizer encoder output equally fragile, or more stable?** More stable, but not
+qualitatively different -- RVQ quantization amplifies an already-present fragility rather than
+creating it from a robust continuous encoding. At k=1 the pre-quantizer output (0.945) is
+noticeably more robust than the post-RVQ `quantized_representation` (0.716), but it too collapses
+by k=8 (0.334) and k=16 (0.229), well above the quantized representation's values at the same
+shifts but nowhere near shift-invariant. This means the fragility is not primarily an RVQ/codebook
+discretization artifact -- it is already substantially present in DAC's own continuous encoder,
+and RVQ's discretization sharpens (roughly doubles the rate of) an existing continuous-domain
+sensitivity rather than introducing a new one.
+
+**Polarity sensitivity: `x` and `-x` are not merely dissimilar -- they are *more* different than
+random unrelated crops.** Cosine similarity between `x` and `-x` is **negative** for both
+`quantized_representation` (-0.435) and the pre-quantizer encoding (-0.557), and codebook
+agreement between the two (stage-0: 0.002, mean-32: 0.0003) sits at or below the random-pair
+floor (0.0025 / 0.0011). So DAC's encoder does not merely fail to recognize polarity-flipped audio
+as similar to the original -- it produces an anti-correlated representation, actively further from
+the original than an unrelated clip would be. A polarity-blind translator input (log-mel
+magnitude, which discards sign entirely; MuQ, whose own polarity sensitivity was not tested here
+since it wasn't part of this task's required scope) is therefore chasing a target that treats `x`
+and `-x` as further apart than chance, not merely indifferent to them.
+
+**How do the input representations' own shift-sensitivity compare to DAC's, at the same shift
+values -- the load-bearing comparison for the open question?** They are drastically more stable.
+At every tested shift up to 128 samples, both log-mel (>=0.99) and MuQ (>=0.98) remain almost
+perfectly self-similar, while DAC's `quantized_representation` has already collapsed to
+near-baseline levels by 16-32 samples -- more than 3 octaves of shift magnitude before the inputs
+show comparable degradation (log-mel first drops meaningfully at 256 samples, to 0.980; MuQ at 128
+samples, to 0.983). **This rules out the alternative explanation that a "shifted DAC target" is
+simply tracking an equivalently shifted input** -- the input representations a translator actually
+receives are far more shift-tolerant than the target they are trained to predict, at every shift
+magnitude tested. This is the structural signature the task's Context section anticipated: a
+magnitude-only/phase-blind input cannot in principle determine this target uniquely at sub-frame
+alignment precision, and MSE regression trained against it must average over the resulting
+ambiguity set -- a candidate explanation for the collapse pathology that is orthogonal to
+everything TASK-01 through TASK-06 have already ruled out.
+
+**Per this task's explicit non-goal: no conclusion is drawn here about whether to proceed with a
+complex-STFT rerun of TASK-05 -- that decision is the user's, from these numbers.**
+
+**Consequences.** New files: `scripts/analyze_dac_shift_sensitivity.py`,
+`src/muq_inversion/dac_shift_sensitivity_common.py`, `tests/test_dac_shift_sensitivity_common.py`
+(12 new tests, full suite now 145 passing). Extended additively:
+`src/muq_inversion/dac_encoder.py` gained `DacEncodeStages`/`FrozenDacEncoder.encode_stages`
+(verified to reproduce `DacModel.encode()`'s own output exactly before use -- see that method's
+docstring; `encode()` itself unchanged, still used everywhere else in this project). No
+TASK-01-06 file modified; no checkpoint, manifest, or cache touched (read-only diagnostic, no
+training). New artifacts: `artifacts/task07_dac_shift_sensitivity/shift_sensitivity_report.json`
+(every number above, plus the exact 40-crop list), `artifacts/task07_dac_shift_sensitivity/
+shift_sensitivity.png` (the required figure). Total run time: 27 seconds.
+
+**Rollback plan.** Entirely additive except the one new `dac_encoder.py` method (backward-
+compatible, verified via the full test suite passing unchanged, and via its own output-equality
+check against `DacModel.encode()` before being trusted). Deleting the new files and reverting
+`dac_encoder.py`'s diff fully reverts this task's code. No training run, checkpoint, or W&B run
+was created by this task.

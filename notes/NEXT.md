@@ -2,93 +2,92 @@
 
 ## Current gate
 
-N=32 compute-controlled micro-ablation (`tasks/TASK-06.md`). **Result: partial, not full,
-recovery -- by the metrics.** Held N=32 fixed and varied only step budget (20k/80k/320k) to test
-whether TASK-05's sharp N=8->N=32 collapse was an undertraining artifact. Waveform correlation did
-rise substantially with more compute (0.469 -> 0.629 -> 0.666), so exposure is a real contributing
-factor -- but even at 320k steps (2750 repetitions per example, 4.6x more than N=8's best
-checkpoint needed) N=32 plateaus far below N=8's near-perfect level (cosine 0.63 vs. 0.998,
-waveform correlation 0.67 vs. 0.997). Per-example ranking is stable across budgets: one example
-(`classical.00003`) never improves regardless of compute while another (`pop.00002`) does --
-preferential memorization of a subset, not uniform improvement. **Listening verdict (2026-09-17)
-diverges from the metrics: "the best audio was generated at 80K steps. The audio from 320K is
-generally worse,"** despite 320k's higher mean metric. Full reasoning and the divergence caveat in
-[[DECISIONS.md#task06-n32-compute-ablation]]. Per this task's own explicit instruction, **stopped
-after answering its four required questions -- no next experiment proposed by this task.**
+DAC shift/polarity sensitivity diagnostic (`tasks/TASK-07.md`), a pre-training diagnostic on the
+frozen DAC encoder alone -- no MuQ, no translator, no training. **Result: DAC's own target is
+extremely shift-fragile while the candidate translator inputs (log-mel, MuQ) are comparatively
+shift-stable at the same shift magnitudes.** `quantized_representation`'s mean cosine similarity
+to its unshifted self drops to 0.716 at a single-*sample* shift and to 0.157 by 16 samples
+(approaching, but never fully reaching, the random-pair floor of 0.030, even at the largest tested
+shift of 256 samples -- still sub-frame relative to DAC's 320-sample hop). log-mel and MuQ stay
+>=0.98/0.94 across the entire same range. Polarity flip (`x` vs. `-x`) produces *anti-correlated*
+latents (cosine -0.44 quantized), not merely dissimilar ones -- further apart than random unrelated
+crops. This confirms and generalizes TASK-04's unplanned 2-sample (83us) finding: the fragility is
+intrinsic to DAC's target, not an artifact of one trained checkpoint's overfit, and gives a
+structural explanation for the collapse pathology (a magnitude-only/phase-blind translator input
+cannot in principle determine this target uniquely) that is orthogonal to everything TASK-01
+through TASK-06 have already ruled out. Full reasoning and the complete shift-sweep table in
+[[DECISIONS.md#task07-dac-shift-sensitivity]]. Per this task's own explicit non-goal, **no
+conclusion is drawn here on whether to proceed with a complex-STFT rerun of TASK-05 -- that
+decision is the user's, from these numbers.**
 
 **Conclusions reached this session (full reasoning in
-[[DECISIONS.md#task06-n32-compute-ablation]]):**
+[[DECISIONS.md#task07-dac-shift-sensitivity]]):**
 
-1. Reused TASK-05's N=32 manifest and pipeline unchanged; ran 80k and 320k step budgets with
-   patience-based early stopping deliberately disabled (reusing TASK-05's 5000-step patience
-   window would likely have triggered a premature stop during this run's characteristic
-   multi-thousand-step turbulent dips).
-2. **Per-example repetition count, not raw step count, is the right unit for comparison against
-   N=8.** 80k's best checkpoint already exceeds N=8's needed per-example exposure by 3x; 320k's by
-   4.6x. Neither approaches N=8's quality.
-3. **Compute has strongly diminishing, then flat, returns.** The 320k run's best-by-MSE checkpoint
-   was found at step 88000 -- barely past the 80k run's own endpoint -- and no new global optimum
-   emerged in the remaining 232000 steps despite many local peaks approaching it.
-4. **The worst example does not improve with compute; the model preferentially memorizes a
-   subset.** `classical.00003` is worst at both 80k and 320k (0.315 -> 0.276, slightly worse
-   despite 4x more compute) while `pop.00002` improves (0.875 -> 0.897) alongside the overall
-   mean/median rise.
-5. Interpretation: the N=8->N=32 boundary is best explained by genuine interference/capacity
-   competition among examples for this architecture's limited representational capacity, not by
-   compute alone and not by regression-to-the-mean ([[task03-bluehive-wandb]]'s mechanism doesn't
-   fit -- scores here are far above degenerate dataset-mean levels and per-example structure is
-   consistent across budgets).
+1. Ran the shift sweep (k in {1,2,4,8,16,32,64,128,256} samples, both directions) and polarity
+   test on 40 GTZAN val-split crops (2/genre x 20 tracks x 2 crops), stratified and deterministic,
+   never overlapping any training set used elsewhere in this project. 27 seconds total runtime.
+2. **DAC's `quantized_representation` is severely shift-fragile at sub-frame magnitudes** --
+   collapses toward (not fully into) the random-pair floor by 16-32 samples, out of a 320-sample
+   frame hop.
+3. **The pre-quantizer (pre-RVQ) encoder output is somewhat more stable but not qualitatively
+   different** -- 0.945 at k=1 vs. quantized's 0.716, but it too collapses by k=8-16. RVQ
+   quantization amplifies an already-present continuous-encoder fragility; it does not create it.
+4. **Polarity flip produces anti-correlated latents**, not just dissimilar ones -- `x`/`-x` cosine
+   similarity is negative and codebook agreement is at or below the random-pair floor.
+5. **log-mel and MuQ are both comparatively near-invariant to the same shifts** -- this rules out
+   "the DAC target is just tracking an equivalently shifted input" as an alternative explanation,
+   and is the load-bearing evidence for the ambiguity-set argument this task set out to test.
+6. `DacModel.encoder`/`DacModel.quantizer` (already-public submodules) expose the pre-quantizer
+   stage cleanly -- verified to reproduce `DacModel.encode()` exactly, no monkeypatch needed, so
+   this task's first stop condition never triggered.
 
 ## Exact last successful commands
 
 ```bash
-uv run python -u scripts/train_gate3_n32_compute_ablation.py --budget 80000 --wandb-mode online
-uv run python -u scripts/train_gate3_n32_compute_ablation.py --budget 320000 --wandb-mode online
-uv run python scripts/plot_gate3_n32_compute_ablation.py   # required figure
-uv run ruff check .; uv run pytest -q                       # 133 passed
+uv run python -u scripts/analyze_dac_shift_sensitivity.py
+uv run ruff check .; uv run pytest -q   # 145 passed
 ```
 
-2026-09-16, macOS, M4 Max, device=mps. Launched via `nohup ... &` chained with `&&` + `disown`
-(unbuffered `-u`), tracked by real PID and a persistent `Monitor`. 80k run: 6257s (~104 min). 320k
-run: 24249s (~6.7 hours).
+2026-09-17, macOS, M4 Max, device=mps. Single foreground run, 27 seconds total (forward passes
+only, no gradients, no background job needed).
 
 ## Run/checkpoint path
 
-- `data/manifests/gate3_scale_32.csv` (tracked, reused unchanged from TASK-05).
-- `runs/task06_n32_compute_ablation/budget_{80000,320000}/checkpoints/{best_by_mse,final}.pt`
-  (git-ignored).
-- `artifacts/task06_n32_compute_ablation/budget_{80000,320000}/report.json` -- full per-budget
-  metrics (32-example aggregate + per-example); `.../budget_{N}/*.wav` -- listening WAVs at steps
-  {20000,40000,80000,160000,320000} (best/median/worst/fixed-subset).
-- `artifacts/task06_n32_compute_ablation/per_example_waveform_correlation.png` -- the required
-  figure (one panel per budget, all 32 examples).
-- `artifacts/task05_gate3_scale/n32/report.json` -- the reused 20k reference (TASK-05's original
-  patience-stopped run).
-- Two live W&B runs, group `gate3-n32-compute-ablation`: `wandb.ai/
-  andrea-cogliati-university-of-rochester/muq-invertibility` (`n32_80k_*`, `n32_320k_*`).
+No checkpoints -- this task trains nothing. Artifacts:
+
+- `artifacts/task07_dac_shift_sensitivity/shift_sensitivity_report.json` -- every number
+  (shift sweep for DAC quantized/pre-quantizer/codebook-agreement, log-mel, MuQ; polarity
+  sensitivity; random-pair baseline; the exact 40-crop list with track IDs and crop start times).
+- `artifacts/task07_dac_shift_sensitivity/shift_sensitivity.png` -- the required figure (DAC
+  quantized + pre-quantizer vs. log-mel vs. MuQ, cosine similarity vs. shift magnitude, log-x,
+  with the random-pair baseline as a reference line).
+- No W&B run (this task doesn't use W&B -- no training loop to log).
 
 ## Next command
 
-**Blocked on user direction.** Per TASK-06's own explicit instruction ("stop after answering
-these questions; do not automatically propose the next experiment"), no next experiment is
-proposed here. Candidate directions that would need the user's go-ahead if raised later:
+**Blocked on user direction.** Per this task's explicit non-goal ("do not draw a final conclusion
+about whether to proceed with the complex-STFT TASK-05 rerun -- the decision on whether/how to
+proceed is the user's"), no next experiment is proposed here. The evidence this task produced
+(DAC target is shift-fragile at sub-frame magnitudes; candidate translator inputs are not) is the
+input to that decision, not the decision itself. If the user does want to proceed:
 
-- A dedicated N=16/N=24 pinpointing run now has a cleaner methodological baseline (compute is
-  confirmed to only partially explain the collapse, so a pinpointing run wouldn't need to also
-  disentangle exposure).
-- Investigating *why* the capacity boundary sits around 8-32 examples specifically -- e.g. does
-  batching multiple examples per gradient step change the threshold? Does model capacity (more
-  parameters) push it higher?
-- Listening verdict for the TASK-06 WAVs (not yet requested from the user).
+- A complex-STFT (phase-aware) representation for the translator input, motivated directly by this
+  task's finding that magnitude-only inputs cannot in principle resolve DAC's sub-frame-sensitive
+  target -- this was the TASK-07 Context section's own motivating rationale for building this
+  diagnostic first.
+- Alternatively, investigating whether more precise crop-boundary alignment during data
+  preparation (rather than a representation change) narrows the practical impact of this
+  fragility, if the sensitivity is dominated by alignment noise already present in this project's
+  own crop-extraction pipeline.
 
-Do not start any of these without the user's go-ahead.
+Do not start either without the user's go-ahead.
 
 ## Blockers
 
-1. **Decision needed from the user** on which direction to pursue next, if any (TASK-06 itself
-   does not request one).
+1. **Decision needed from the user** on whether/how to proceed given this task's shift-sensitivity
+   findings (TASK-07 itself does not request one).
 2. **Listening verdicts** for TASK-01's and TASK-02's WAV packages -- still pending (TASK-04's,
-   TASK-05's, and TASK-06's are all now confirmed by ear).
+   TASK-05's, and TASK-06's are all now confirmed by ear; TASK-07 has no audio output to review).
 3. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
 4. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
    untested, orthogonal to this branch's findings.
@@ -103,16 +102,20 @@ Not yet reached, and not authorized to start.
 
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#task06-n32-compute-ablation]] first.** It resolves the "is the N=8->N=32
-  collapse just undertraining?" question TASK-05 left open: no, not primarily -- exposure matters
-  but plateaus far short of N=8's quality even given 5x N=8's needed per-example repetitions.
-- Per-example repetition count (`best_checkpoint_step / N`) is the correct unit for comparing
-  compute-equivalence across different N -- raw step counts are not comparable across N.
-- `src/muq_inversion/gate3_spectrogram_common.py`'s `rank_examples_by_metric` is generic and
-  reusable for any future per-example best/median/worst identification -- no new plumbing needed.
-- `scripts/plot_gate3_n32_compute_ablation.py` is read-only and reusable if a future N=32-fixed
-  run with a different budget schedule is added -- update its report-path constants only.
-- Early stopping (patience) is disabled by design in
-  `scripts/train_gate3_n32_compute_ablation.py` for its 80k/320k budgets -- do not re-enable it
-  without re-deriving why (see [[DECISIONS.md#task06-n32-compute-ablation]]'s resume-policy
-  section) if reusing this script for a future compute-budget experiment.
+- **Read [[DECISIONS.md#task07-dac-shift-sensitivity]] first.** It gives the clearest structural
+  explanation yet for why this project's collapse pathology exists: the DAC target this whole
+  investigation regresses against is intrinsically fragile to sub-frame input alignment in a way
+  none of the candidate translator inputs are, at the same shift magnitudes.
+- `src/muq_inversion/dac_encoder.py`'s new `FrozenDacEncoder.encode_stages` is the clean way to
+  get DAC's pre-quantizer output + per-stage codebook indices in one call, for any future
+  diagnostic needing them -- no monkeypatch, verified equivalent to `encode()`.
+- `src/muq_inversion/dac_shift_sensitivity_common.py`'s `select_stratified_tracks`,
+  `cosine_similarity_per_frame`, `codebook_agreement`, and `sample_cross_track_pairs` are generic
+  and reusable for any future shift/polarity/alignment-sensitivity diagnostic on any of this
+  project's three representations (DAC, log-mel, MuQ) -- no new plumbing needed.
+- This task's crop selection (val-split, `crop_start_seconds` in {5.0, 15.0}) deliberately never
+  overlaps any training manifest in this project -- keep that property if extending this
+  diagnostic (e.g. to more shift magnitudes or a MuQ polarity test) rather than reusing a training
+  crop.
+- `scripts/analyze_dac_shift_sensitivity.py` is read-only and fast (27s) -- safe to rerun directly
+  if the DAC checkpoint, GTZAN manifest, or shift magnitudes ever need revisiting.
