@@ -13,6 +13,7 @@ dependencies = [
     "matplotlib>=3.11.2",
     "muq>=0.1.0",
     "numpy>=2.5.2",
+    "pot>=0.9.7.post1",
     "pyyaml>=6.0.3",
     "scipy>=1.18.1",
     "soundfile>=0.14.0",

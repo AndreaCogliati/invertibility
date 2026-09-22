@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 
+import numpy as np
 import pytest
 import torch
 
@@ -18,6 +19,8 @@ from muq_inversion.dac_shift_sensitivity_common import (
     l2_distance_per_frame,
     sample_cross_track_pairs,
     select_stratified_tracks,
+    sinkhorn_epsilon_for_cloud,
+    sinkhorn_ot_divergence,
     slice_shifted,
 )
 
@@ -222,3 +225,52 @@ def test_correlate_metrics_perfect_negative_correlation():
 def test_correlate_metrics_length_mismatch_raises():
     with pytest.raises(ValueError, match="length mismatch"):
         correlate_metrics([1.0, 2.0], [1.0])
+
+
+def test_sinkhorn_epsilon_for_cloud_positive():
+    rng = np.random.default_rng(0)
+    points = rng.normal(size=(20, 8))
+    eps = sinkhorn_epsilon_for_cloud(points, fraction=0.1)
+    assert eps > 0
+
+
+def test_sinkhorn_epsilon_for_cloud_scales_with_fraction():
+    rng = np.random.default_rng(0)
+    points = rng.normal(size=(20, 8))
+    eps_small = sinkhorn_epsilon_for_cloud(points, fraction=0.05)
+    eps_big = sinkhorn_epsilon_for_cloud(points, fraction=0.2)
+    assert eps_big == pytest.approx(4 * eps_small)
+
+
+def test_sinkhorn_epsilon_for_cloud_identical_points_floor():
+    points = np.zeros((5, 4))
+    eps = sinkhorn_epsilon_for_cloud(points, fraction=0.1)
+    assert eps == pytest.approx(1e-6)
+
+
+def test_sinkhorn_ot_divergence_identical_clouds_is_zero():
+    rng = np.random.default_rng(0)
+    points = rng.normal(size=(30, 16))
+    eps = sinkhorn_epsilon_for_cloud(points, fraction=0.1)
+    d = sinkhorn_ot_divergence(points, points, epsilon=eps)
+    assert d == pytest.approx(0.0, abs=1e-6)
+
+
+def test_sinkhorn_ot_divergence_increases_with_perturbation_size():
+    rng = np.random.default_rng(0)
+    z0 = rng.normal(size=(30, 16))
+    eps = sinkhorn_epsilon_for_cloud(z0, fraction=0.1)
+    z_small = z0 + rng.normal(scale=0.05, size=(30, 16))
+    z_big = z0 + rng.normal(scale=2.0, size=(30, 16))
+    d_small = sinkhorn_ot_divergence(z0, z_small, epsilon=eps)
+    d_big = sinkhorn_ot_divergence(z0, z_big, epsilon=eps)
+    assert 0.0 <= d_small < d_big
+
+
+def test_sinkhorn_ot_divergence_nonnegative():
+    rng = np.random.default_rng(1)
+    z0 = rng.normal(size=(30, 16))
+    zk = rng.normal(size=(30, 16))
+    eps = sinkhorn_epsilon_for_cloud(z0, fraction=0.1)
+    d = sinkhorn_ot_divergence(z0, zk, epsilon=eps)
+    assert d >= -1e-6

@@ -504,3 +504,64 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   passing. Total run time: 93 seconds. Listening package produced
   (`artifacts/task08_dac_latent_vs_audio_shift/listening/`), not yet reviewed by the user. Full
   write-up in [[task08-dac-latent-vs-audio-shift]].
+- DAC Optimal Transport geometry diagnostic CONCLUDED (2026-09-22, `tasks/TASK-09.md`, extends
+  [[task08-dac-latent-vs-audio-shift]]): tested whether comparing DAC latents as unordered point
+  clouds (Optimal Transport / entropic Sinkhorn divergence, `POT` library, sqeuclidean ground
+  cost, per-crop-scaled epsilon) predicts reconstruction-audio similarity better than the
+  project's pointwise MSE/cosine metrics, on TASK-07/08's exact 40-crop shift-sweep dataset (no
+  training, no decode -- audio-similarity numbers reused verbatim from TASK-08's report). **Result:
+  OT is a consistently, moderately better predictor of audio similarity than MSE or cosine across
+  every audio metric tested, but the improvement is not dramatic** -- |Spearman| correlation with
+  waveform correlation: OT=0.521 vs. MSE=0.362 vs. cosine=0.229 (44-127% relative improvement,
+  consistent across log-mel-cosine and STFT-distance comparisons too, 0.546/0.625 for OT vs.
+  0.382/0.468 for MSE vs. 0.346/0.333 for cosine). **A second, partially independent finding**:
+  OT's raw dynamic range across the shift sweep is much smaller than MSE's or cosine's and
+  saturates almost immediately (by shift=4, vs. MSE/cosine continuing to drift gradually out to
+  shift=1024) -- a genuine but partial Outcome-C-like signature: the *long-range* continued
+  pointwise drift looks substantially transportable, but the *short-range* (shifts 1-4) initial
+  collapse, the largest single move in every metric, is not explained away by OT at all. Per this
+  task's own interpretation rules: **closest to Outcome B** ("the mismatch is deeper than
+  framewise comparison"), **with a partial Outcome-C saturation signature confined to the
+  long-range portion of the curve** -- neither fits cleanly alone. Strengthens the target-mismatch
+  hypothesis with a specific refinement: loss geometry is a contributing cause (OT recovers a
+  meaningfully better, though still far from strong, correspondence with audio similarity than the
+  project's actual MSE+cosine training objective), but the residual gap (rho still only ~0.5-0.6)
+  means geometry mismatch is unlikely to be the entire explanation. New dependency: `pot`
+  (python-optimal-transport), added via `uv add pot` -- this task's own instruction explicitly
+  permitted a new dependency here (unlike TASK-08's SI-SDR). Per this task's explicit instruction,
+  stopped after answering its five required questions, no follow-up experiment proposed or run. 6
+  new tests, full suite 165 passing. Total run time: 40.7 seconds (19.9s of which was the 880
+  Sinkhorn calls themselves). Full write-up in [[task09-dac-ot-geometry]].
+- EnCodec shift-sensitivity replication CONCLUDED (2026-09-22, `tasks/TASK-10.md`, replicates
+  TASK-07+TASK-08 on `facebook/encodec_24khz` instead of DAC): tests whether DAC's
+  latent-collapses/audio-stays-stable phenomenon is DAC-specific or general to neural codecs,
+  same 40-crop dataset and 0-1024-sample shift schedule as TASK-07/08/09. **Note: `tasks/TASK-10.md`
+  is truncated mid-sentence in its Final Questions section -- confirmed by direct byte
+  inspection, flagged to the user rather than guessed past.** EnCodec: 24kHz, 75Hz frame rate
+  (matches DAC exactly), 32 codebooks/1024 codebook size at max bandwidth (also matches DAC),
+  128-dim continuous+quantized latent (much smaller than DAC's 1024-dim), decoder reproduces
+  input length exactly (unlike DAC's 8-sample-shorter output). **Result: EnCodec's continuous
+  latent is dramatically more shift-stable than DAC's (cosine 0.999->0.953 across the full shift
+  range vs. DAC's 0.716->0.087) -- but this smoothness does NOT translate into more shift-robust
+  audio: EnCodec's reconstructed-audio waveform correlation (~0.89 flat) sits measurably BELOW
+  DAC's (~0.96 flat) throughout, despite the latent-stability gap.** A dramatically smoother
+  latent space did not buy EnCodec a more shift-robust reconstruction -- latent movement and audio
+  change are decoupled in both codecs, just at different points on the latent-stability axis.
+  **A further nuance**: EnCodec's latent cosine correlates 1.6-2.1x MORE strongly with its own
+  audio similarity than DAC's does (Spearman 0.36/0.60/-0.71 vs. DAC's 0.23/0.35/-0.33 across
+  waveform-correlation/log-mel/STFT), despite varying over a much narrower absolute range --
+  proportionally more informative, even though there's much less of it. **Mechanistic note**:
+  EnCodec's *discrete* codebook indices collapse under shift about as fast as DAC's do (mean-32-
+  stage agreement 0.115->0.0055) even though the *continuous* quantized latent does not -- the
+  smoothness is specific to the continuous embedding geometry (likely a 128-dim-vs-1024-dim
+  effect), not evidence EnCodec's underlying tokenization is intrinsically more shift-robust. Per
+  this task's own interpretation rules: **none of Outcome A/B/C fits cleanly alone** -- closest to
+  a combination of B (raw latent stability) and C (correlation strength), with the audio-
+  robustness complication anticipated by neither. No new dependency (EnCodec ships in this
+  project's pinned `transformers==4.55.0`); new module `src/muq_inversion/encodec_encoder.py`
+  (`FrozenEncodecEncoder`, mirrors `dac_encoder.py`'s interface, verified once against EnCodec's
+  own top-level API before trusting it, no dedicated unit test -- matching this project's existing
+  convention for model-loading encoder wrappers). Listening package produced
+  (`artifacts/task10_encodec_shift_sensitivity/listening/`), not yet reviewed. Total run time: 11.8
+  seconds -- the fastest of the four DAC/EnCodec diagnostics. Full write-up in
+  [[task10-encodec-shift-sensitivity]].

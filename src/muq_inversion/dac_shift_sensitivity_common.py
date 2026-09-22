@@ -1,6 +1,7 @@
 """Pure, testable helpers for `tasks/TASK-07.md`'s DAC shift/polarity sensitivity diagnostic
-(`scripts/analyze_dac_shift_sensitivity.py`) and its audio-domain extension
-(`tasks/TASK-08.md`, `scripts/analyze_dac_latent_vs_audio_shift.py`).
+(`scripts/analyze_dac_shift_sensitivity.py`), its audio-domain extension (`tasks/TASK-08.md`,
+`scripts/analyze_dac_latent_vs_audio_shift.py`), and the Optimal Transport geometry diagnostic
+built on both (`tasks/TASK-09.md`, `scripts/analyze_dac_ot_geometry.py`).
 
 Kept separate from the scripts, mirroring this project's existing convention (`gate4_common.py`,
 `gate3_spectrogram_common.py`) -- so track selection, frame-alignment, and similarity/agreement
@@ -22,6 +23,7 @@ import random
 from pathlib import Path
 
 import numpy as np
+import ot
 import torch
 from scipy import stats
 
@@ -206,3 +208,31 @@ def correlate_metrics(x: list[float], y: list[float]) -> dict[str, float]:
         "spearman_r": float(spearman.statistic),
         "spearman_p": float(spearman.pvalue),
     }
+
+
+def sinkhorn_epsilon_for_cloud(points: np.ndarray, fraction: float) -> float:
+    """`tasks/TASK-09.md`'s required documented epsilon choice: `fraction` times the median of
+    the nonzero pairwise squared-Euclidean distances within `points` (a single (num_frames,
+    num_channels) point cloud -- typically the canonical, shift-0 latent). Scaling the
+    regularization to the cloud's own distance scale, rather than a fixed absolute epsilon,
+    keeps Sinkhorn well-conditioned across latents of very different magnitude without any
+    per-pair manual tuning -- verified empirically (this module's tests, and this task's own
+    real-DAC-latent trial runs) to converge cleanly at `fraction=0.1` where a smaller fraction
+    (e.g. 0.05) can fail to converge within the default iteration budget."""
+    pairwise = ot.dist(points, points, metric="sqeuclidean")
+    nonzero = pairwise[pairwise > 0]
+    if nonzero.size == 0:
+        return 1e-6
+    return max(float(fraction * np.median(nonzero)), 1e-6)
+
+
+def sinkhorn_ot_divergence(z0: np.ndarray, zk: np.ndarray, epsilon: float, num_iter_max: int = 5000) -> float:
+    """Debiased entropic-regularized Sinkhorn divergence between two point clouds `z0`, `zk`
+    (each (num_frames, num_channels), uniform mass per frame) -- `tasks/TASK-09.md`'s "Optimal
+    Transport distance" metric. Uses POT's `ot.bregman.empirical_sinkhorn_divergence` (squared-
+    Euclidean ground cost) rather than the plain entropic OT cost (`sinkhorn2`): the plain cost
+    is verified (this module's own tests) to NOT vanish for `z0 == zk` -- it carries an O(epsilon)
+    entropy bias even at zero true distance -- while the debiased divergence subtracts the two
+    self-transport terms and is confirmed to return exactly 0.0 for identical clouds, giving an
+    interpretable zero-point that matches MSE=0/cosine=1 at zero shift."""
+    return float(ot.bregman.empirical_sinkhorn_divergence(z0, zk, reg=epsilon, numIterMax=num_iter_max))
