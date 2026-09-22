@@ -2,127 +2,145 @@
 
 ## Current gate
 
-EnCodec shift-sensitivity replication (`tasks/TASK-10.md`), testing whether DAC's
-latent-collapses/audio-stays-stable phenomenon (TASK-07/08) is DAC-specific or general to neural
-codecs. **Note: `tasks/TASK-10.md` is truncated** (ends mid-sentence in its Final Questions
-section, confirmed by direct byte inspection) -- flagged to the user, not guessed past; every
-other section of the task was complete and was followed in full.
+EnCodec continuous-latent controlled scaling probe (`tasks/TASK-11.md`) -- the first *training*
+experiment since TASK-06 in the TASK-07-11 target-mismatch investigation line. Tested whether
+TASK-05's sharp DAC N=8->N=32 collapse moves when only the target codec changes to EnCodec's
+continuous latent, everything else held fixed (same manifests, input, architecture except the
+mechanically-necessary 128-vs-1024 output width, loss, optimizer, 20000-step budget, seed).
 
-**Result: neither Outcome A, B, nor C fits cleanly -- EnCodec's latent is dramatically smoother
-than DAC's, but that smoothness does not buy more shift-robust audio.** On the exact same 40-crop
-dataset and 0-1024-sample shift schedule as TASK-07/08/09: EnCodec's continuous (quantized)
-latent cosine similarity stays at 0.999->0.953 across the full shift range, vs. DAC's
-0.716->0.087 -- an order of magnitude or more smoother, closely matching this task's Outcome B
-example. But EnCodec's reconstructed-audio waveform correlation (~0.89, flat) sits measurably
-*below* DAC's (~0.96, flat) throughout -- the latent smoothness did not translate into better
-shift-robustness downstream. A further complication: EnCodec's latent cosine is nonetheless a
-1.6-2.1x *better* predictor of its own audio similarity than DAC's latent cosine is of DAC's
-(Spearman 0.36/0.60/-0.71 vs. 0.23/0.35/-0.33), despite the much narrower range it varies over.
-Mechanistically, EnCodec's *discrete* codebook indices collapse under shift about as fast as
-DAC's -- the continuous-latent smoothness is specific to the embedding geometry (likely a
-128-dim-vs-1024-dim effect), not evidence the underlying tokenization itself is more robust. Full
-reasoning, all four comparison tables, and both legible-question answers in
-[[DECISIONS.md#task10-encodec-shift-sensitivity]]. Per this task's own instruction, **no follow-up
-experiment proposed or run.**
+**Result: the collapse is dramatically reduced -- decisive support for the target-mismatch
+hypothesis.** At N=32: DAC's norm/variance ratios collapse to 0.499/0.177; EnCodec's stay at
+0.985/0.650 (no norm collapse). Waveform correlation (pred vs. target-decode): DAC crashes 0.997
+(N=8) -> 0.469 (N=32); EnCodec declines 0.982 -> 0.724 -- real but about half DAC's drop.
+**Oracle-relative: EnCodec's translator recovers 79.2% of its own reconstruction ceiling at N=32,
+vs. DAC's 48.4%** (using a newly-fixed lag-aligned DAC oracle metric -- see below). Per-example
+N=32: EnCodec's latent fit is uniform across all 32 examples; audio-level per-example variation
+remains despite that uniform latent fit. Per this task's own rules: **Outcome B** (substantial
+but partial improvement -- target geometry, optimization, and capacity/interference likely
+coexist). Full reasoning, the complete comparison table, and all eight required question answers
+in [[DECISIONS.md#task11-encodec-controlled-scaling]]. Per this task's own instruction, **stopped
+after answering its eight required questions -- no N=128/512 extension, no follow-up experiment
+proposed or run.**
 
-**Conclusions reached this session (full reasoning in
-[[DECISIONS.md#task10-encodec-shift-sensitivity]]):**
-
-1. `tasks/TASK-10.md` is truncated mid-sentence; every section up through "Final Questions" is
-   complete and was followed, but the question list itself cuts off after two questions. Flagged
-   explicitly rather than fabricating the missing text.
-2. Built `src/muq_inversion/encodec_encoder.py` (`FrozenEncodecEncoder`), mirroring
-   `dac_encoder.py`'s interface -- EnCodec (24kHz, 75Hz frame rate, 32 codebooks/1024 codebook
-   size at max bandwidth) matches DAC's geometry closely except for a much smaller 128-dim latent
-   and exact-length-preserving decoder (vs. DAC's 8-sample-shorter output).
-3. **EnCodec's latent is dramatically more shift-stable than DAC's** -- confirmed decisively
-   (Outcome-B-shaped result on the raw stability axis).
-4. **This latent stability does not translate into audio-reconstruction stability** -- EnCodec's
-   audio similarity is flat but sits below DAC's throughout; the two properties are evidently
-   decoupled in both codecs, not a DAC-specific artifact.
-5. **EnCodec's (small) latent movement is proportionally more audio-relevant than DAC's (large)
-   movement** -- an Outcome-C-flavored refinement layered on the Outcome-B-flavored headline.
-6. The smoothness is a continuous-embedding-geometry effect, not a discrete-tokenization one --
-   EnCodec's codebook indices are about as shift-fragile as DAC's.
+**Two real bugs found and fixed during this task:**
+1. **DAC's decoder has a previously-undocumented fixed 8-sample group delay** relative to its
+   input -- a naive lag-0 original-vs-oracle correlation gave ~0.37-0.47 (looked broken) until a
+   cross-correlation lag search (`find_best_lag_and_align`, `gate3_encodec_common.py`) recovered
+   the true ~0.96-0.97 ceiling. EnCodec has no equivalent delay (best lag 0). This had never
+   surfaced before because every prior same-codec audio comparison in this project (TASK-08's
+   `align_shifted_pair`) compares two DECODED outputs to each other, where a shared delay cancels
+   -- never original audio to a single decoder output directly.
+2. **EnCodec targets computed fresh are PyTorch "inference tensors"** and crash autograd
+   ("Inference tensors cannot be saved for backward") unless explicitly `.clone()`-d. TASK-05's
+   DAC targets never hit this since they load from TASK-02's cache as plain tensors.
 
 ## Exact last successful commands
 
 ```bash
-uv run python -u scripts/analyze_encodec_shift_sensitivity.py
-uv run ruff check .; uv run pytest -q   # 165 passed
+uv run python -u scripts/train_gate3_encodec_scale_wandb.py --levels 2,8,32 --wandb-mode online
+uv run python scripts/plot_gate3_encodec_scale_figures.py   # four required figures
+uv run ruff check .; uv run pytest -q   # 177 passed
 ```
 
-2026-09-22, macOS, M4 Max, device=mps. Single foreground run, 11.8 seconds total -- the fastest of
-the four DAC/EnCodec diagnostics (no MuQ, smaller 128-dim latent).
+2026-09-22, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown`, tracked by a
+persistent `Monitor`. Training time: N=2 96.8s, N=8 126.3s, N=32 127.0s (~5.8 min total -- far
+faster than TASK-05's DAC runs at the same N, consistent with EnCodec's much smaller 128-dim
+target and correspondingly smaller translator).
 
 ## Run/checkpoint path
 
-No checkpoints -- this task trains nothing. Artifacts:
-
-- `artifacts/task10_encodec_shift_sensitivity/encodec_shift_sensitivity_report.json` -- every
-  number (per-shift EnCodec latent + audio summaries, the DAC comparison tables, correlation
-  analysis, EnCodec model/geometry details, runtime).
-- `artifacts/task10_encodec_shift_sensitivity/figure1_latent_similarity_vs_shift.png` -- EnCodec
-  vs. DAC latent cosine vs. shift.
-- `artifacts/task10_encodec_shift_sensitivity/figure2_audio_similarity_vs_shift.png` -- EnCodec
-  vs. DAC waveform correlation vs. shift.
-- `artifacts/task10_encodec_shift_sensitivity/figure3_latent_vs_audio_similarity.png` -- EnCodec
-  latent cosine vs. all three audio metrics, one point per crop/shift pair.
-- `artifacts/task10_encodec_shift_sensitivity/listening/` -- 2 representative crops (same
-  selection method as TASK-08) x shifts {0,2,8,32,128}: original, shifted, EnCodec reconstruction
-  at shift 0 and shift k. Not yet reviewed by the user.
-- No W&B run (no training loop to log).
+- `data/manifests/gate3_scale_{2,8,32}.csv` (tracked, reused unchanged from TASK-05, verified
+  nested and identical at runtime).
+- `runs/task11_gate3_encodec_scale/n{2,8,32}/checkpoints/{best_by_mse,best_by_wav_corr,final}.pt`
+  (git-ignored).
+- `artifacts/task11_gate3_encodec_scale/n{2,8,32}/report.json` -- full per-level metrics (latent +
+  audio, EnCodec oracle, DAC oracle, per-example, DAC comparison values pulled from TASK-05);
+  `.../n{N}/*.wav` -- listening WAVs (best/median/worst at the best checkpoint, plus final-
+  checkpoint audio for N=8/32 where the final checkpoint materially degraded from the best).
+- `artifacts/task11_gate3_encodec_scale/figure{1,2,3,4}_*.png` -- the four required figures.
+- `artifacts/task11_gate3_encodec_scale/scaling_summary.json` -- cross-level summary.
+- Three live W&B runs, group `gate3-encodec-scale`: `wandb.ai/
+  andrea-cogliati-university-of-rochester/muq-invertibility` (`gate3_encodec_scale_{2,8,32}`).
 
 ## Next command
 
 **Blocked on user direction.** Per this task's own instruction ("do not propose or run a new
-experiment automatically"), no next experiment is proposed here. Two things worth flagging to the
-user directly, though:
+experiment automatically"), no next experiment is proposed here. Candidate directions that would
+need the user's go-ahead if raised later:
 
-- **The task file itself is incomplete** -- if there were more final questions intended, the user
-  may want to supply the missing text so they can be answered from the results already computed
-  (no rerun needed; the report has everything the visible sections asked for).
-- The EnCodec-vs-DAC audio-robustness gap (EnCodec's flat similarity sitting below DAC's, despite
-  EnCodec's far smoother latent) is a genuinely new, somewhat counterintuitive finding across
-  TASK-07/08/09/10 combined, worth the user's attention regardless of what direction (if any) is
-  pursued next -- it complicates any simple "switch to EnCodec" recommendation the latent-only
-  result alone might have suggested.
+- Extending the EnCodec scaling curve to N=128/512 to see whether EnCodec has its own, later
+  collapse point -- explicitly out of this task's scope, but a natural next question given how
+  cleanly N=2/8/32 differentiated DAC from EnCodec.
+- Investigating the audio-level per-example variation at N=32 that survives despite uniform
+  latent fit (Figure 4) -- is it decoder sensitivity, content complexity, or something else?
+- Now that DAC's own 8-sample decoder delay is known and fixed, revisiting any earlier
+  original-vs-DAC-oracle comparison in this project that might have used the naive (unaligned)
+  correlation -- worth an audit, though the fix here was scoped narrowly to this task's own new
+  oracle metric, not applied retroactively to any prior task's numbers.
 
-Do not start any further experiment without the user's go-ahead.
+Do not start any of these without the user's go-ahead.
 
 ## Blockers
 
-1. **The task file's missing final questions** -- worth asking the user for the complete text if
-   they had something specific in mind beyond what's already answered here.
-2. **Decision needed from the user** on how to weigh TASK-07/08/09/10 together for any future
-   direction (none of the four tasks requests one).
-3. **Listening verdict for TASK-08's and TASK-10's packages** -- neither yet reviewed by the user.
-4. **Listening verdicts** for TASK-01's and TASK-02's WAV packages -- still pending.
-5. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
-6. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
+1. **Decision needed from the user** on how to weigh TASK-07-11 together for any future direction
+   (none of the five tasks requests one).
+2. **Listening verdict for TASK-11's package** -- not yet reviewed by the user (nor TASK-08's or
+   TASK-10's).
+3. **Listening verdicts** for TASK-01's and TASK-02's WAV packages -- still pending.
+4. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
+5. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
    untested, orthogonal to this branch's findings.
-7. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
+6. The `shuffled_time` finding from Gate 4 (see [[DECISIONS.md#gate4-shuffled-time-finding]]) --
    still dormant.
-8. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
+7. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
    the MuQ layer-sweep were never given -- not blocking, worth noting if any comes up again.
 
 ## Expected verification criteria for Gate 5
 
 Not yet reached, and not authorized to start.
 
+## Repository state at the end of this task (per TASK-11's explicit reporting requirement)
+
+At the start of this task, `git status` showed a clean tree except `tasks/TASK-11.md` itself
+(untracked) -- TASK-09 and TASK-10, which TASK-11's own text assumed were still uncommitted, had
+in fact already been committed as `b54418f` in the prior session turn (explicit user instruction:
+"Summarize the results and commit"). Nothing from TASK-09/10 was at risk during this task.
+
+At the end of this task:
+
+```text
+Changes not staged for commit:
+    modified:   notes/DECISIONS.md
+    modified:   notes/MEMORY.md
+    modified:   notes/NEXT.md        (this file, being written)
+    modified:   notes/SCRATCHPAD.md  (pending)
+
+Untracked files:
+    scripts/plot_gate3_encodec_scale_figures.py
+    scripts/train_gate3_encodec_scale_wandb.py
+    src/muq_inversion/gate3_encodec_common.py
+    tasks/TASK-11.md
+    tests/test_gate3_encodec_common.py
+```
+
+**Not committed**, per this task's explicit "do not commit changes without explicit user
+instruction" rule. No existing tracked file was modified except the four `notes/*.md` files
+(additive appends/rewrites only, consistent with every prior task in this project).
+
 ## Notes for whoever resumes this
 
-- **Read [[DECISIONS.md#task10-encodec-shift-sensitivity]] first**, alongside TASK-07/08/09's
-  entries -- together these four form the most complete picture yet of the target-mismatch
-  investigation: not just "DAC's target is fragile and reconstruction-irrelevant" (TASK-07/08),
-  not just "pointwise geometry is part of the problem" (TASK-09), but now also "a much smoother
-  codec latent doesn't automatically fix the audio-robustness side of the equation" (TASK-10).
-- `src/muq_inversion/encodec_encoder.py` is now available for any future EnCodec-based diagnostic
-  or experiment in this project -- no dedicated unit test file, matching the existing convention
-  for `encoder.py`/`dac_encoder.py` (verified once via a documented manual check instead).
-- `scripts/analyze_encodec_shift_sensitivity.py` depends on TASK-08's and TASK-09's report.json
-  files existing (for DAC's reused comparison numbers) -- rerun those first if either file is ever
-  regenerated with different crops/shifts.
-- Don't assume "smoother latent = better regression target" from TASK-10's Result 1 alone without
-  also weighing Result 2 (audio-robustness gap) -- the full picture is more nuanced than either
-  number in isolation suggests.
+- **Read [[DECISIONS.md#task11-encodec-controlled-scaling]] first**, alongside TASK-07-10's
+  entries -- this is the decisive, causal test of the whole line: a controlled target swap (with
+  *fewer*, not more, translator parameters) removes most of TASK-05's sharp collapse, directly
+  implicating DAC's target geometry as a primary (not sole) cause.
+- `src/muq_inversion/gate3_encodec_common.py`'s `find_best_lag_and_align` is now the correct way
+  to compare any codec's original-vs-oracle audio in this project -- do not reuse a naive lag-0
+  comparison for a new codec without first checking whether it has its own fixed decoder delay
+  (verified: DAC has one, 8 samples; EnCodec does not).
+- The `.clone()` requirement for freshly-computed (not cached) codec targets used as autograd
+  targets is a real PyTorch gotcha (`torch.inference_mode()`-decorated encode methods) -- keep it
+  if reusing `load_examples_from_manifest_encodec`'s pattern for any future non-DAC target.
+- `scripts/train_gate3_encodec_scale_wandb.py` restricts `--levels` to {2,8,32} by explicit
+  assertion -- this is a deliberate scope guard from this task's own instruction, not an
+  oversight; remove it deliberately (and update the docstring) if a future task authorizes
+  N=128/512.

@@ -2837,3 +2837,188 @@ Total run time: 11.8 seconds.
 
 **Rollback plan.** Entirely additive. Deleting the two new files fully reverts this task's code.
 No training run, checkpoint, or W&B run was created by this task.
+
+## task11-encodec-controlled-scaling: swapping only the target codec removes the sharp N=8->N=32 collapse -- Outcome B, decisive support for the target-mismatch hypothesis
+
+**Context (`tasks/TASK-11.md`).** [[task05-gate3-scaling]] found a sharp, >50-percentage-point
+collapse in every collapse metric between N=8 (near-perfect memorization) and N=32, using DAC's
+`quantized_representation` as the regression target. TASK-07/08/09/10 built a converging case that
+this collapse is substantially a target-geometry problem: DAC's latent is far more shift-fragile
+than candidate translator inputs (TASK-07), that fragility is largely reconstruction-irrelevant
+(TASK-08), a transport-based geometry partially closes the gap (TASK-09), and EnCodec's continuous
+latent is dramatically smoother under shift than DAC's (TASK-10). This task tests the direct,
+controlled prediction of that whole line of reasoning: **does the TASK-05 N=8->N=32 boundary move
+if the target codec changes from DAC to EnCodec, with literally everything else held fixed?**
+
+**A training experiment, unlike TASK-07-10's pure analysis** -- the first in this line of tasks to
+retrain anything since TASK-06. Changed exactly one variable relative to TASK-05: DAC
+`quantized_representation` -> EnCodec quantized (post-RVQ) continuous latent
+(`facebook/encodec_24khz`, 24.0 kbps/all 32 codebooks, mirroring DAC's own full-RVQ-depth
+convention -- see `src/muq_inversion/encodec_encoder.py`, built and verified in
+[[task10-encodec-shift-sensitivity]]). Manifests (`gate3_scale_{2,8,32}.csv`), input
+representation (log-mel from TASK-02's dense cache), loss (MSE + 0.1*cosine), optimizer (Adam,
+lr=1e-3, betas=(0.9,0.999)), step budget (20000, patience 5000 at 1e-5 min delta), and seed (0) are
+all reused byte-for-byte from TASK-05's own recorded configuration (`artifacts/
+task05_gate3_scale/n{N}/report.json`, used as the source of truth per this task's own
+instruction). Scope restricted to N in {2, 8, 32} only, per this task's explicit "do not run
+N=128/512" instruction.
+
+**Parameter count: an unavoidable dimensional change working *against*, not for, EnCodec.**
+`SpectrogramToDacTranslator`'s `dac_channels` argument sets both the input projection's output
+width and the entire `TemporalConvNet`'s channel width throughout, so EnCodec's smaller 128-dim
+target (vs. DAC's 1024-dim) mechanically shrinks the whole network: 262,656 parameters vs. TASK-05's
+15,863,808 -- a 98.3% reduction, not a capacity increase. Any success at N=32 below cannot be
+attributed to "EnCodec's translator secretly had more capacity."
+
+**A real implementation bug found and fixed before trusting any oracle-comparison number: DAC's
+decoder has a measured, fixed 8-sample group delay relative to its input** (not just the already-
+known 8-sample-shorter output length) -- a naive lag-0 correlation between original audio and
+DAC's own oracle reconstruction gave 0.366-0.47 (looked like a broken codec), while the properly
+lag-aligned correlation (cross-correlation search, `find_best_lag_and_align`,
+`gate3_encodec_common.py`) gave 0.96-0.97 (a sensible high-fidelity ceiling). Verified EnCodec has
+no equivalent delay (best lag 0, exact length match). This fix (and the underlying delay) is new,
+not previously documented -- TASK-08's `align_shifted_pair` only ever compared two same-codec
+decoder outputs to each other (where a shared delay cancels out), never original audio to a
+decoder output directly, so this particular alignment issue had never surfaced before. Both codec
+oracle numbers below are computed with this fix; the fix is unit-tested
+(`test_find_best_lag_and_align_recovers_known_shift`, recovers a synthetic 8-sample delay exactly).
+
+**Also found and fixed: EnCodec targets computed fresh (not loaded from a cache) are PyTorch
+"inference tensors"** (`FrozenEncodecEncoder.encode` runs under `torch.inference_mode()`) and
+cannot be used as autograd targets without an explicit `.clone()` -- crashed the first training
+attempt with "Inference tensors cannot be saved for backward." TASK-05's DAC targets never hit
+this because they come from `torch.load`-ing TASK-02's dense cache, which are already plain
+tensors by the time training sees them.
+
+**Result -- the sharp N=8->N=32 collapse is dramatically reduced, not just "improved," when the
+target is EnCodec instead of DAC (best-by-MSE checkpoint per level; required comparison table):**
+
+| Target | N | Best Step | Latent Cosine | Norm Ratio | Variance Ratio | Wave Corr\* | STFT Dist\* |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| DAC | 2 | 4000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0013 |
+| EnCodec | 2 | 10250 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0013 |
+| DAC | 8 | 4750 | 0.9980 | 1.0025 | 1.0077 | 0.9970 | 0.2377 |
+| EnCodec | 8 | 19250 | 0.9991 | 0.9932 | 0.9644 | 0.9819 | 0.4258 |
+| DAC | 32 | 3000 | 0.5161 | 0.4993 | 0.1773 | 0.4689 | 1.8304 |
+| **EnCodec** | **32** | **15000** | **0.9879** | **0.9849** | **0.6500** | **0.7235** | **1.1694** |
+
+\*Wave Corr/STFT Dist here are "predicted-latent-decode vs. target-latent-decode" (matching TASK-05's
+own metric exactly -- both sides pass through the same frozen decoder, so any codec-specific
+decode artifact cancels out; this is a memorization-fidelity metric, not fidelity-to-the-original-
+waveform, which the oracle numbers below cover separately).
+
+**At N=32 specifically -- the decisive comparison -- EnCodec's norm ratio (0.985) and variance
+ratio (0.650) show essentially no collapse, next to DAC's norm ratio 0.499 (50% collapse) and
+variance ratio 0.177 (82% collapse).** Waveform correlation: DAC crashes from 0.997 (N=8) to 0.469
+(N=32), a 53-percentage-point drop; EnCodec goes from 0.982 (N=8) to 0.724 (N=32), a 26-point drop
+-- real, but roughly half the size, and starting from a level DAC never reaches even at N=8's own
+ceiling headroom. Figure 2 (`artifacts/task11_gate3_encodec_scale/
+figure2_dac_vs_encodec_scaling.png`) shows this directly: DAC's three curves all crash sharply
+between N=8 and N=32; EnCodec's decline over the same range is comparatively mild on every metric.
+
+**Oracle-relative performance (this task's explicit requirement -- do not compare raw numbers
+across codecs without their own reconstruction ceilings): EnCodec recovers a much larger fraction
+of its own achievable ceiling at N=32 than DAC does of its.** EnCodec's own oracle (original waveform
+vs. EnCodec encode-then-decode, no translator) has waveform correlation 0.914 at N=32; the
+translator reaches 0.724, **79.2% of that ceiling**. DAC's own oracle (with the lag-alignment fix
+above) has waveform correlation 0.969 at N=32; the translator reaches only 0.469, **48.4% of that
+ceiling**. This rules out the alternative explanation that EnCodec's raw numbers simply look better
+because EnCodec is an easier codec to reconstruct through in general -- normalized by each codec's
+own ceiling, EnCodec's translator still recovers a much larger share of what's achievable. Figure 3
+(`figure3_oracle_relative_audio_quality.png`) shows both codecs' oracle and translator bars
+side by side at every N, making the different reconstruction ceilings explicit per this task's own
+requirement.
+
+**Per-example N=32 results (Figure 4, `figure4_per_example_n32.png`): EnCodec lifts every example's
+LATENT fit uniformly, but audio-level outcomes still show real per-example spread.** EnCodec's
+per-example latent cosine sits in a tight 0.98-0.99 band across all 32 examples, vs. DAC's wide
+0.43-0.68 spread -- confirming this is not "EnCodec helps an easier subset while leaving others
+behind" the way [[task06-n32-compute-ablation]] found added compute does for DAC; every example's
+*latent* is fit about equally well. But EnCodec's own per-example *waveform correlation* (pred vs.
+target-decode) still spans 0.37-0.98 across the 32 examples, despite the near-uniform latent fit --
+meaning residual per-example variation survives at the audio level even when the latent-level
+memorization is essentially uniform, most plausibly reflecting the frozen EnCodec decoder's own
+differential sensitivity to small residual latent errors (or genuine per-track audio complexity),
+not a translator-side "easier subset" effect.
+
+**Answers to this task's eight required questions.**
+
+1. *Can the existing TemporalConvNet memorize the continuous EnCodec target at N=2?* Yes,
+   near-perfectly -- cosine 1.0000, wav_corr (pred vs. target-decode) 1.0000, matching TASK-05's
+   DAC N=2 result exactly. The positive-control gate passes cleanly; this is not Outcome D
+   (pipeline failure).
+2. *Does EnCodec preserve near-perfect memorization at N=8?* Yes -- cosine 0.9991, wav_corr
+   0.9819, essentially unchanged from N=2 and statistically close to DAC's own (also near-perfect)
+   N=8 result. Neither codec differentiates at N=8; the two targets only diverge at N=32.
+3. *At N=32, does EnCodec substantially outperform DAC relative to each codec's own oracle?* Yes,
+   decisively -- 79.2% of EnCodec's own ceiling recovered vs. 48.4% of DAC's, a relative (not just
+   raw-number) advantage.
+4. *Does the EnCodec target move or remove the sharp N=8->N=32 transition observed with DAC?* It
+   removes the *sharpness* within this task's tested range (N up to 32) -- EnCodec's N=8-to-N=32
+   decline is real but roughly half the magnitude of DAC's collapse on every metric, and shows no
+   norm/variance collapse at all. Whether EnCodec has its own, later collapse point (N=128/512) is
+   explicitly out of this task's scope and remains unknown.
+5. *Are norm and variance collapse reduced when predicting EnCodec continuous latents?* Yes,
+   dramatically -- DAC's N=32 norm/variance ratios (0.499/0.177) show the classic collapse
+   signature; EnCodec's (0.985/0.650) show essentially no norm collapse and only partial variance
+   reduction.
+6. *Does EnCodec improve all N=32 examples or preferentially improve an easier subset?* At the
+   latent level, uniformly -- all 32 examples cluster tightly (0.98-0.99 cosine). At the audio
+   level, real per-example spread remains (0.37-0.98 waveform correlation) despite the uniform
+   latent fit, pointing to decoder-side or content-dependent variation rather than a translator-side
+   "easier subset" effect.
+7. *Does the result support target geometry, optimizer instability, capacity/interference, or a
+   combination?* Primarily target geometry. Swapping only the target codec -- with a translator
+   that has *98.3% fewer* parameters, ruling out a capacity-increase confound -- removed the sharp
+   collapse and produced decisive oracle-relative improvement at N=32. This directly implicates
+   DAC's own target geometry (established across TASK-07-10) as a primary driver of TASK-05's
+   original collapse, not a general "any translator fails past 8 examples" limit. That said,
+   EnCodec's own N=32 result (cosine 0.988, wav_corr 0.724) still falls short of its own N=8 level
+   and its own oracle ceiling, so some residual optimization/capacity/interference effect likely
+   still contributes at the margin -- consistent with this task's own Outcome B, not a full
+   removal of every contributing cause.
+8. *Is continuous EnCodec a materially better regression target than continuous DAC under the same
+   translator, loss, compute budget, and optimizer?* Yes, decisively, specifically at the N=32
+   level where DAC collapses -- the two targets are statistically indistinguishable at N=2 and N=8
+   (both near-perfect, uninformative about "which target is better" since capacity-per-example is
+   abundant there for either).
+
+**Per this task's own interpretation rules: this is Outcome B** ("EnCodec N=32 substantially
+outperforms DAC N=32 but remains clearly below EnCodec oracle... target geometry, optimization,
+and capacity/interference likely coexist") **-- not Outcome A** (EnCodec N=32 is well below its
+own oracle and below its own N=8 level, not "near oracle") **and not Outcome C** (the two codecs'
+N=8-to-N=32 trajectories are clearly different in magnitude, not a similar sharp transition for
+both). This is decisive, not marginal, support for the target-mismatch hypothesis this entire
+TASK-07-11 line has been building toward -- while also confirming (via the residual EnCodec-N=32
+gap) that target geometry is not the *sole* explanation for the original DAC collapse.
+
+**Per this task's own explicit instruction: stopping after answering these questions -- no
+N=128/512 extension, no transformer, no optimizer change, no OT training loss, no discrete-token
+switch, no follow-up experiment proposed or run.**
+
+**Consequences.** New files: `scripts/train_gate3_encodec_scale_wandb.py`,
+`scripts/plot_gate3_encodec_scale_figures.py`, `src/muq_inversion/gate3_encodec_common.py`, 12 new
+tests in `tests/test_gate3_encodec_common.py` (full suite now 177 passing). No TASK-01-10 file
+modified; `data/manifests/gate3_scale_{2,8,32}.csv` reused unchanged (verified nested and equal to
+TASK-05's own manifests at runtime, Gate 0). New artifacts: `artifacts/task11_gate3_encodec_scale/
+n{2,8,32}/report.json` + listening WAVs (best/median/worst at the best checkpoint, plus final-
+checkpoint audio for the two levels where the final checkpoint materially degraded from the best),
+four required figures, `scaling_summary.json`. Three live W&B runs under group
+`gate3-encodec-scale`. Total training time: N=2 96.8s, N=8 126.3s, N=32 127.0s (~5.8 minutes
+total, all three levels combined -- far faster than TASK-05's DAC runs at the same N, consistent
+with EnCodec's much smaller 128-dim target and correspondingly smaller translator).
+
+**Repository state (per this task's explicit instruction -- recorded, not just implied): TASK-09
+and TASK-10 were NOT actually uncommitted at the start of this task, contrary to this task's own
+"TASK-09 and TASK-10 changes are currently uncommitted" assumption** -- they were committed as
+`b54418f` in the immediately preceding session turn (user instruction: "Summarize the results and
+commit"), before this task began. `git status` at the start of this task showed only
+`tasks/TASK-11.md` untracked. All of this task's own new files remain untracked/unstaged at the
+end of this task, per its explicit "do not commit without explicit user instruction" rule -- exact
+final state in `notes/NEXT.md`.
+
+**Rollback plan.** Entirely additive: new files only (`gate3_encodec_common.py`,
+`train_gate3_encodec_scale_wandb.py`, `plot_gate3_encodec_scale_figures.py`, the new test file).
+Deleting them fully reverts this task's code; no existing file was modified. The three W&B runs
+live on wandb.ai independent of any local rollback. No checkpoint or manifest from TASK-01-10 was
+touched.

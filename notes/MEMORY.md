@@ -565,3 +565,38 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   (`artifacts/task10_encodec_shift_sensitivity/listening/`), not yet reviewed. Total run time: 11.8
   seconds -- the fastest of the four DAC/EnCodec diagnostics. Full write-up in
   [[task10-encodec-shift-sensitivity]].
+- EnCodec continuous-latent controlled scaling probe CONCLUDED (2026-09-22, `tasks/TASK-11.md`, a
+  training experiment -- the first since TASK-06 in this line): tested whether TASK-05's sharp
+  DAC N=8->N=32 collapse moves when the target codec changes to EnCodec's continuous latent, with
+  literally everything else held fixed (same manifests, input, architecture except the mechanically
+  -necessary `dac_channels=128` instead of 1024, loss, optimizer, 20000-step budget, seed -- source
+  of truth: TASK-05's own report.json). The EnCodec translator has 98.3% *fewer* parameters
+  (262,656 vs. 15,863,808) than TASK-05's DAC translator, ruling out a capacity-increase confound.
+  **Result: the collapse is dramatically reduced, not just "improved" -- decisive support for the
+  target-mismatch hypothesis this project's TASK-07-10 line has been building.** At N=32: DAC's
+  norm/variance ratios collapse to 0.499/0.177 (classic collapse signature); EnCodec's stay at
+  0.985/0.650 (essentially no norm collapse). Waveform correlation (pred vs. target-decode): DAC
+  crashes from 0.997 (N=8) to 0.469 (N=32); EnCodec declines from 0.982 to 0.724 -- real, but
+  roughly half DAC's drop. **Oracle-relative (this task's own required framing, since DAC and
+  EnCodec have different reconstruction ceilings): EnCodec's translator recovers 79.2% of its own
+  oracle ceiling at N=32 (0.724/0.914), vs. DAC's 48.4% (0.469/0.969, using a newly-fixed lag-
+  aligned DAC oracle -- see below)** -- a relative, not just raw-number, advantage. Per-example
+  N=32: EnCodec's LATENT fit is uniform across all 32 examples (0.98-0.99 band) unlike DAC's wide
+  0.43-0.68 spread, but AUDIO-level per-example variation remains (0.37-0.98 waveform correlation)
+  despite the uniform latent fit -- pointing to decoder-side/content-dependent variation, not a
+  translator-side "easier subset" effect. **Two real bugs found and fixed during this task**: (1)
+  DAC's decoder has a previously-undocumented fixed 8-sample group delay relative to its input --
+  a naive lag-0 original-vs-oracle correlation gave ~0.37-0.47 (looked broken) until a
+  cross-correlation lag search (`find_best_lag_and_align`) recovered the true ~0.96-0.97 ceiling;
+  EnCodec has no equivalent delay (best lag 0); (2) EnCodec targets computed fresh are PyTorch
+  "inference tensors" and need an explicit `.clone()` before use as autograd targets (TASK-05's
+  DAC targets never hit this since they load from a cache as plain tensors). Per this task's own
+  interpretation rules: **Outcome B** ("EnCodec substantially outperforms DAC but remains clearly
+  below its own oracle... target geometry, optimization, and capacity/interference likely
+  coexist") -- not Outcome A (EnCodec N=32 isn't near its own oracle or its own N=8 level) and not
+  Outcome C (the two codecs' trajectories clearly differ in magnitude). Scope restricted to N in
+  {2,8,32} per the task's own instruction; N=128/512 and any follow-up explicitly not run. 12 new
+  tests, full suite 177 passing. Total training time ~5.8 minutes (all three levels). **Not
+  committed** -- per this task's explicit "do not commit without explicit user instruction" rule;
+  exact repository state (staged/unstaged/untracked) recorded in [[task11-encodec-controlled-scaling]]
+  and `notes/NEXT.md`. Full write-up in [[task11-encodec-controlled-scaling]].

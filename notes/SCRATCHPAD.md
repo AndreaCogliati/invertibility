@@ -1484,3 +1484,110 @@ past it. Per the task's explicit instruction, proposed no follow-up experiment.
 
 Full write-up in notes/DECISIONS.md#task10-encodec-shift-sensitivity and notes/MEMORY.md. Figures:
 artifacts/task10_encodec_shift_sensitivity/figure{1,2,3}_*.png.
+
+## 2026-09-22: TASK-11 EnCodec continuous-latent controlled scaling probe
+
+First TRAINING task since TASK-06 in this line -- the direct causal test of everything TASK-07-10
+found: does swapping only the target codec (DAC -> EnCodec) move TASK-05's sharp N=8->N=32
+collapse? Recorded git status at start per the task's explicit instruction first: clean except
+tasks/TASK-11.md itself untracked -- TASK-09/10 were already committed (b54418f) from the prior
+turn, contrary to the task text's own assumption that they were still uncommitted. Noted this
+discrepancy rather than silently trusting the task's stale premise.
+
+Checked `SpectrogramToDacTranslator`'s `dac_channels` param -- already parameterized (not
+hardcoded to 1024), so `dac_channels=128` for EnCodec is a one-line change, no architecture
+surgery needed. `TemporalConvNet`'s receptive field (13 frames) is independent of channel count,
+confirmed from its own formula. Computed exact param counts: DAC version 15,863,808 (matches
+TASK-05's own stored value exactly), EnCodec version 262,656 -- 98.3% FEWER, not more. Important:
+this rules out "EnCodec just got a bigger network" as a confound before even running anything.
+
+Key design decision: reuse `evaluate_prediction` from gate3_spectrogram_common.py UNCHANGED for
+EnCodec too. Checked its source first -- it only ever calls `.decode(...)` on its `dac` parameter
+(duck-typed), and FrozenEncodecEncoder.decode (built in TASK-10) already mirrors
+FrozenDacEncoder.decode's exact interface. Wrote a dedicated test
+(test_evaluate_prediction_accepts_encodec_encoder_via_duck_typing) to verify this BEFORE writing
+the training script, not after -- this was the single biggest reuse risk in the whole task and
+worth confirming early.
+
+Built load_examples_from_manifest_encodec: reuses TASK-05's own load_examples_from_manifest for
+the mel input (unmodified), computes EnCodec target fresh from the manifest's own
+path/crop_start_seconds/crop_duration_seconds columns (dense cache only ever had DAC targets).
+
+First smoke test (--levels 2, MAX_STEPS=100 override) crashed immediately:
+"RuntimeError: Inference tensors cannot be saved for backward." FrozenEncodecEncoder.encode runs
+under @torch.inference_mode(), so its raw output can't be used as an autograd target later even
+though no grad is needed ON the target itself -- PyTorch tracks "inference tensor" as a property
+of the tensor's origin, not the current context. Fixed with .clone() right after transpose(1,2),
+per PyTorch's own error message suggestion. TASK-05 never hit this since its DAC targets load
+from a torch.save'd cache file (plain tensors by the time training sees them).
+
+Second smoke test (after the clone fix) ran clean -- but a startup sanity check revealed something
+worth double-checking: EnCodec's own oracle wav_corr was 0.897 while a freshly-added DAC oracle
+metric (original vs DAC's own encode-decode, never computed anywhere in this project before) came
+back at only 0.47 -- looked broken for a supposedly high-fidelity codec. Investigated by hand:
+searched lag -30..+30 for the best Pearson correlation between original and DAC's own oracle
+reconstruction. Found best_lag=8, corr=0.973 (vs lag-0's 0.366) -- DAC's decoder has a genuine
+fixed 8-sample GROUP DELAY relative to its input, not just the already-known 8-sample-shorter
+output length. Checked EnCodec the same way: best_lag=0, no delay. This was a real bug in my own
+new oracle-comparison code (naive first-N-samples truncation), not a DAC defect -- fixed by adding
+find_best_lag_and_align (cross-correlation search + alignment) and using it for both codecs'
+oracle metrics. Unit-tested with a synthetic 8-sample-shifted signal to confirm the search
+recovers the exact known shift.
+
+Ran the REAL training (all three levels, background job via nohup+disown, monitored via
+persistent Monitor with ~30 print-line granularity, no polling):
+```
+uv run python -u scripts/train_gate3_encodec_scale_wandb.py --levels 2,8,32 --wandb-mode online
+```
+N=2: 15250 steps (patience), 96.8s -- near-perfect immediately (cosine 1.0 by step ~4000).
+N=8: 20000 steps (max_steps, no early stop), 126.3s -- near-perfect (cosine 0.999).
+N=32: 20000 steps (patience triggered exactly at the boundary), 127.0s -- the decisive run.
+Total: ~5.8 minutes for all three levels combined -- much faster than TASK-05's DAC equivalents
+(660+716+592s ~ 33 min for the same three N), consistent with EnCodec's much smaller 128-dim
+target and correspondingly tiny 262K-param translator.
+
+N=32 trajectory: climbed steadily from wav_corr~0.06 (step 1000) to a peak ~0.77 (step 16000),
+then a sharp dip to ~0.18 (step 17000, same turbulence pattern as every large/long run in this
+project since TASK-01), ending at 0.378 at step 20000 (final). Best-by-MSE checkpoint (step
+15000) captured wav_corr=0.7235, well before the late-run dip -- exactly why the script tracks
+best-by-MSE AND best-by-wav_corr separately and never trusts the final checkpoint automatically,
+per this task's own explicit TASK-06-derived instruction.
+
+Headline numbers (best-by-MSE checkpoint):
+```
+              N=2      N=8      N=32
+DAC cosine    1.0000   0.9980   0.5161
+EnCodec cos   1.0000   0.9991   0.9879
+
+DAC wav_corr  1.0000   0.9970   0.4689
+EnCodec wc    1.0000   0.9819   0.7235   (pred vs target-decode, both codecs' own metric)
+
+DAC oracle    0.9612   0.9665   0.9690   (orig vs codec's own encode-decode, lag-aligned)
+EnCodec orcl  0.8975   0.9043   0.9140
+```
+Oracle-relative at N=32: EnCodec recovers 0.7235/0.9140 = 79.2% of its own ceiling; DAC recovers
+0.4689/0.9690 = 48.4% of its own ceiling. This normalized comparison is the load-bearing number
+the task explicitly asked for ("do not compare raw EnCodec wav_corr directly with DAC without
+also presenting the codec oracle") -- confirms the raw-number gap isn't just "EnCodec is an
+easier codec to reconstruct through in general."
+
+Figure 2 (DAC vs EnCodec scaling, 3 panels) is the single clearest visual in this whole task:
+DAC's three curves (cosine, wav_corr, variance ratio) all crash sharply between N=8 and N=32;
+EnCodec's decline over the same range is comparatively mild on every one. Figure 4 (per-example
+N=32) shows EnCodec's latent cosine in a tight 0.98-0.99 band across ALL 32 examples (vs DAC's
+0.43-0.68 spread) -- uniform lift, not an easier-subset effect -- but EnCodec's own per-example
+AUDIO correlation still spans 0.37-0.98 despite that uniform latent fit, an interesting residual
+finding not explicitly asked for but worth flagging (decoder-side sensitivity, not translator-side
+unevenness).
+
+Outcome classification: closest to Outcome B (substantial-but-partial improvement, target
+geometry + optimization/capacity/interference likely coexist) -- not Outcome A (EnCodec N=32 is
+well below its own oracle and its own N=8 level) and not Outcome C (the two codecs' trajectories
+are clearly different in magnitude, no shared sharp transition).
+
+Per the task's explicit instructions: did NOT extend to N=128/512, did NOT propose a follow-up
+experiment, did NOT commit anything. Reported exact final git status (staged/unstaged/untracked)
+in notes/NEXT.md as required.
+
+Full write-up in notes/DECISIONS.md#task11-encodec-controlled-scaling and notes/MEMORY.md.
+Figures: artifacts/task11_gate3_encodec_scale/figure{1,2,3,4}_*.png.
