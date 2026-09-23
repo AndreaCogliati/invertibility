@@ -1591,3 +1591,96 @@ in notes/NEXT.md as required.
 
 Full write-up in notes/DECISIONS.md#task11-encodec-controlled-scaling and notes/MEMORY.md.
 Figures: artifacts/task11_gate3_encodec_scale/figure{1,2,3,4}_*.png.
+
+## 2026-09-22: TASK-12 EnCodec N=32 compute ablation
+
+Extends TASK-11: is the residual N=32 gap (79.2% oracle-relative recovery at 20k steps)
+compute-limited? Directly mirrors TASK-06's DAC compute ablation design, substituting EnCodec.
+
+Reproducibility checks first, per the task's explicit instructions: recorded git status (clean
+except tasks/TASK-12.md itself -- confirmed TASK-09/10 were ALREADY committed from a prior turn,
+contradicting the task text's own stale assumption, same situation as TASK-11 had with TASK-09/10),
+recorded commit hash (79805b4...), confirmed TASK-11's report.json/checkpoints/WAVs all present,
+checksummed the N=32 manifest before touching anything.
+
+Wrote train_gate3_encodec_n32_compute_ablation.py as a close mirror of TASK-06's
+train_gate3_n32_compute_ablation.py, substituting: FrozenEncodecEncoder for FrozenDacEncoder,
+gate3_encodec_common.load_examples_from_manifest_encodec for load_examples_from_manifest,
+ex.target for ex.dac, dac_channels=128 for the translator. Reused evaluate_prediction/
+aggregate_metrics_across_examples/rank_examples_by_metric UNCHANGED (same duck-typing trick
+verified in TASK-11 -- didn't need to re-verify, TASK-11's own test already covers it). Added
+best_by_wav_corr checkpoint tracking (TASK-11 pattern) plus explicit final-vs-best degradation
+check per TASK-12's own requirement.
+
+Smoke test (--budget 500 temporarily added to choices, --wandb-mode disabled): 10.18s, clean,
+correct schema. Reverted the temporary choices/val_every overrides before the real run.
+
+Launched the real run as one chained background command (80k then 320k, same nohup+disown+Monitor
+pattern as every prior long run in this project):
+```
+nohup bash -c "uv run python -u scripts/train_gate3_encodec_n32_compute_ablation.py --budget 80000 --wandb-mode online && uv run python -u scripts/train_gate3_encodec_n32_compute_ablation.py --budget 320000 --wandb-mode online" > /tmp/task12_real.log 2>&1 &
+```
+80k: 570.5s (~9.5 min). 320k: 2083.1s (~34.7 min). Total ~44 min for both -- dramatically faster
+than TASK-06's DAC equivalent (320k alone took ~6.7 hours for DAC), consistent with EnCodec's
+much smaller 262,656-param translator (vs DAC's 15.9M).
+
+Confirmed determinism throughout monitoring: the 80k and 320k runs' logged per-checkpoint values
+matched TASK-11's own 20k run EXACTLY at every shared step (e.g. step 20000: both showed
+wav_corr_mean=0.3554-ish and the identical best/median/worst example IDs) -- same seed, same
+deterministic alternating-presentation order, confirms nothing was accidentally randomized.
+
+Headline results (best-by-MSE checkpoint):
+```
+budget   best_step   wav_corr   oracle_rel   var_ratio
+20k      15000       0.7235     79.2%        0.650
+80k      75000       0.8040     88.0%        0.668
+320k     300000      0.8470     92.7%        0.738
+```
+Classic diminishing returns: +8.05pp for the first 4x compute jump, only +4.30pp for the second
+4x jump. Norm ratio stayed flat near 1.0 throughout (0.985-0.993) -- confirms TASK-11's "no norm
+collapse" finding is compute-independent, not just a 20k-budget artifact.
+
+One severe instability event during the 320k run: step 268000 showed wav_corr crashing to 0.35
+(cosine to 0.94, mse spiking to 4.16) from a stable ~0.84 the checkpoint before -- fully recovered
+by the very next checkpoint (step 272000, only 4000 steps later). Checked the checkpoint_history
+directly to confirm this was a single-point transient, not a multi-checkpoint degradation, and
+that it didn't affect best-checkpoint selection (actual best came later, at step 300000).
+
+Computed the required per-example analyses with scipy (spearmanr for rank stability, pearsonr for
+gain-vs-starting-point):
+- Rank stability: spearman 0.964 (20k vs 80k), 0.973 (80k vs 320k), 0.944 (20k vs 320k) -- high
+  but not perfect.
+- Gain vs starting point: pearson r=-0.846 (20k->80k) and r=-0.839 (80k->320k) -- STRONG negative
+  correlation, meaning examples that started worse gained more. An equalizing, decelerating
+  effect (mean gain shrinks: 0.0805 -> 0.0430; std also shrinks: 0.054 -> 0.029).
+
+Unplanned but important finding while doing the latent-vs-audio analysis: pooled all 96 points
+(3 budgets x 32 examples) and computed Spearman rho between each latent metric and waveform
+correlation. Cosine similarity: rho=0.605. Latent MSE: rho=0.199 (weak). VARIANCE RATIO: rho=0.819
+-- much stronger than either. This makes sense in retrospect: cosine similarity is already
+squeezed into a tiny 0.988-0.992 range across all three budgets (ceiling effect), so its residual
+variation carries little signal, while variance ratio has real headroom (0.650-0.738) and tracks
+the actual audio outcome much more tightly. Flagged this as a methodologically useful finding for
+future diagnostics on this pipeline, not just a TASK-12-specific footnote.
+
+Built 5 figures (compute-response curve, marginal gains, rank-stability scatter x3, gain-vs-
+starting-point scatter x2, latent-vs-audio scatter x2) via a new plot_gate3_encodec_n32_compute_ablation.py
+script, read-only over the three reports.
+
+Wrote the full TASK-12_RESULTS.md report in the EXACT structure the task specified (Executive
+Summary through Final Git Status, 15 sections) -- this is a different deliverable format than
+this project's usual DECISIONS.md entries, so wrote it as a dedicated file in the artifacts
+directory rather than trying to force it into the DECISIONS.md format, then wrote a normal
+DECISIONS.md summary entry linking to it.
+
+Outcome classification: B (Partial Response) -- clear gains at 80k, smaller-but-real gains at
+320k, meaningful residual gap (7.3pp oracle-relative, variance ratio still 0.262 short of 1.0).
+Explicitly ruled out A (not strong/sustained enough), C (audio improved right alongside latent,
+not latent-only), D (changes are large, not minimal), and primarily-E (oscillation was present
+but didn't prevent net progress).
+
+Per the task's explicit instructions: no follow-up experiment proposed, not committed. Recorded
+exact final git status in notes/NEXT.md as required.
+
+Full write-up in notes/DECISIONS.md#task12-encodec-n32-compute-ablation, notes/MEMORY.md, and the
+dedicated artifacts/task12_encodec_n32_compute_ablation/TASK-12_RESULTS.md report.

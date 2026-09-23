@@ -3022,3 +3022,83 @@ final state in `notes/NEXT.md`.
 Deleting them fully reverts this task's code; no existing file was modified. The three W&B runs
 live on wandb.ai independent of any local rollback. No checkpoint or manifest from TASK-01-10 was
 touched.
+
+## task12-encodec-n32-compute-ablation: additional compute helps but does not close the residual TASK-11 gap -- Outcome B, diminishing returns
+
+**Context (`tasks/TASK-12.md`).** [[task11-encodec-controlled-scaling]] found EnCodec's N=32
+translator recovered 79.2% of its own oracle reconstruction ceiling after a 20,000-step budget
+(waveform correlation 0.7235 / oracle 0.9140), leaving a meaningful residual gap. This task asks
+whether that gap is compute-limited, extending training to 80,000 and 320,000 steps independently
+(same seed/init, every other control identical to TASK-11 -- exact recipe verified: reproduces
+TASK-11's own trajectory step-for-step through step 20,000). Full report (all required sections
+per this task's own template) at `artifacts/task12_encodec_n32_compute_ablation/TASK-12_RESULTS.md`
+-- this entry summarizes it.
+
+**Result -- decisive diminishing returns, Outcome B (Partial Response), not full closure:**
+
+| Budget | Best step | Wave corr. | Oracle-relative | Variance ratio |
+| --- | --- | --- | --- | --- |
+| 20k (TASK-11) | 15,000 | 0.7235 | 79.2% | 0.650 |
+| 80k | 75,000 | 0.8040 | 88.0% | 0.668 |
+| 320k | 300,000 | 0.8470 | 92.7% | 0.738 |
+
+Marginal gain: +8.05 points waveform correlation for 20k->80k (4x compute), only +4.30 points for
+80k->320k (another 4x compute) -- roughly half the return for the same additional compute. Norm
+ratio never collapsed at any budget (0.985-0.993 throughout, confirming TASK-11's finding is
+compute-independent); variance ratio climbs steadily but remains 26 percentage points short of
+1.0 even at 320k.
+
+**A methodologically notable finding, not explicitly asked for by the task but directly useful for
+future diagnostics in this line: variance ratio (Spearman rho=0.819 vs. audio quality, pooled
+across all three budgets and 32 examples) is a far better predictor of audio-reconstruction
+quality than latent cosine similarity (rho=0.605) or latent MSE (rho=0.199)**, despite cosine
+similarity being the metric closest to its ceiling (0.988-0.992 throughout) and therefore, naively,
+looking like the success story. This sharpens TASK-11's own "high latent fit can coexist with
+substantial audio variation" observation into an actionable one: watch variance ratio, not cosine
+similarity, for future compute/architecture ablations on this pipeline.
+
+**Per-example analysis: compute preferentially benefits examples that started worse (an
+equalizing, decelerating effect), while broadly preserving relative rank.** Rank stability
+(Spearman rho) is 0.964 (20k vs. 80k), 0.973 (80k vs. 320k), 0.944 (20k vs. 320k) -- high but not
+perfect. Pearson r between an example's starting performance and its subsequent gain is -0.846
+(20k->80k) and -0.839 (80k->320k) -- strong evidence that harder examples close more of their gap
+per unit of compute than easier ones, even as the easier/harder ordering itself mostly persists.
+
+**Optimization stability: one severe, isolated instability spike (320k run, step 268,000: wave
+corr. crashed to 0.35, cosine to 0.94, fully recovered by the very next checkpoint 4000 steps
+later) -- a transient, not a sustained degradation, and did not affect best-checkpoint selection**
+(the actual best, step 300,000, came later and was unaffected). Both new runs' final checkpoints
+stayed close to their best checkpoints (within ~0.012 waveform correlation), unlike TASK-11's own
+20k run, whose final checkpoint had degraded substantially by the time training stopped --
+reinforcing (yet again, per TASK-06's original finding) that best-by-MSE checkpoint selection,
+not final-checkpoint evaluation, is essential for this pipeline.
+
+**Per this task's own decision rules: Outcome B (Partial Response)** -- "compute helps, but
+architecture, objective, or information limits remain" -- not Outcome A (gains are decelerating,
+not strong/sustained, and 92.7% is not "near oracle"), not Outcome C (audio improved proportionally
+with latent, not latent-only), not Outcome D (the 20k-to-320k change is large, not minimal), and
+not primarily Outcome E (large oscillations were present throughout but did not prevent clear net
+progress -- a contributing factor to trajectory shape, not the dominant explanation for the
+residual gap).
+
+**Per this task's own explicit instruction: no follow-up experiment proposed or run; not
+committed, per its "do not commit unless explicitly instructed" rule.**
+
+**Consequences.** New files: `scripts/train_gate3_encodec_n32_compute_ablation.py` (mirrors
+TASK-06's DAC compute-ablation script exactly, substituting EnCodec via TASK-10/11's existing,
+unmodified infrastructure), `scripts/plot_gate3_encodec_n32_compute_ablation.py` (5 figures),
+`artifacts/task12_encodec_n32_compute_ablation/TASK-12_RESULTS.md` (the full required report,
+every section of this task's own template). No new tests needed (fully reuses TASK-05/06/10/11's
+existing, unmodified infrastructure -- `evaluate_prediction`'s duck-typed `dac` parameter, already
+verified for EnCodec in TASK-11, worked unchanged again here). No TASK-01-11 file modified;
+`data/manifests/gate3_scale_32.csv` reused unchanged (checksum-verified before use, per this
+task's reproducibility-check requirement). New artifacts: `artifacts/
+task12_encodec_n32_compute_ablation/budget_{80000,320000}/report.json` + listening WAVs (19 + 29
+files) + 5 figures + the results report. Two live W&B runs, group
+`gate3-encodec-n32-compute-ablation`. Total training time: 80k run 570.5s (~9.5 min), 320k run
+2083.1s (~34.7 min) -- far faster than TASK-06's DAC equivalent (320k took ~6.7 hours), consistent
+with EnCodec's much smaller 128-dim target and 262,656-parameter translator.
+
+**Rollback plan.** Entirely additive: new files only. Deleting them fully reverts this task's
+code; no existing file was modified. The two W&B runs live on wandb.ai independent of any local
+rollback. No checkpoint or manifest from TASK-01-11 was touched.

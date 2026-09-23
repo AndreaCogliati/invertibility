@@ -600,3 +600,31 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   committed** -- per this task's explicit "do not commit without explicit user instruction" rule;
   exact repository state (staged/unstaged/untracked) recorded in [[task11-encodec-controlled-scaling]]
   and `notes/NEXT.md`. Full write-up in [[task11-encodec-controlled-scaling]].
+- EnCodec N=32 compute ablation CONCLUDED (2026-09-22, `tasks/TASK-12.md`, extends
+  [[task11-encodec-controlled-scaling]]): tested whether TASK-11's residual N=32 gap (79.2%
+  oracle-relative recovery at a 20k-step budget) is compute-limited, by training the identical
+  setup independently to 80k and 320k steps (same seed/init, early stopping disabled, same
+  rationale as TASK-06). **Result: Outcome B (Partial Response) -- compute helps substantially
+  but with clearly diminishing returns, and a meaningful gap remains at 320k.** Oracle-relative
+  recovery: 79.2% (20k) -> 88.0% (80k) -> 92.7% (320k); marginal gain in waveform correlation was
+  +8.05 points for 20k->80k (4x compute) but only +4.30 points for 80k->320k (another 4x compute)
+  -- roughly half the return for the same additional compute. Norm ratio never collapsed at any
+  budget (compute-independent, confirming TASK-11); variance ratio climbed steadily (0.650 ->
+  0.668 -> 0.738) but stayed 26 points short of 1.0 even at 320k. **Notable methodological
+  finding**: variance ratio (Spearman rho=0.819 vs. audio quality, pooled across budgets) predicts
+  audio-reconstruction quality far better than latent cosine similarity (rho=0.605) or latent MSE
+  (rho=0.199), despite cosine being the metric closest to its own ceiling -- a concrete,
+  actionable refinement of TASK-11's "high latent fit can coexist with audio variation" finding
+  for any future diagnostic on this pipeline. **Per-example**: compute preferentially benefits
+  examples that started worse (Pearson r=-0.85 between starting performance and subsequent gain)
+  while broadly preserving relative rank (Spearman rho 0.94-0.97 across budget pairs) -- an
+  equalizing, decelerating effect. One severe but transient instability spike occurred in the 320k
+  run (step 268,000, fully recovered within one checkpoint interval, did not affect best-checkpoint
+  selection). Both fixes carried over from TASK-11 (target `.clone()`, lag-aware DAC oracle
+  policy) preserved without needing rediscovery. No new tests needed (fully reused TASK-05/06/10/11's
+  unmodified infrastructure). Full required-template report at `artifacts/
+  task12_encodec_n32_compute_ablation/TASK-12_RESULTS.md`. Total training time: 80k run 570.5s
+  (~9.5 min), 320k run 2083.1s (~34.7 min) -- far faster than TASK-06's DAC equivalent (~6.7 hours
+  for 320k), consistent with EnCodec's much smaller translator. **Not committed** -- per this
+  task's explicit instruction; per this task's own instruction, no follow-up experiment proposed
+  or run. Full write-up in [[task12-encodec-n32-compute-ablation]].
