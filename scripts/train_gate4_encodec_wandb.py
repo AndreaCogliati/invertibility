@@ -35,6 +35,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Must be set before CUDA is initialized (i.e. before `import torch` touches the GPU) --
+# required for `torch.use_deterministic_algorithms(True)` to cover cuBLAS ops below. Harmless
+# on MPS/CPU-only machines, where it is simply never read.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import numpy as np
 import soundfile as sf
 import torch
@@ -123,11 +128,13 @@ def _write_wav(path: Path, waveform: torch.Tensor, sample_rate: int) -> None:
 
 def _rng_snapshot() -> dict:
     mps_state = torch.mps.get_rng_state() if torch.backends.mps.is_available() else None
+    cuda_state = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
     return {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
         "torch": torch.get_rng_state(),
         "torch_mps": mps_state,
+        "torch_cuda": cuda_state,
     }
 
 
@@ -137,6 +144,23 @@ def _rng_restore(snapshot: dict) -> None:
     torch.set_rng_state(snapshot["torch"])
     if snapshot.get("torch_mps") is not None and torch.backends.mps.is_available():
         torch.mps.set_rng_state(snapshot["torch_mps"])
+    if snapshot.get("torch_cuda") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(snapshot["torch_cuda"])
+
+
+def _enable_cuda_determinism(device: torch.device) -> None:
+    """`tasks/TASK-13.md` requires a checkpoint/resume equivalence *check*, not just a checkpoint
+    write -- on a first BlueHive (CUDA) run without this, the check correctly FAILED (max relative
+    diff 8.4 pre-checkpoint, 153.8 post-resume) because cuDNN convolution/cuBLAS kernels are not
+    bit-reproducible across separate process invocations by default, unlike this project's MPS
+    runs (which measured an exact 0.0000 match twice). `warn_only=True`: falls back to a
+    best-effort deterministic kernel with a warning rather than raising, for any op in this
+    pipeline that has no deterministic CUDA implementation, instead of crashing the whole run."""
+    if device.type != "cuda":
+        return
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 
 def _make_model_and_optimizer(device: torch.device, seed: int) -> tuple[SpectrogramToDacTranslator, torch.optim.Optimizer]:
@@ -246,6 +270,7 @@ def main() -> None:
     except DeviceSelectionError as exc:
         raise SystemExit(f"Device selection failed: {exc}") from exc
     print(f"device: {device}")
+    _enable_cuda_determinism(device)
     environment = capture_environment_manifest(REPO_ROOT)
 
     muq = FrozenMuQEncoder(MUQ_MODEL_ID, device)
