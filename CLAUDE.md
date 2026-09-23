@@ -12,10 +12,13 @@ This is an interpretability experiment, not a codec benchmark and not an attempt
 - Dataset: GTZAN, 1,000 mono WAV tracks, about 30 seconds each, originally sampled at 22.05 kHz.
 - Encoder: frozen `OpenMuQ/MuQ-large-msd-iter`.
 - Encoder input: mono audio resampled to 24 kHz.
-- Decoder: a small HiFi-GAN-style generator and its discriminators, adapted to accept continuous MuQ features instead of mel spectrograms.
-- Decoder input: MuQ `last_hidden_state`, meaning the final time-resolved encoder representation. In this project, call this the "bottleneck" representation.
+- Reconstruction pipeline (current): audio -> frozen MuQ `last_hidden_state` -> learned translator -> frozen EnCodec continuous latent -> frozen EnCodec decoder -> reconstructed audio. The translator is the only trained component; MuQ and EnCodec are both frozen throughout.
+- Decoder: frozen, pretrained EnCodec (`facebook/encodec_24khz`). This project does not train, fine-tune, or design a decoder -- EnCodec's own decoder is used as-is to turn a predicted continuous latent into audio.
+- Translator input: MuQ `last_hidden_state`, meaning the final time-resolved encoder representation. In this project, call this the "bottleneck" representation.
 - Initial experiment: one representation only. Do not combine intermediate layers, use skip connections from MuQ, or implement learned layer mixing unless explicitly requested later.
-- Training target: the original 24 kHz waveform aligned with the MuQ feature sequence.
+- Training target: EnCodec's continuous (post-quantization) latent, not the raw waveform directly. The translator is trained to predict this latent; the frozen EnCodec decoder then turns it into the reconstructed waveform.
+- DAC (`descript/dac_24khz`) is no longer the primary regression target: its continuous latent proved highly sensitive to sub-frame input shifts and poorly aligned with decoded-audio similarity. EnCodec's continuous latent substantially improved scaling behavior and avoided DAC-style norm collapse under the same translator, loss, and optimizer. DAC-based findings remain valid prior experimental evidence, not invalidated results -- see `notes/DECISIONS.md` for the full history.
+- Latest recorded benchmark (N=32 training examples, 320,000 training steps): the existing small ConvNet-based translator reached 92.7% of the EnCodec oracle reconstruction ceiling (waveform correlation), with diminishing but still-positive returns from additional training compute, and a variance ratio of 0.738 (short of the 1.0 no-collapse reference).
 - Package manager: Astral `uv`, using native project commands only.
 
 ## Scientific Questions
@@ -149,9 +152,11 @@ Do not assume the MuQ frame rate or channel dimension. Derive them from the inst
 
 The decoder must receive the full temporal sequence. Never pool with a mean, standard deviation, or global average.
 
-## Decoder Design
+## Translator Design
 
-Implement a deliberately small HiFi-GAN-style baseline:
+The only trained component in the current pipeline is the translator: a learned mapping from MuQ `last_hidden_state` to EnCodec's continuous latent space. The decoder itself is frozen, pretrained EnCodec -- do not design, train, fine-tune, or add discriminators to a decoder.
+
+Historical note: the original plan for this section called for training a small HiFi-GAN-style decoder with discriminators directly from MuQ features, outputting the waveform directly. That approach was superseded by the frozen-EnCodec pipeline above (see `notes/DECISIONS.md` for the evidence). The original design notes are preserved below as historical context, not current instructions:
 
 1. A learned input projection from MuQ channels to decoder channels.
 2. Temporal convolutional conditioning at the MuQ frame rate.
@@ -160,9 +165,9 @@ Implement a deliberately small HiFi-GAN-style baseline:
 5. A waveform output head.
 6. Multi-period and multi-scale discriminators only after the reconstruction path passes smoke tests.
 
-Start with reconstruction-only training using mel and multi-resolution STFT losses. Add adversarial and feature-matching losses only after the model can overfit a tiny subset and produce time-aligned audio.
+(Historical) Start with reconstruction-only training using mel and multi-resolution STFT losses. Add adversarial and feature-matching losses only after the model can overfit a tiny subset and produce time-aligned audio.
 
-Do not copy speech-specific HiFi-GAN constants blindly. Sampling rate, FFT sizes, hop sizes, upsampling factors, segment lengths, and discriminator settings must be explicit in configuration and justified for 24 kHz music.
+(Historical) Do not copy speech-specific HiFi-GAN constants blindly. Sampling rate, FFT sizes, hop sizes, upsampling factors, segment lengths, and discriminator settings must be explicit in configuration and justified for 24 kHz music.
 
 ## Required Validation Gates
 
@@ -324,6 +329,8 @@ If the controls sound similar to the correctly conditioned model, assume conditi
 
 Use objective metrics as diagnostics, not as proof of perceptual fidelity. Do not claim successful inversion solely from a low training loss. The initial success criterion is conservative: reconstructions are recognizably tied to the source and outperform the controls.
 
+Treat the variance ratio (predicted-to-oracle per-channel latent variance) as the primary latent-collapse diagnostic. Across this project's DAC and EnCodec experiments, cosine similarity and MSE have repeatedly saturated near their ceiling values well before decoded-audio quality did, making them unreliable as the primary signal for whether collapse is actually resolved. Retain cosine similarity and MSE as secondary/supporting metrics, not as the primary indicator.
+
 ## Coding Standards
 
 - Use typed Python and small testable modules.
@@ -356,7 +363,7 @@ The proof of concept is complete only when:
 1. The environment can be recreated with `uv sync --frozen` from `pyproject.toml` and `uv.lock`.
 2. GTZAN manifests and preprocessing are deterministic.
 3. MuQ final-layer feature geometry is measured and documented.
-4. A small HiFi-GAN-style decoder trains from that representation alone.
+4. A small learned translator trains to predict frozen EnCodec's continuous latent from that representation, decodable by EnCodec's own frozen decoder.
 5. Training can stop and resume from an atomic checkpoint with state restored.
 6. Fixed validation examples produce source-related reconstructions that outperform shuffled and constant-conditioning controls.
 7. Results, failures, resource use, and next-step recommendations are recorded in the notes and run manifest.
