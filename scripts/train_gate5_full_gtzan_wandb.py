@@ -599,7 +599,16 @@ def main() -> None:
     print(f"W&B run finished: {run.id}")
     print(f"\nFINAL: Gate 5 {'PASSED' if gate5_passed else 'NOT PASSED'} (outcome {outcome}) -- see {report_path}")
 
-    if not gate5_passed:
+    # A bounded diagnostic (configs/gate5_smoke.yaml: a handful of tracks/steps) is never
+    # expected to satisfy Gate 5's real pass criteria -- that would require a signal this scale
+    # cannot produce. Its success/failure is "did the pipeline run without error", not "did Gate 5
+    # pass", so the process exit code must not conflate the two: a clean bounded-diagnostic run
+    # that (correctly, expectedly) reports Gate 5 NOT PASSED must still exit 0, or every SLURM
+    # diagnostic submission would be misreported as a job failure regardless of whether anything
+    # actually went wrong (exactly what happened on the first BlueHive diagnostic submission,
+    # job 1956802 -- see notes/DECISIONS.md#task14-gate5-full-gtzan-pilot's addendum).
+    is_bounded_diagnostic = config.train_track_limit is not None or config.heldout_crop_limit is not None
+    if not gate5_passed and not is_bounded_diagnostic:
         sys.exit(1)
 
 

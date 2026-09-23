@@ -3276,3 +3276,21 @@ write-up: `artifacts/task14_gate5_full_gtzan_prep/TASK-14_PREPARATION_REPORT.md`
 parameter addition (verified non-breaking by its existing test suite). Deleting the new files and
 reverting `wandb_logging.py`/`bluehive/README.md` fully reverts this task; nothing was submitted
 to BlueHive to roll back.
+
+**Addendum (2026-09-23): the bounded diagnostic's own success signal was wrong, fixed.** The
+user submitted `bluehive/run_task14_diagnostic.slurm` (Tesla T4, job `1956802`) and it appeared
+to fail -- but the `.out`/`.err` logs show a completely clean run: CUDA OK, manifest/held-out
+loading, 20 training steps with finite loss throughout, checkpoint writes, full conditioning-
+control evaluation, listening artifacts, report.json, and a clean W&B sync, all succeeding. The
+"failure" was `train_gate5_full_gtzan_wandb.py`'s own exit code: it called `sys.exit(1)` whenever
+Gate 5's pass criteria weren't met, copying TASK-13's script's convention (where that maps
+"real result didn't clear the bar" to "nonzero exit") without accounting for the fact that a
+20-step/4-track bounded diagnostic can *never* clear Gate 5's bar by construction -- so every
+clean diagnostic run was guaranteed to report as a SLURM failure regardless of whether anything
+actually went wrong. Fixed: the exit-1-on-not-passed path now only fires when
+`config.train_track_limit is None and config.heldout_crop_limit is None` (i.e. the real,
+unbounded full-run config) -- a bounded diagnostic always exits 0 on a clean run, since its
+success criterion is "did the pipeline run without error," not "did Gate 5 pass." Re-verified
+locally (exit code 0 on the fixed script, identical metrics to the pre-fix run otherwise); full
+suite still 215 passing, lint clean. The BlueHive run itself needed no changes and produced no
+incorrect data -- only this environment's local exit-code check was wrong.
