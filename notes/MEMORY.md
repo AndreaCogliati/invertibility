@@ -653,3 +653,31 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   val + 2 test) -- a real power caveat, though both splits independently show the same null
   result. Per this task's explicit instruction, Gate 5 not started. **Not committed** -- per this
   task's explicit instruction. Full write-up in [[task13-gate4-encodec-revalidation]].
+- Gate 5 full-GTZAN pilot BlueHive package PREPARED, not run (2026-09-23, `tasks/TASK-14.md`):
+  built and locally-verified (never executed at scale, per this task's explicit "do not run the
+  full job locally / do not submit on BlueHive unless instructed" constraints) the infrastructure
+  to test whether TASK-13's held-out null result was caused by too little training data (16
+  crops). New: `configs/gate5_full_gtzan.yaml` (300,000-step full-run config, versioned) +
+  `configs/gate5_smoke.yaml` (bounded diagnostic); `scripts/train_gate5_full_gtzan_wandb.py` with
+  a deterministic resumable random-crop sampler (`gate5_common.TrainCropSampler`) drawing broadly
+  across all 792 training tracks (genuinely random start offsets, not a small fixed rotation);
+  `data/manifests/gate5_heldout_crops.csv` (188 val + 226 test crops, fixed/versioned, derived
+  from `more_data_crops.csv`'s existing split -- no new crop-selection decision). Held-out
+  evaluation reuses TASK-13's `gate4_encodec_common.py` manifest loader and all four conditioning
+  controls completely unmodified (identical CSV schema). **Primary endpoint is
+  `oracle_relative_waveform_recovery`** (original-vs-translator / original-vs-oracle correlation)
+  -- deliberately different from TASK-13's translator-vs-oracle metric, per this task's explicit
+  "oracle-relative waveform recovery" specification. **Verified, not just built**: ran the bounded
+  diagnostic locally three times, including a genuine partial-train-to-step-10-then-resume-to-
+  step-20 run that reproduced bit-identical final metrics to an uninterrupted run -- confirms the
+  checkpoint/sampler/RNG/W&B-run-lineage round-trip actually works. `wandb_logging.init_run`
+  gained a backward-compatible `resume_id` parameter so resumed runs reopen the same W&B run
+  (previously every resume created a disconnected new one -- a real gap this task's own explicit
+  "same scientific run lineage" requirement caught and fixed). 24 new tests, full suite 215
+  passing, lint clean. SLURM package (`bluehive/run_task14.slurm` for the full job,
+  `run_task14_diagnostic.slurm` optional BlueHive-side check, `resubmit_task14.sh`) syntax-
+  validated but **not submitted** -- this environment still has no BlueHive access. **Known
+  placeholder**: the 16-hour wall-clock budget is extrapolated from the local per-step rate
+  (~116ms/step), not a real BlueHive measurement -- correct after the first submission. TASK-13's
+  own files untouched. **Not committed** -- per this task's explicit instruction; no Gate 5
+  scientific conclusion drawn. Full write-up in [[task14-gate5-full-gtzan-pilot]].

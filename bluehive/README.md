@@ -132,3 +132,36 @@ Once you've run it, fill in and keep for the record (`notes/DECISIONS.md` or
 - `--steps` on the training script exists ONLY for infrastructure validation, as done on the M4
   Max before this handoff. Never pass `--steps` when running the actual reproduction -- the
   default (450000) is what makes the run comparable to TASK-02.
+
+## TASK-13 and TASK-14 addendum
+
+The setup above (sections 1-6) still applies for later Gate-4/Gate-5 jobs. Differences to note:
+
+- **TASK-13** (`bluehive/run_task13.slurm`, `scripts/train_gate4_encodec_wandb.py`): already
+  submitted and confirmed working on BlueHive (Tesla T4 and NVIDIA A40 both tested) -- see
+  `notes/DECISIONS.md#task13-gate4-encodec-revalidation`'s addendum. Needs only 12 raw GTZAN
+  tracks (`data/manifests/gate4_crops.csv` Experiment B), not the full dataset. **Important**: if
+  you see the checkpoint/resume equivalence check fail with a large divergence on CUDA, that is
+  the exact bug fixed in commit `895b81b` (cuDNN/cuBLAS kernel nondeterminism) -- make sure you're
+  running a commit at or after that fix.
+- **TASK-14** (`bluehive/run_task14.slurm`, `bluehive/run_task14_diagnostic.slurm`,
+  `bluehive/resubmit_task14.sh`, `scripts/train_gate5_full_gtzan_wandb.py`): the full-GTZAN Gate 5
+  pilot. Needs the **entire** committed GTZAN split present under `data/raw/gtzan/genres/`
+  (999 valid tracks across 792 train / 94 val / 113 test) -- `run_task14.slurm` checks for at
+  least 999 `.wav` files before starting and fails fast otherwise. Also needs
+  `data/manifests/gate5_heldout_crops.csv` (tracked in git; if missing, regenerate with
+  `uv run python scripts/build_gate5_manifests.py`). Unlike TASK-03/TASK-13, no precomputed
+  feature cache is used -- training crops are sampled with random start offsets across the full
+  training split and encoded on the fly, so only the raw audio needs to be present, but per-step
+  cost is correspondingly higher (see `run_task14.slurm`'s own resource-justification comment for
+  the wall-clock estimate and how it was derived).
+  - `run_task14_diagnostic.slurm` runs `configs/gate5_smoke.yaml` (a tiny, ~1-minute bounded
+    check) and is optional -- submit it first if you want to verify the CUDA path before
+    committing to the full ~16-hour job.
+  - `run_task14.slurm` runs `configs/gate5_full_gtzan.yaml` (300,000 steps) and always passes
+    `--resume auto`, so resubmitting after a preemption/timeout (`bluehive/resubmit_task14.sh`,
+    or just `sbatch bluehive/run_task14.slurm` again) continues the same run and the same W&B run
+    ID rather than starting over.
+  - Per `tasks/TASK-14.md`'s explicit instruction, do not submit `run_task14.slurm` (the full job)
+    without being told to -- it was prepared and validated (local bounded diagnostic + resume
+    test, both passing) but not executed as part of TASK-14 itself.

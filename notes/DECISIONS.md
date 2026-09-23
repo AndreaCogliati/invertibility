@@ -3201,3 +3201,78 @@ pooled mean waveform correlation vs. MPS's 0.7857, same qualitative pattern, Gat
 not bit-identical across MPS/CUDA (expected, different hardware/kernels), but internally
 deterministic on both now. No further action needed; this addendum exists purely as the runtime-
 environment record CLAUDE.md rule 2 requires.
+
+---
+
+## task14-gate5-full-gtzan-pilot: BlueHive package prepared and validated; full run NOT submitted
+
+**Context (`tasks/TASK-14.md`).** TASK-13 found Gate 4's pooled PASS was a memorization artifact
+(no held-out conditioning separation on its 4-crop val+test set) -- the leading hypothesis being
+that 16 training crops is simply too little data. TASK-14 prepares the infrastructure to test
+that hypothesis at full-GTZAN scale (792 training tracks) via BlueHive, per this task's own
+explicit "do not run the full training job locally" / "do not submit the full BlueHive job unless
+explicitly instructed" constraints -- so this entry documents preparation only, not a scientific
+result.
+
+**What was built.** `configs/gate5_full_gtzan.yaml` (versioned, 300,000-step full-run config) and
+`configs/gate5_smoke.yaml` (bounded diagnostic, clearly separate output paths). New training
+script `scripts/train_gate5_full_gtzan_wandb.py`: a deterministic, resumable random-crop sampler
+(`gate5_common.TrainCropSampler`) draws crops broadly across all 792 train tracks with genuinely
+random start offsets (not a rotation over a small fixed set, unlike TASK-13's 16 crops or even
+`more_data_crops.csv`'s 2-fixed-crops/track convention) -- MuQ/EnCodec are encoded on the fly per
+step, since a precomputed cache isn't feasible for unbounded crop positions. Held-out evaluation
+(`data/manifests/gate5_heldout_crops.csv`, 188 val + 226 test crops, fixed and versioned, derived
+from `more_data_crops.csv`'s existing val/test rows -- no new crop-selection decision) reuses
+`gate4_encodec_common.py`'s manifest loader and four conditioning-control constructions
+(`correct`/`shuffled_across`/`shuffled_time`/`constant_zero`) completely unmodified, since the
+manifest uses the identical CSV schema. Checkpointing captures full sampler/RNG/optimizer state
+plus (new) the W&B run ID, so `--resume auto` reopens the same W&B run rather than starting a
+disconnected one (`wandb_logging.init_run` gained a backward-compatible `resume_id` parameter for
+this). The primary endpoint is `oracle_relative_waveform_recovery` (original-vs-translator
+correlation / original-vs-oracle correlation, `gate5_common.compute_held_out_audio_metrics`) --
+deliberately not the translator-vs-oracle metric TASK-13 used, since TASK-14 explicitly specifies
+"oracle-relative waveform recovery" for both checkpoint selection and the primary paired-delta
+endpoint, and these are different metrics.
+
+**Verification, not just construction.** Ran the bounded diagnostic locally (M4 Max/MPS) three
+times: fresh (`--wandb-mode disabled`), online (`--wandb-mode online`, confirmed a real W&B run
+`nhws11b2` was created and populated), and -- most importantly -- a genuine partial-train-to-
+step-10-then-`--resume auto`-to-step-20 run, which reproduced **bit-identical** final metrics to
+an uninterrupted 20-step run (val wav_corr mean 0.0239, identical 4-condition control table,
+identical variance ratio 0.4321). This confirms the checkpoint/resume mechanism genuinely works,
+not just that it avoids crashing. 24 new tests (`tests/test_gate5_common.py`), full suite 215
+passing, lint clean.
+
+**SLURM package**: `bluehive/run_task14.slurm` (the full 300,000-step job, `--resume auto`
+always on), `bluehive/run_task14_diagnostic.slurm` (optional BlueHive-side bounded check, not
+submitted -- this environment still has no BlueHive access), `bluehive/resubmit_task14.sh`
+(refuses to resubmit if no checkpoint exists, to avoid an ambiguous duplicate run). All three
+syntax-validated (`bash -n`), none submitted.
+
+**Known placeholder, explicitly flagged (this task's own instruction, not to be silently
+guessed past)**: the full run's 16-hour wall-clock budget is extrapolated from the local
+diagnostic's measured per-step rate (~116ms/step, on MPS, including on-the-fly MuQ+EnCodec
+encoding) -- 300,000 x ~116ms =~9.7 hours, with a ~1.65x safety margin. This has NOT been
+cross-checked against real BlueHive GPU throughput for this specific (cache-free, per-step-
+encoding) workload, unlike TASK-13's directly-measured MPS-vs-CUDA comparison. Correct this
+after the first real submission.
+
+**Decision.** Package is ready to submit; the full job itself is explicitly NOT submitted as
+part of this task. No Gate 5 scientific conclusion is drawn here or anywhere in `notes/*.md`.
+
+**Consequences.** New files, none committed: `configs/gate5_full_gtzan.yaml`,
+`configs/gate5_smoke.yaml`, `scripts/build_gate5_manifests.py`,
+`scripts/train_gate5_full_gtzan_wandb.py`, `src/muq_inversion/gate5_common.py`,
+`tests/test_gate5_common.py`, `data/manifests/gate5_heldout_crops.csv`,
+`bluehive/run_task14.slurm`, `bluehive/run_task14_diagnostic.slurm`,
+`bluehive/resubmit_task14.sh`, `artifacts/task14_gate5_smoke/` and
+`artifacts/task14_gate5_full_gtzan_prep/TASK-14_PREPARATION_REPORT.md` (both git-ignored),
+`runs/task14_gate5_smoke/` (git-ignored). Modified: `src/muq_inversion/wandb_logging.py`
+(backward-compatible `resume_id` addition, 11 existing tests still pass unchanged),
+`bluehive/README.md` (new TASK-13/TASK-14 addendum section). TASK-13's own files untouched. Full
+write-up: `artifacts/task14_gate5_full_gtzan_prep/TASK-14_PREPARATION_REPORT.md`.
+
+**Rollback plan.** Entirely additive except the one backward-compatible `wandb_logging.py`
+parameter addition (verified non-breaking by its existing test suite). Deleting the new files and
+reverting `wandb_logging.py`/`bluehive/README.md` fully reverts this task; nothing was submitted
+to BlueHive to roll back.

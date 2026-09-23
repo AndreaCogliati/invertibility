@@ -2,127 +2,116 @@
 
 ## Current gate
 
-Gate 4 revalidation on the merged architecture (`tasks/TASK-13.md`) -- re-ran CLAUDE.md's Gate 4
-checkpoint/resume + four-way conditioning-control protocol on `main`'s actual pipeline after
-`experiment/muq-layer-sweep` merged in (commit `a96fd4b`): MuQ `last_hidden_state` ->
-repeat_interleave -> `SpectrogramToDacTranslator` -> frozen EnCodec latent -> frozen EnCodec
-decoder. One model trained 20,000 steps on `data/manifests/gate4_crops.csv` Experiment B (16
-train / 2 val / 2 test track-disjoint crops), then evaluated under `correct`/`shuffled_across`/
-`shuffled_time`/`constant_zero` conditioning against that single checkpoint.
+Gate 5 full-GTZAN pilot -- BlueHive package **prepared and locally verified, NOT submitted**
+(`tasks/TASK-14.md`). TASK-13 found Gate 4's pooled PASS was a memorization artifact (no
+held-out conditioning separation on 4 held-out crops); TASK-14 builds the infrastructure to test
+whether full-GTZAN scale (792 training tracks) resolves that, per this task's explicit "do not
+run the full job locally / do not submit on BlueHive unless instructed" constraints.
 
-**Addendum (2026-09-23): confirmed reproducible on BlueHive.** A first BlueHive submission
-(Tesla T4) failed checkpoint/resume equivalence (CUDA kernel nondeterminism, not an RNG bug --
-see [[DECISIONS.md#task13-gate4-encodec-revalidation]]'s addendum); fixed in
-`scripts/train_gate4_encodec_wandb.py` (commit `895b81b`) and confirmed on a second BlueHive
-submission (NVIDIA A40, job `1956502`): resume equivalence now passes exactly, and the
-conditioning-control numbers are consistent with the MPS run (correct 0.7843 vs. 0.7857 pooled
-mean waveform correlation). `bluehive/run_task13.slurm` is now a validated, working path for
-this script.
+**What exists now, ready to submit:**
 
-**Result: PASSED by the pooled decision rule, but this is a memorization artifact, not evidence
-of generalized conditioning use.** Pooled across all 20 crops, correct conditioning (0.786 mean
-waveform correlation to the EnCodec oracle) beats every control by far more than the 0.05-absolute
-margin (shuffled_across -0.008, shuffled_time 0.005, constant_zero 0.001); resume equivalence
-exact (0.0000 relative diff both halves); variance ratio 1.080 (no collapse). But split by data
-split: train (n=16) correct=0.981 vs. controls ~0 (clean separation, resolving the old
-`shuffled_time` ambiguity -- but only on memorized data); held-out val+test (n=4) correct=
-0.002-0.007 vs. controls -0.024-to-0.028 -- **no separation at all on held-out crops**. This
-reproduces [[muq-to-dac-minimal-gate4]]'s earlier "Gate 3 doesn't generalize, it was
-memorization" finding, now confirmed on the EnCodec-target pipeline too. Full reasoning in
-`artifacts/task13_gate4_encodec_revalidation/TASK-13_RESULTS.md`, summarized in
-[[DECISIONS.md#task13-gate4-encodec-revalidation]]. Per this task's own instruction, **Gate 5 was
-not started.**
+- `configs/gate5_full_gtzan.yaml` (300,000 steps, full 792-track training split, random-crop
+  sampling) and `configs/gate5_smoke.yaml` (bounded diagnostic).
+- `scripts/train_gate5_full_gtzan_wandb.py` -- new training script: `TrainCropSampler`
+  (deterministic, resumable, broad random-crop sampling across all train tracks), held-out
+  evaluation reusing TASK-13's `gate4_encodec_common.py` unchanged, primary endpoint
+  `oracle_relative_waveform_recovery`, outcome classification (A-F), paired-delta statistics.
+- `data/manifests/gate5_heldout_crops.csv` (188 val + 226 test crops, fixed/versioned).
+- `bluehive/run_task14.slurm` (full job, `--resume auto` always on), `run_task14_diagnostic.slurm`
+  (optional BlueHive-side bounded check), `resubmit_task14.sh`.
+- **Verified locally** (M4 Max/MPS): fresh smoke run, online-W&B-mode smoke run, and -- most
+  importantly -- a genuine partial-train-to-step-10-then-`--resume auto`-to-step-20 run that
+  reproduced bit-identical final metrics to an uninterrupted run. Checkpoint/resume mechanism
+  (model/optimizer/sampler/RNG/W&B-run-lineage) confirmed genuinely correct, not just non-crashing.
+- 24 new tests (`tests/test_gate5_common.py`), full suite 215 passing, lint clean.
+- Full preparation report: `artifacts/task14_gate5_full_gtzan_prep/TASK-14_PREPARATION_REPORT.md`.
 
-**Conclusions reached this session:**
+**Not done, by explicit instruction:** the full 300,000-step training job has not been run,
+locally or on BlueHive. No Gate 5 scientific result exists yet.
 
-1. Merged `experiment/muq-layer-sweep` into `main` (commit `a96fd4b`, zero merge conflicts,
-   already pushed to `origin/main`) per the user's explicit instruction, after first committing
-   the CLAUDE.md pipeline-shift edit on both branches (`74e2fde` on the experiment branch,
-   `2e3fd55` on `main`, identical content).
-2. Built the merged-architecture Gate 4 harness (`gate4_encodec_common.py`,
-   `train_gate4_encodec_wandb.py`) reusing every existing piece unmodified (`SpectrogramToDacTranslator`,
-   `evaluate_prediction`, `aggregate_metrics_across_examples`, `find_best_lag_and_align`-style
-   patterns) -- only the MuQ-input + repeat-interleave alignment and the four conditioning-control
-   constructions are new, unit-tested (14 tests) before running anything real.
-3. **The merged architecture's Gate 4 "pass" is real on training data but does not extend to
-   held-out data** -- the single most important, decision-relevant finding this session. Treat any
-   future "Gate 4 passed" claim on this pipeline as pooled-metric-only unless explicitly qualified
-   by a held-out breakdown.
-4. `shuffled_time` (a genuine random frame permutation, not the older fixed circular shift) now
-   separates cleanly from correct conditioning on training data -- the prior ambiguity
-   ([[gate4-shuffled-time-finding]]) is resolved in the "the decoder does use temporal MuQ
-   structure" direction, but only for memorized examples, which meaningfully changes what that
-   resolution is worth.
+**Known placeholder**: the full run's 16-hour SLURM wall-clock request is extrapolated from the
+local diagnostic's measured per-step rate (~116ms/step including on-the-fly MuQ+EnCodec
+encoding), not a real BlueHive measurement. Correct after the first submission.
+
+**Also this session**: fixed a real gap in `wandb_logging.init_run` -- every prior resumed run
+(TASK-13's included, though TASK-13 never needed resume in practice) would have silently created
+a disconnected new W&B run instead of continuing the same one. Added a backward-compatible
+`resume_id` parameter; verified the fix reopens the same run across the resume test above.
 
 ## Exact last successful commands
 
 ```bash
-git checkout main && git merge --no-commit --no-ff experiment/muq-layer-sweep   # 0 conflicts
-git commit -m "Merge experiment/muq-layer-sweep into main"                      # a96fd4b
-uv run pytest tests/test_gate4_encodec_common.py -q                             # 14 passed
-uv run python scripts/train_gate4_encodec_wandb.py --steps 20 --wandb-mode disabled  # smoke test
-uv run python -u scripts/train_gate4_encodec_wandb.py --wandb-mode online       # real run, 20k steps
-uv run ruff check scripts/train_gate4_encodec_wandb.py src/muq_inversion/gate4_encodec_common.py tests/test_gate4_encodec_common.py
+uv run python scripts/build_gate5_manifests.py                                    # gate5_heldout_crops.csv
+uv run pytest tests/test_gate5_common.py -q                                       # 24 passed
+uv run python scripts/train_gate5_full_gtzan_wandb.py --config configs/gate5_smoke.yaml --wandb-mode disabled
+uv run python scripts/train_gate5_full_gtzan_wandb.py --config configs/gate5_smoke.yaml --wandb-mode online
+# partial-then-resume verification (temp configs, steps=10 then steps=20 --resume auto):
+uv run python scripts/train_gate5_full_gtzan_wandb.py --config <steps=10 copy> --wandb-mode disabled
+uv run python scripts/train_gate5_full_gtzan_wandb.py --config <steps=20 copy> --wandb-mode disabled --resume auto
+uv run ruff check .; uv run pytest -q   # 215 passed, lint clean
+bash -n bluehive/run_task14.slurm bluehive/run_task14_diagnostic.slurm bluehive/resubmit_task14.sh
 ```
 
-2026-09-23, macOS, M4 Max, device=mps. Launched via `nohup ... &` + `disown`, tracked by a
-persistent `Monitor`. Full run (main 20k-step training + resume-check pre/post halves + 4-way
-control eval) completed in well under 10 minutes.
+2026-09-23, macOS, M4 Max, device=mps. All diagnostic runs completed in a few seconds each; no
+BlueHive access in this environment (same limitation as TASK-03).
 
 ## Run/checkpoint path
 
-- `data/manifests/gate4_crops.csv` (tracked, reused unchanged, Experiment B; manifest hash
-  `0f9884a3bf451f66451db612da1b7eec880687f71ca59af8062cc9eca5d85ddb`).
-- `runs/task13_gate4_encodec_revalidation/checkpoints/{resume_test_checkpoint,final}.pt`
-  (git-ignored).
-- `artifacts/task13_gate4_encodec_revalidation/report.json` -- full per-condition, per-split,
-  per-example metrics; `.../*.wav` -- 12 listening WAVs (test split: original, EnCodec oracle, 4
-  conditioning reconstructions x 2 tracks).
-- `artifacts/task13_gate4_encodec_revalidation/TASK-13_RESULTS.md` -- the full report in this
-  task's own required structure (Executive Summary through Final Git Status).
-- One W&B run, group `task13-gate4-encodec-revalidation`: `wandb.ai/
-  andrea-cogliati-university-of-rochester/muq-invertibility/runs/gwj2rn8d`.
+- `data/manifests/gtzan_manifest_smoke.csv` (full GTZAN split, sha256
+  `0dedd1efa83441ce929a46530c95d8dff6ba3d67d99fbdde2038177a5d4f095e`).
+- `data/manifests/gate5_heldout_crops.csv` (sha256
+  `719b38a6f9046778ffa4facd451423e283d8b09dfd9cf2788f9983e7d3abbd91`).
+- `runs/task14_gate5_smoke/checkpoints/{latest,best,step10,step15,step20}.pt` (git-ignored,
+  diagnostic only -- NOT the full run).
+- `artifacts/task14_gate5_smoke/report.json` + 12 listening WAVs (git-ignored, diagnostic only).
+- `artifacts/task14_gate5_full_gtzan_prep/TASK-14_PREPARATION_REPORT.md` (git-ignored).
+- Two W&B runs from the diagnostic (group `task14-gate5-smoke`, project `muq-invertibility`):
+  `2xozcddv` (disabled mode) and `nhws11b2` (online mode, real).
+- **Full run paths (not yet populated)**: `runs/task14_gate5_full_gtzan/checkpoints/`,
+  `artifacts/task14_gate5_full_gtzan/report.json`, W&B group `task14-gate5-full-gtzan`.
 
 ## Next command
 
-**Blocked on user direction.** Candidate directions that would need the user's go-ahead:
+**Blocked on explicit user instruction to submit the full BlueHive job** -- per this task's own
+constraint, TASK-14 prepares and validates only. The next command, when authorized:
 
-- Decide the Gate 4 decision-rule question this task surfaced but did not resolve: should
-  "materially outperforms" be computed on held-out crops only (which would report Gate 4 as NOT
-  passed), rather than pooled across train+val+test (which reports PASSED)? This governs whether
-  Gate 5 should even be considered next.
-- If held-out generalization is the actual bar, consider whether a larger Gate 4 manifest (more
-  tracks) would give genuine held-out conditioning sensitivity, or whether (per TASK-01/02's
-  data-scaling findings on the DAC pipeline) more data alone is unlikely to help without an
-  architecture/objective change -- untested for this pipeline specifically.
-- A human listening pass on the 12 TASK-13 test-split WAVs -- not yet done.
-- Extending TASK-12's EnCodec compute-response curve further (640k, 1.28M steps) -- still not
-  authorized.
+```bash
+sbatch bluehive/run_task14.slurm
+```
 
-Do not start any of these without the user's go-ahead.
+Optionally first: `sbatch bluehive/run_task14_diagnostic.slurm` (an extra CUDA-specific check
+beyond this task's MPS-only local verification -- not required, since TASK-13's own BlueHive
+submissions already validated the CUDA determinism fix this script also relies on).
+
+Do not submit either without the user's explicit go-ahead.
 
 ## Blockers
 
-1. **Decision needed from the user**: pooled vs. held-out-only Gate 4 criteria (this task's own
-   central open question -- see above).
-2. **Listening verdicts pending** for TASK-13's 12 WAVs, and the long-standing backlog: TASK-12's
-   80k/320k packages, TASK-11's, TASK-08's, TASK-10's, TASK-01's, TASK-02's.
-3. **BlueHive job not yet run** -- see [[task03-bluehive-wandb]], still pending.
-4. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
-   untested, orthogonal to this branch's findings.
-5. Listening verdicts for the 80-track scaling experiment, the full-GTZAN scaling experiment, and
-   the MuQ layer-sweep were never given -- not blocking, worth noting if any comes up again.
+1. **Full BlueHive submission requires explicit authorization** -- not a technical blocker, a
+   process one per this task's own instruction.
+2. **BlueHive wall-clock estimate unverified** -- 16-hour budget is extrapolated, not measured;
+   should be corrected after the first real submission (see `run_task14.slurm`'s own comment).
+3. **Decision needed from the user** (carried over from TASK-13): pooled vs. held-out-only Gate 4
+   criteria -- still relevant context for interpreting whatever Gate 5 eventually shows.
+4. **Listening verdicts pending**: TASK-14's 12 smoke-test WAVs (not scientific evidence, but
+   still unreviewed), plus the long-standing backlog: TASK-13's, TASK-12's 80k/320k, TASK-11's,
+   TASK-08's, TASK-10's, TASK-01's, TASK-02's.
+5. **BlueHive job not yet run** for TASK-03 either -- see [[task03-bluehive-wandb]], still pending.
+6. The still-pending conditioning-collapse diagnostic from `experiment/mel-hifigan-sanity` --
+   untested, orthogonal.
 
 ## Expected verification criteria for Gate 5
 
-Not yet reached, and not authorized to start. Per TASK-13's own finding, any future Gate 5
-authorization should specify whether pooled or held-out-only conditioning separation is the bar,
-given this session's evidence that the two give opposite answers on this pipeline.
+Defined in `configs/gate5_full_gtzan.yaml` and `scripts/train_gate5_full_gtzan_wandb.py`'s
+outcome-classification logic (Outcomes A-F, `tasks/TASK-14.md`'s own rubric): Gate 5 passes only
+if correct conditioning materially outperforms all three controls on BOTH held-out validation and
+held-out test data (paired mean delta > 0.05 in `oracle_relative_waveform_recovery` AND >50% of
+paired examples positive, for each control, each split), with no variance collapse. Not yet
+reached -- the full run has not been executed.
 
-## Repository state at the end of this task (per TASK-13's explicit reporting requirement)
+## Repository state at the end of this task (per TASK-14's explicit reporting requirement)
 
-At task start: commit `a96fd4b` on `main` (the just-completed merge), clean tree except
-`tasks/TASK-13.md` (untracked).
+At task start: commit `a74003d` on `main`, clean except `tasks/TASK-14.md` (untracked).
 
 At the end of this task:
 
@@ -131,31 +120,45 @@ On branch main
 Your branch is up to date with 'origin/main'.
 
 Changes not staged for commit:
+    modified:   bluehive/README.md
+    modified:   src/muq_inversion/wandb_logging.py
     modified:   notes/DECISIONS.md
     modified:   notes/MEMORY.md
     modified:   notes/NEXT.md        (this file, being written)
 
 Untracked files:
-    scripts/train_gate4_encodec_wandb.py
-    src/muq_inversion/gate4_encodec_common.py
-    tasks/TASK-13.md
-    tests/test_gate4_encodec_common.py
+    bluehive/resubmit_task14.sh
+    bluehive/run_task14.slurm
+    bluehive/run_task14_diagnostic.slurm
+    configs/gate5_full_gtzan.yaml
+    configs/gate5_smoke.yaml
+    data/manifests/gate5_heldout_crops.csv
+    scripts/build_gate5_manifests.py
+    scripts/train_gate5_full_gtzan_wandb.py
+    src/muq_inversion/gate5_common.py
+    tasks/TASK-14.md
+    tests/test_gate5_common.py
 ```
 
 **Not committed**, per this task's explicit "do not commit unless explicitly instructed" rule.
-`artifacts/task13_gate4_encodec_revalidation/` and `runs/task13_gate4_encodec_revalidation/` are
-git-ignored and do not appear in `git status`.
+`artifacts/task14_gate5_smoke/`, `artifacts/task14_gate5_full_gtzan_prep/`, and
+`runs/task14_gate5_smoke/` are git-ignored and do not appear in `git status`. TASK-13's own files
+were not modified.
 
 ## Notes for whoever resumes this
 
-- **Read `artifacts/task13_gate4_encodec_revalidation/TASK-13_RESULTS.md` first** for the full
-  required-structure report, then [[DECISIONS.md#task13-gate4-encodec-revalidation]] for the
-  project-notes-style summary.
-- **The pooled Gate 4 "PASSED" verdict this script prints is not the whole story** -- always check
-  the per-split breakdown (`report.json`'s `control_report.<mode>.aggregate_by_split`) before
-  citing this result; the held-out numbers tell a materially different story than the pooled ones.
-- `scripts/train_gate4_encodec_wandb.py --steps N` overrides the 20,000-step default for smoke
-  tests; the real run's config/checkpoints all reflect `steps=20000`.
-- `gate4_encodec_common.build_conditioning`'s `shuffled_time` is a true random permutation
-  (`torch.randperm`), not the older `gate4_common.shifted_time_control`'s fixed circular shift --
-  don't conflate the two when comparing to pre-merge Gate 4 results.
+- **Read `artifacts/task14_gate5_full_gtzan_prep/TASK-14_PREPARATION_REPORT.md` first** for the
+  full required-structure preparation report, then
+  [[DECISIONS.md#task14-gate5-full-gtzan-pilot]] for the project-notes-style summary.
+- **This task built and verified infrastructure only -- there is no Gate 5 result yet.** Don't
+  cite anything from `artifacts/task14_gate5_smoke/` as scientific evidence; it's a 20-step/
+  4-track diagnostic, explicitly labeled as such.
+- **`oracle_relative_waveform_recovery` is the primary endpoint metric for Gate 5**, distinct from
+  TASK-13's `waveform_correlation_to_oracle` (translator-vs-oracle, not anchored to the original)
+  -- don't conflate the two when comparing results across tasks.
+- To actually run Gate 5: get explicit authorization, then `sbatch bluehive/run_task14.slurm`
+  (after confirming `data/raw/gtzan/` has all 999 valid tracks on the BlueHive filesystem -- the
+  job checks this and fails fast if not, per `bluehive/README.md`'s TASK-14 addendum).
+- If a submitted job is preempted/times out, `bluehive/resubmit_task14.sh` (or just `sbatch
+  bluehive/run_task14.slurm` again, since `--resume auto` is always on) continues the same run
+  and the same W&B run ID -- verified correct by this task's local partial-then-resume test.

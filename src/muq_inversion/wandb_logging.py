@@ -53,6 +53,7 @@ def init_run(
     group: str = GROUP,
     job_type: str | None = None,
     tags: list[str] | None = None,
+    resume_id: str | None = None,
 ):
     """Initializes a W&B run under the fixed `PROJECT`, with `group` defaulting to TASK-03's
     `spectrogram-control` (overridable -- e.g. `tasks/TASK-04.md`'s `spectrogram-gate3`). Import
@@ -60,8 +61,19 @@ def init_run(
     requires `wandb` to be importable or configured -- only the scripts that actually opt into
     W&B logging pay that cost. `mode='offline'` or `'disabled'` lets a caller (or a BlueHive
     compute node with no outbound network access) run without a live connection; `wandb sync` can
-    push an offline run later."""
+    push an offline run later.
+
+    `resume_id` (`tasks/TASK-14.md`'s "resumption path must append to the same scientific run
+    lineage" requirement): when a caller resumes training from a checkpoint that recorded a prior
+    `run.id`, passing that id here reopens the SAME W&B run (`resume="must"`) instead of creating
+    a new one with a fresh timestamped name -- `run_name`/`group`/`job_type`/`tags` are then
+    ignored by W&B for an existing run (its original values are kept), consistent with "resuming
+    must append to the existing run history rather than creating ambiguous duplicate runs"
+    (CLAUDE.md's Checkpointing and Resumption section, generalized here to W&B runs)."""
     import wandb
+
+    if resume_id is not None:
+        return wandb.init(project=PROJECT, id=resume_id, resume="must", mode=mode)
 
     run_name = run_name or make_run_name()
     full_config = {**config, **build_run_metadata(environment, job_id)}

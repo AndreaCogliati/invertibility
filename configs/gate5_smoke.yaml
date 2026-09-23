@@ -1,0 +1,52 @@
+# TASK-14: Gate 5 bounded diagnostic (smoke-test) configuration.
+#
+# NOT scientific evidence -- per this task's explicit instruction, its outputs must be labeled
+# and kept separate from the full Gate 5 run (see `run_dir_name`/`artifact_dir_name` below, both
+# distinct from `configs/gate5_full_gtzan.yaml`'s). Exercises the identical code path (same
+# training script, same architecture, same loss/optimizer) at a tiny scale: a handful of steps,
+# a handful of train tracks, a handful of held-out crops -- just enough to verify imports,
+# manifest loading, MuQ/EnCodec extraction, forward/backward passes, finite loss, checkpoint
+# write/load, W&B initialization, and argument parsing, per this task's "Bounded diagnostic run"
+# requirements.
+
+task: TASK-14
+gate: "Gate 5 Full GTZAN Pilot (SMOKE TEST -- not scientific evidence)"
+run_label: gate5_smoke
+
+seed: 0
+device_request: auto
+allow_cpu_fallback: false
+
+sample_rate: 24000
+crop_duration_seconds: 2.0
+
+muq_model_id: OpenMuQ/MuQ-large-msd-iter
+encodec_model_id: facebook/encodec_24khz
+encodec_bandwidth_kbps: 24.0
+
+full_gtzan_manifest: data/manifests/gtzan_manifest_smoke.csv
+heldout_manifest: data/manifests/gate5_heldout_crops.csv
+
+# Bounds the diagnostic to a tiny subset of the full manifests, per this task's "the diagnostic
+# may use a tiny subset" allowance -- null in the full-run config (uses everything).
+train_track_limit: 4
+heldout_crop_limit: 4
+
+learning_rate: 0.001
+adam_betas: [0.9, 0.999]
+cosine_loss_weight: 0.1
+
+steps: 20
+val_every: 10
+log_every: 5
+early_diagnostic_step: 10
+intermediate_checkpoint_steps: [15]
+checkpoint_every: 10
+
+listening_subset_size: 1
+
+run_dir_name: task14_gate5_smoke
+artifact_dir_name: task14_gate5_smoke
+
+wandb_group: task14-gate5-smoke
+wandb_tags: [task14, gate5, smoke-test, muq, encodec, spectrogram-to-dac-translator]

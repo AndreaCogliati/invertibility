@@ -1,0 +1,69 @@
+# TASK-14: Gate 5 full-GTZAN pilot, full-run configuration.
+#
+# Deliberately NOT expressed in the pre-existing config.py/ExperimentConfig schema (configs/
+# smoke.yaml, configs/pilot.yaml): that schema models the original HiFi-GAN-style waveform
+# decoder (decoder.base_channels/upsample_rates/resblock_*), which this project superseded for
+# the frozen-EnCodec pipeline (see CLAUDE.md's "Translator Design" section and
+# notes/DECISIONS.md). This file instead follows the flat, script-specific convention TASK-11/12/
+#13's scripts already used (ad hoc Python constants), just promoted to a versioned YAML file per
+# this task's explicit "use a versioned configuration" instruction -- CLAUDE.md rule 6.
+#
+# Every hyperparameter below is unchanged from TASK-13's recipe (same loss, optimizer, lr, batch
+# behavior, init policy -- per this task's explicit "no hyperparameter sweep, no new warmup/
+# decay/clipping/EMA/normalization" constraint). Only what genuinely differs from TASK-13 is new
+# here: full-GTZAN data scale, the resumable random-crop training sampler, and the step/
+# checkpoint schedule below.
+
+task: TASK-14
+gate: "Gate 5 Full GTZAN Pilot"
+run_label: gate5_full_gtzan
+
+seed: 0
+device_request: auto
+allow_cpu_fallback: false
+
+sample_rate: 24000
+crop_duration_seconds: 2.0
+
+muq_model_id: OpenMuQ/MuQ-large-msd-iter
+encodec_model_id: facebook/encodec_24khz
+encodec_bandwidth_kbps: 24.0
+
+# Full committed GTZAN manifest (Gate 1, 999 valid tracks: 792 train / 94 val / 113 test,
+# checksum-deduplicated within-split, not artist-aware -- see notes/DECISIONS.md#gtzan-source-and-defects).
+full_gtzan_manifest: data/manifests/gtzan_manifest_smoke.csv
+# Fixed, versioned held-out crop manifest (built by scripts/build_gate5_manifests.py from
+# data/manifests/more_data_crops.csv's val/test rows -- 188 val + 226 test crops, 2 fixed 2.0s
+# crops/track, unchanged throughout training and across all four conditioning controls).
+heldout_manifest: data/manifests/gate5_heldout_crops.csv
+
+# Unchanged from TASK-13 (scripts/train_gate4_encodec_wandb.py).
+learning_rate: 0.001
+adam_betas: [0.9, 0.999]
+cosine_loss_weight: 0.1
+
+# Step/checkpoint schedule, defined before the full job starts (this task's explicit
+# requirement). 300,000 steps: an order of magnitude above TASK-13's 20,000-step/16-example
+# budget, and in the same range this project used for its other full/dense-GTZAN runs (TASK-02's
+# 450,000-step dense-spectrogram run) -- set somewhat lower than that precedent because this
+# pipeline encodes MuQ+EnCodec on the fly per step (no precomputed cache, since training crops
+# are randomly positioned, not a fixed pool), which is more expensive per step than TASK-02's
+# cached-feature pipeline. This is a documented, reasoned choice, not a swept/tuned value -- per
+# this task's explicit "no hyperparameter sweep" constraint, it is not adjusted based on any
+# result.
+steps: 300000
+val_every: 2000
+log_every: 200
+early_diagnostic_step: 5000
+intermediate_checkpoint_steps: [50000, 100000, 150000, 200000, 250000]
+checkpoint_every: 10000
+
+# Fixed representative listening subset: first N val + N test tracks by track_id (deterministic,
+# no random selection), matching this project's existing "small fixed set" listening convention.
+listening_subset_size: 3
+
+run_dir_name: task14_gate5_full_gtzan
+artifact_dir_name: task14_gate5_full_gtzan
+
+wandb_group: task14-gate5-full-gtzan
+wandb_tags: [task14, gate5, gtzan-full, muq, encodec, bluehive, spectrogram-to-dac-translator]
