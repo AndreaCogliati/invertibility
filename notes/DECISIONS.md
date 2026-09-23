@@ -3183,3 +3183,21 @@ task13_gate4_encodec_revalidation/TASK-13_RESULTS.md`.
 
 **Rollback plan.** Entirely additive: new files only, none committed. Deleting the untracked
 files fully reverts this task. The W&B run lives on wandb.ai independent of any local rollback.
+
+**Addendum (2026-09-23): CUDA checkpoint/resume equivalence failed on first BlueHive run, fixed.**
+A first BlueHive submission (`bluehive/run_task13.slurm`, Tesla T4, job `1956437`) ran this exact
+script and failed the resume-equivalence check with a large divergence (max relative diff 8.4
+pre-checkpoint, 153.8 post-resume) -- the M4 Max/MPS run above matched exactly (0.0000). Root
+cause: cuDNN convolution and cuBLAS kernels are not bit-reproducible across separate process
+invocations by default on CUDA (the model has no dropout/other randomness, so this was never an
+RNG-state bug). Fixed in `scripts/train_gate4_encodec_wandb.py` (commit `895b81b`): set
+`CUBLAS_WORKSPACE_CONFIG` before CUDA initializes, enable `torch.backends.cudnn.deterministic`
+(disable `benchmark`), and `torch.use_deterministic_algorithms(True, warn_only=True)` when
+`device.type == "cuda"`; also extended the RNG snapshot/restore helpers to cover CUDA's RNG state
+(previously only CPU + MPS). **Confirmed fixed** on a second BlueHive submission (NVIDIA A40,
+job `1956502`): checkpoint/resume equivalence now PASSES exactly (0.0000 max relative diff, both
+halves). Conditioning-control results are numerically consistent with the MPS run (correct 0.7843
+pooled mean waveform correlation vs. MPS's 0.7857, same qualitative pattern, Gate 4 PASSED) --
+not bit-identical across MPS/CUDA (expected, different hardware/kernels), but internally
+deterministic on both now. No further action needed; this addendum exists purely as the runtime-
+environment record CLAUDE.md rule 2 requires.

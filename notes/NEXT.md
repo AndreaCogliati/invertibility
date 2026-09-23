@@ -10,6 +10,15 @@ decoder. One model trained 20,000 steps on `data/manifests/gate4_crops.csv` Expe
 train / 2 val / 2 test track-disjoint crops), then evaluated under `correct`/`shuffled_across`/
 `shuffled_time`/`constant_zero` conditioning against that single checkpoint.
 
+**Addendum (2026-09-23): confirmed reproducible on BlueHive.** A first BlueHive submission
+(Tesla T4) failed checkpoint/resume equivalence (CUDA kernel nondeterminism, not an RNG bug --
+see [[DECISIONS.md#task13-gate4-encodec-revalidation]]'s addendum); fixed in
+`scripts/train_gate4_encodec_wandb.py` (commit `895b81b`) and confirmed on a second BlueHive
+submission (NVIDIA A40, job `1956502`): resume equivalence now passes exactly, and the
+conditioning-control numbers are consistent with the MPS run (correct 0.7843 vs. 0.7857 pooled
+mean waveform correlation). `bluehive/run_task13.slurm` is now a validated, working path for
+this script.
+
 **Result: PASSED by the pooled decision rule, but this is a memorization artifact, not evidence
 of generalized conditioning use.** Pooled across all 20 crops, correct conditioning (0.786 mean
 waveform correlation to the EnCodec oracle) beats every control by far more than the 0.05-absolute
