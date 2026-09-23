@@ -173,3 +173,458 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   step (proposed to user, not yet executed): test much longer/broader adversarial training before
   drawing conclusions about the representation itself. See [[gate3-capacity-ruled-out]] for the
   full three-finding synthesis and reasoning.
+- MuQ-to-DAC temporal-conv experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-temporal-conv`
+  branch, off `main`): direct follow-up to the framewise-MLP experiment's exact architectural
+  ceiling (cosine similarity 0.64). Replaced the MLP's pointwise `Linear` layers with 3 residual
+  `Conv1D(k=5)` layers (receptive field 5 MuQ frames, verified both analytically and empirically
+  via a perturbation test) -- everything else (input, target, optimizer, loss, steps, clips, crop)
+  held identical, a true single-variable comparison. Result: **cosine similarity jumped to
+  0.9999-1.0000** (from 0.6418), MSE dropped to ~0.004-0.014 (from ~11.05) -- essentially a full
+  latent-space solve. Decoded waveform correlates with the DAC-oracle reconstruction itself at
+  0.9999/1.0000 (not just with the reference), meaning the predicted latent decodes to audio
+  essentially indistinguishable from decoding the true DAC latent. 15.7M params, 18s total
+  training time. **This answers this investigation's central open question for the MuQ-to-DAC
+  axis: the framewise MLP's ceiling was a limitation of its memoryless architecture, not of MuQ's
+  representation -- MuQ contained the missing information all along, accessible with just ~200ms
+  of local temporal context.** Full write-up in [[muq-to-dac-temporal-conv]]. **Listening verdict
+  (2026-09-09): "The listening test shows almost perfect reconstruction! We nailed it!"** --
+  confirmed by ear, not just by metric. **This is the first unambiguous positive result in the
+  entire Gate 3 audio-quality investigation**, after capacity, representation-source (MuQ/
+  EnCodec/ground-truth-mel), and custom-implementation-vs-reference-HiFi-GAN were all ruled out or
+  only partially resolved the mediocrity. Tagged `muq-to-dac-temporal-conv-v1` as a durable
+  milestone. Notably, the metric that actually predicted this perceptual success was "predicted
+  latent decodes to the same audio as the true latent" (correlation to the DAC-oracle
+  reconstruction, 0.9999/1.0000) -- not waveform-vs-reference correlation, which has been
+  unreliable throughout this project (see [[muq-to-dac-mlp]]).
+- Gate 4 minimal generalization experiment CONCLUDED (2026-09-09,
+  `experiment/muq-to-dac-minimal-gate4` branch, off `experiment/muq-to-dac-temporal-conv`):
+  **the Gate 3 near-perfect result (cosine similarity 0.9999) does NOT generalize -- it was
+  memorization, not a transferable MuQ-to-DAC mapping.** Retrained the exact Gate 3 architecture
+  (TemporalConvNet, 15.7M params, unchanged) fresh on two independent generalization tests:
+  Experiment A (16 train / 4 val / 4 test crops, disjoint 2s windows with 1.0s guard bands, from
+  the same 2 Gate 3 tracks) and Experiment B (16 train crops from 8 track-disjoint GTZAN tracks
+  across 4 genres / 2 val tracks / 2 test tracks, no track in more than one split). Both show a
+  textbook overfitting signature: train cosine similarity reaches 0.40-0.45 by step 8000, but
+  validation MSE increases monotonically from the start of training, and the required
+  validation-MSE-based checkpoint selection picks **step 200 of 8000** in both experiments.
+  Held-out (val/test) waveform correlation to the DAC oracle collapses to ~0 (from a real,
+  positive 0.25-0.33 on training data) in BOTH experiments, with Experiment B (unseen tracks) no
+  worse than Experiment A (unseen crops, same tracks) -- an all-or-nothing collapse, not a
+  graded specificity effect. Shuffled-across and time-shifted controls are clearly beaten by
+  correct conditioning on training data (real, well-separated effect) but are statistically
+  indistinguishable from correct conditioning on held-out data -- the model's real
+  conditioning-sensitivity is entirely confined to memorized examples. DAC oracle quality
+  unaffected throughout (0.05-0.67 correlation to reference, consistent with every prior
+  experiment); no stop conditions triggered (no split overlap, no frame misalignment, no
+  non-finite values, tiny-subset sanity check passed at ratio 0.0002). Full write-up, six-question
+  interpretation, and exact manifest in [[muq-to-dac-minimal-gate4]] and
+  `data/manifests/gate4_crops.csv`. **Listening verdict (2026-09-09): "The listening confirms the
+  poor result. The model is not learning and generalizing."** Metrics and listening agree cleanly
+  here (unlike several earlier findings in this project where they diverged in either direction --
+  see [[muq-to-dac-mlp]], [[muq-to-dac-temporal-conv]]): Gate 3's near-perfect result is confirmed
+  to have been memorization, not a transferable MuQ-to-DAC mapping.
+- Data-scaling experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-scale-data` branch, off
+  `experiment/muq-to-dac-minimal-gate4`): tested whether Gate 4's generalization failure was
+  caused by insufficient training data, using the exact Gate 3 architecture/hyperparameters
+  unchanged on ~20x more training crops (320 vs. 16) and ~10x more unique training tracks (80
+  across all 10 GTZAN genres vs. 8 across 4). **Result: cosine similarity improved meaningfully on
+  held-out data (0.15-0.18 -> 0.22), and correct conditioning now shows a real, consistent edge
+  over shuffled/time-shifted controls on held-out tracks (unlike Gate 4, where they were
+  statistically indistinguishable) -- genuine evidence of a weak transferable signal that did not
+  exist at Gate 4's scale. But waveform correlation to the DAC oracle did not improve at all,
+  staying at the same noise-floor level (~0) as Gate 4.** Immediate overfitting persists
+  (validation-MSE-selected checkpoint at step 300/20000, 1.5% through training). Conclusion: the
+  MuQ-to-DAC mapping is **data-hungry, not fundamentally non-generalizable** (Gate 4's more
+  extreme reading is now too strong) -- but a ~20x data increase, while producing a measurable
+  latent-space effect, was nowhere near enough to produce audible-quality improvement. Full
+  write-up in [[muq-to-dac-scale-data]]. Listening verdict pending as of this note.
+- Further data-scaling experiment CONCLUDED (2026-09-09, `experiment/muq-to-dac-more-data`
+  branch, off `experiment/muq-to-dac-scale-data`): tested whether held-out MuQ-to-DAC prediction
+  keeps improving with ~5x more crops (1584 vs. 320) and ~10x more tracks (792 vs. 80, reusing
+  Gate 1's own committed full-GTZAN split, `data/manifests/gtzan_manifest_smoke.csv`), same
+  architecture/hyperparameters unchanged. **Result: cosine similarity barely moved (0.222/0.223
+  -> 0.230/0.226, ~4-5% relative vs. the prior step's ~35% relative gain) and waveform correlation
+  to the DAC oracle stayed at the same noise floor (~0) as every smaller scale -- a
+  decelerating/saturating curve, not continued scaling.** Training itself was qualitatively new:
+  a turbulent, unstable early phase (steps ~5000-32000, large but always-finite loss spikes) then
+  a clean, late improvement phase, with the validation-MSE-selected checkpoint at **step 50000 of
+  60000 (83.3% through training)** -- a dramatic change from Gate 4's 2.5% and the 80-track
+  experiment's 1.5%, meaning immediate overfitting no longer occurs at this scale. But this later,
+  less-overfit checkpoint did not translate into better ultimate generalization on the
+  audio-relevant metric. **Final recommendation (from the observed 3-point scaling curve, not
+  expectations): further pure data scaling within this exact architecture is unlikely to be
+  productive -- the flat waveform-correlation trend across a ~100x crop-count range points to
+  saturation (an architecture/receptive-field/information ceiling), not a data-limited
+  bottleneck.** Full write-up and six-question interpretation in [[muq-to-dac-more-data]].
+  Listening verdict pending as of this note.
+- MuQ hidden-layer sweep CONCLUDED (2026-09-10, `experiment/muq-layer-sweep` branch, off
+  `experiment/muq-to-dac-more-data`): tested whether an earlier/intermediate MuQ hidden layer
+  predicts DAC latents better than the final layer (this investigation's baseline throughout).
+  MuQ measured to have 13 `output_hidden_states` (index 0 = embedding output, indices 1-12 =
+  each of 12 Conformer blocks; `hidden_states[12] == last_hidden_state`, confirmed via
+  `torch.equal`); 5 candidates chosen by a pure function (`linspace(1,12,5)` rounded) = layers
+  [1, 4, 6, 9, 12]; all share shape/channel-count/frame-rate, no adapter needed. Same
+  architecture/optimizer/loss/split/manifest as [[muq-to-dac-more-data]], only the MuQ layer
+  varied; 45000-step screening budget chosen and documented from that experiment's own curve
+  before running anything else. **Result: the final layer (baseline) wins the primary ranking
+  metric (validation MSE) outright -- lowest val AND test MSE of all five layers, no candidate
+  close.** The earliest layer had a small (~10% relative) edge in cosine similarity and controls
+  margin, but this didn't translate to a lower MSE or any waveform-domain gain -- waveform
+  correlation to the DAC oracle stayed at ~0 for every layer, no exceptions. **Conclusion: MuQ
+  layer choice does not resolve the saturation ceiling found in the data-scaling experiments --
+  the final layer was never the bottleneck on this axis.** Per the experiment's own decision
+  rule, no layer qualifies for a full follow-up run; architecture/context (receptive field,
+  temporal modeling capacity) remains the leading unexplored hypothesis. A genuine, separately
+  noteworthy finding: the final-layer control run itself was turbulent through most of its
+  budget (val MSE spiking to 142 and 65 at similar step counts to the original more-data run's
+  own turbulence), with its best-by-validation-MSE checkpoint landing on an early lucky dip
+  (step 1500) rather than the eventual stable region -- a real property of this training regime's
+  noise, not a bug, and worth remembering when interpreting any single "best checkpoint step" from
+  this pipeline. Full write-up, comparison table, and seven-question interpretation in
+  [[muq-layer-sweep]].
+- Spectrogram-to-DAC positive control CONCLUDED (2026-09-14, `tasks/TASK-01.md`, code alongside
+  `experiment/muq-layer-sweep`): tested whether the MuQ-to-DAC training pipeline itself (not
+  MuQ) is the bottleneck, by feeding it a log-mel spectrogram (128 mels, hop aligned to DAC's
+  75Hz grid, no repeat-interleave needed) through the exact unmodified `TemporalConvNet` (plus
+  one required 128->1024 linear input projection) instead of MuQ's `last_hidden_state`. Same
+  manifest/split/DAC-cache/optimizer/loss/step-budget as [[muq-to-dac-more-data]] (the current
+  best MuQ-to-DAC model). **Result: latent-space metrics improved only modestly (val cosine 0.230
+  -> 0.298, val MSE 17.29 -> 16.54) despite ~100x more raw temporal-spectral resolution in the
+  input, while audio-relevant metrics did not improve at all -- multi-res STFT distance got
+  worse (2.65 -> 3.02), and waveform correlation to the DAC oracle stayed at the same ~0 noise
+  floor as every MuQ-based experiment.** New diagnostics (`latent_diagnostics.py`, predicted-vs-
+  oracle on held-out data) found severe, undiminished norm collapse (ratio 0.36), variance
+  collapse (ratio 0.11), and extreme over-smoothing (lag-1 autocorrelation 0.97 for predictions
+  vs. 0.08 for the oracle) -- the same pathologies named in CLAUDE.md's own Scientific Motivation
+  section, present in essentially unchanged form under a richer input representation.
+  **Conclusion: the current pipeline (13-frame-receptive-field residual ConvNet, MSE+cosine
+  regression directly onto DAC's raw continuous latent) cannot productively exploit a
+  substantially richer representation either -- the training/objective formulation, not MuQ's
+  information content, is now the leading suspect, and conclusions about MuQ's invertibility
+  from this pipeline's waveform-quality failures remain premature.** Validation-MSE-selected
+  checkpoint landed at step 1000/60000 (an extreme case of the "early lucky dip" pattern flagged
+  in [[muq-layer-sweep]]); end-of-training (step 60000) numbers were close (val_mse 17.06, val_cos
+  0.27), so this did not appear to be misleading here. Full write-up, comparison table, and
+  interpretation in [[spectrogram-positive-control]]. 11 new tests (`tests/
+  test_spectrogram_control.py`), full suite 73 passing. 30 listening WAVs written to
+  `artifacts/spectrogram_control/`; listening verdict pending.
+- Dense-audio-coverage rerun CONCLUDED (2026-09-14, `tasks/TASK-02.md`): tested whether
+  [[spectrogram-positive-control]]'s result was caused by insufficient training data (only
+  ~13.3% of GTZAN used, 1998 sparse crops) rather than the pipeline itself, by rebuilding the
+  exact same experiment on ~100% of GTZAN's audio (14976 non-overlapping 2.0s crops, 792/94/113
+  track-disjoint train/val/test tracks -- same split, 7.50x more crops) with the step budget
+  scaled 60000 -> 450000 to preserve per-crop exposure. Representation, architecture, loss,
+  optimizer held byte-for-byte identical to TASK-01. **Result: TASK-01 and TASK-02 are
+  statistically indistinguishable.** Val MSE 16.54 -> 16.44, val cosine 0.298 -> 0.293, val STFT
+  distance 3.02 -> 3.09 (marginally worse), waveform correlation to oracle stayed at the same ~0
+  noise floor, and norm/variance collapse ratios moved slightly *further* from 1.0 (0.364 ->
+  0.322 norm ratio, 0.110 -> 0.086 variance ratio) rather than toward it -- none of the five
+  things a genuine data-coverage effect should move (per the task's own pre-registered Outcome A
+  criteria) moved in the expected direction by any margin exceeding this pipeline's known
+  run-to-run noise. **Conclusion: Outcome C -- increasing audio coverage does not meaningfully
+  address the failure mode.** Combined with [[spectrogram-positive-control]], this rules out both
+  "wrong/insufficient input representation" and "insufficient training data" as explanations for
+  the norm-collapse/over-smoothing pathology across two independent single-variable experiments;
+  the deeper issue is now most plausibly the target formulation / regression objective onto DAC's
+  raw continuous latent, not representation or data scale. Best checkpoint again selected at step
+  1000 -- this time of 450000, the third independent experiment in this investigation with this
+  "early lucky dip" checkpoint-selection pattern ([[muq-layer-sweep]], TASK-01, this one).
+  6 new tests (`tests/test_dense_manifest.py`), full suite 79 passing. 30 listening WAVs (same 6
+  tracks as TASK-01) written to `artifacts/dense_spectrogram_control/`; listening verdict pending.
+  Full write-up in [[dense-spectrogram-positive-control]].
+- BlueHive/W&B instrumentation built and validated; early-checkpoint mechanism identified
+  (2026-09-14, `tasks/TASK-03.md`): this environment has no SSH/sbatch access to BlueHive, so the
+  actual cluster reproduction is handed off (`bluehive/README.md`, `bluehive/run_task03.slurm`) --
+  not fabricated here. Built CUDA/MPS-agnostic device selection, gradient/latent/W&B diagnostics
+  modules (`grad_diagnostics.py`, extended `latent_diagnostics.py`, `wandb_logging.py`), and
+  `scripts/train_spectrogram_to_dac_wandb.py` (TASK-02's exact scientific formulation, plus
+  instrumentation only -- documented deviations for cost control). Validated with two real local
+  runs on this machine (MPS, NOT BlueHive): a disabled-mode dry run and a real online run against
+  the user's actual W&B account (`wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility`,
+  run `gz3uffcf`), both clean, zero errors. The online run's best checkpoint (step 1000,
+  val_mse=16.442551) exactly matched TASK-02's own step-1000 result, confirming this pipeline is
+  fully deterministic given the same seed/data/code. **Additional-investigation finding (evidence-
+  based, `scripts/analyze_early_checkpoint_selection.py`, read-only over TASK-01/TASK-02's
+  existing curves): the early-checkpoint phenomenon is regression-to-the-mean, not optimization
+  instability or validation noise.** The first validation checkpoint (step 1000) is the GLOBAL
+  minimum validation MSE across the entire run in BOTH TASK-01 (rank 1 of 60) and TASK-02 (rank 1
+  of 450) -- never beaten again. A trivial "predict the dataset's mean DAC vector, ignore the
+  input entirely" baseline achieves MSE within 6-7% of that "best" checkpoint in both runs
+  (0.937x/0.933x). Validation MSE and cosine similarity are genuinely anti-correlated across
+  checkpoints (r=-0.72 in both runs, excluding turbulence-spike outliers) -- TASK-02's single best
+  cosine checkpoint (step 443000, near the end of training) has *higher* MSE than step 1000, so
+  pure-MSE selection can never find it. **This is the same underlying mechanism as the norm/
+  variance collapse documented in TASK-01/TASK-02: a near-constant prediction is simultaneously
+  the MSE-cheap solution, the norm-collapsed solution, and the maximally over-smoothed solution,
+  because for this target/loss combination those are the same solution.** 24 new tests, full
+  suite 103 passing. Full write-up in [[task03-bluehive-wandb]].
+- Spectrogram Gate-3 memorization control CONCLUDED (2026-09-15, `tasks/TASK-04.md`): tested
+  whether Spectrogram->DAC can memorize two fixed training excerpts at all, on the exact same
+  two clips (`pop.00012`, `disco.00049`) as the successful MuQ Gate-3 memorization control
+  (`experiment/muq-to-dac-temporal-conv`, cosine 0.9999-1.0000). Same architecture
+  (`SpectrogramToDacTranslator`), loss (MSE+0.1*cosine), and hyperparameters as that control
+  (Adam lr=1e-3, 3000 steps, alternating presentation). **Result: Strong Success -- near-perfect
+  memorization matching or exceeding the MuQ control** (best checkpoint, step 2536/3000: MSE
+  0.000547, cosine 0.99999, norm ratio 0.9999, variance ratio 0.9998, waveform correlation
+  0.99999, STFT distance 0.0145 -- vs. MuQ's own 0.001936 / 0.99996 / 1.0038 / 1.0073 / 0.99994 /
+  0.0415). Both excerpts memorized evenly (1500/1500 presentations). **This decisively rules out
+  data alignment, spectrogram preprocessing, the 128->1024 projection, translator implementation,
+  target extraction, loss computation, gradient flow, checkpoint restoration, and DAC decoding as
+  explanations for TASK-01/02's GTZAN-scale failure -- the pipeline works; the failure is
+  generalization/scale-specific**, consistent with and reinforcing [[task03-bluehive-wandb]]'s
+  regression-to-the-mean finding (collapse never emerged here: lag-1 autocorrelation tracked the
+  oracle's own ~0.05 throughout, vs. ~0.95 at GTZAN scale -- collapse looks like a property of
+  the multi-example training regime, not the architecture/loss in isolation). **Unplanned finding
+  while building the required MuQ-comparison table**: the trained MuQ Gate-3 checkpoint is
+  extremely sample-alignment-sensitive -- a 2-sample (83us) crop offset collapses its cosine
+  similarity from 0.99998 to 0.577, meaning that "successful" memorization is a narrow,
+  sample-exact overfit, not a phase-tolerant content-level fit. All 11 pre-training integrity
+  checks passed (alignment, caching determinism, gradient reach, checkpoint reproducibility,
+  etc.), run twice (disabled + online W&B modes) with byte-identical results, confirming
+  determinism. 14 new tests, full suite 117 passing. Live W&B run: `wandb.ai/
+  andrea-cogliati-university-of-rochester/muq-invertibility/runs/7kfiziym`. **Listening verdict
+  (2026-09-15), confirmed by ear: "the two audio excerpts are already great at 1000 steps. Almost
+  undistinguishable from the final version or the original. The early excerpts show signs of
+  artifacts, though."** Metrics and perception agree here (unlike several earlier findings in
+  this project) -- convergence is perceptually front-loaded (audible quality plateaus well before
+  step 3000, consistent with cosine already at 0.98 by step 1000), and the still-artifacted early
+  checkpoints match their still-far-from-converged metrics. Full write-up in
+  [[task04-spectrogram-gate3]].
+- Gate-3 training-set-size scaling curve CONCLUDED (2026-09-15, `tasks/TASK-05.md`): trained the
+  exact TASK-04 pipeline at 5 nested training-set sizes (N=2/8/32/128/512, round-robin
+  genre-balanced, all crops already in TASK-02's dense cache -- no new precompute) with a FIXED
+  20000-step max budget across all levels (not scaled with N, a deliberate choice so per-example
+  exposure decreases as N grows -- otherwise every example could trivially memorize regardless of
+  N). **Result: a sharp collapse onset between N=8 and N=32, then asymptotic decay to the
+  GTZAN-scale ceiling by N=512.** N=2 and N=8 are statistically indistinguishable (both
+  near-perfect: norm ratio 1.00/1.00, waveform correlation 1.00/0.997). Between N=8 and N=32,
+  every collapse metric moves by more than half its entire range in one step (norm ratio 1.0025
+  -> 0.4993, variance ratio 1.0077 -> 0.1773, waveform correlation 0.997 -> 0.469). From N=32
+  onward the decline decelerates (norm ratio 0.4993 -> 0.3778 -> 0.3434 at N=32/128/512),
+  approaching an asymptote. **By N=512, results (MSE 16.02, cosine 0.327, norm ratio 0.343,
+  waveform correlation 0.019) are already statistically indistinguishable from TASK-01's
+  1584-crop and TASK-02's 11873-crop full GTZAN runs (MSE 16.47/16.39, cosine 0.295/0.291, norm
+  ratio 0.36/0.32)** -- the entire collapse regime this investigation has characterized since
+  [[muq-to-dac-scale-data]] is fully established by ~512 examples, 23-30x fewer than either
+  GTZAN-scale experiment used. Neither pure Outcome A (gradual), B (sharp-to-final-state), nor C
+  (no collapse) -- closest to B but with an asymptotic tail, consistent with a capacity/
+  optimization boundary around 8-32 simultaneously-memorizable examples giving way to the
+  regression-to-the-mean mechanism ([[task03-bluehive-wandb]]) once individual memorization is no
+  longer achievable. Two required figures produced (`artifacts/task05_gate3_scale/
+  scaling_curve_main.png`, `scaling_curve_norm_variance_ratio.png`). 13 new tests, full suite 130
+  passing. **Listening verdict (2026-09-16), confirms and sharpens the metrics: "the clips for
+  N=32 are closer to those for N=128 and N=512 than to those for N=8... the drop between N=8 and
+  N=32 is dramatic."** By ear, N=32 already belongs to the "collapsed" perceptual family with
+  N=128/512, not the "near-perfect" family with N=2/8 -- the audible category boundary matches
+  the metric-located N=8-to-N=32 transition exactly, while the N=32-to-512 metric decline
+  (waveform correlation 0.469 -> 0.019, >20x) is comparatively minor perceptually. Full write-up
+  in [[task05-gate3-scaling]].
+- N=32 compute-controlled micro-ablation CONCLUDED (2026-09-16, `tasks/TASK-06.md`): held N=32
+  fixed (TASK-05's exact manifest/architecture/loss) and varied only step budget -- 20k (TASK-05's
+  run reused unchanged, patience-stopped at 8000), 80k, 320k -- to separate "undertraining" from
+  "genuine capacity/interference boundary" as explanations for the N=8->N=32 collapse. **Result:
+  partial, not full, recovery -- and the key comparison is per-example repetition count, not raw
+  steps.** 80k's best checkpoint (step 57000) already gives each of the 32 examples 1781
+  repetitions -- 3x more than N=8's best checkpoint needed (594 reps); 320k's best checkpoint
+  (step 88000) gives 2750 reps, 4.6x N=8's. Despite that, N=32 plateaus far below N=8: cosine 0.63
+  / waveform correlation 0.67 / norm ratio 0.66 at 320k, vs. N=8's cosine 0.998 / waveform
+  correlation 0.997 / norm ratio 1.003. Waveform correlation did rise substantially from the
+  original 20k number (0.469 -> 0.629 -> 0.666), so compute is not irrelevant -- but returns are
+  strongly diminishing (320k found no new global-best checkpoint past step 88000 despite 232000
+  more steps of noisy oscillation). **Per-example ranking is stable and reveals preferential
+  memorization, not uniform improvement**: `classical.00003` is the single worst example at both
+  80k and 320k and does not improve with 4x more compute (0.315 -> 0.276, slightly worse), while
+  `pop.00002` is consistently best and does improve (0.875 -> 0.897) -- the mean/median rise is
+  driven by the easier subset of the 32 examples, not a uniform lift. Conclusion: the N=8->N=32
+  boundary is best explained by genuine interference/capacity competition among examples, not
+  compute and not regression-to-the-mean -- exposure explains part of the *original* fixed-budget
+  collapse but not the residual gap to N=8, which persists even at 5x N=8's needed per-example
+  exposure. Required figure: `artifacts/task06_n32_compute_ablation/
+  per_example_waveform_correlation.png`. Full 133-test suite passing (1 new test file, 3 tests,
+  `rank_examples_by_metric` added to `gate3_spectrogram_common.py`). Two live W&B runs under group
+  `gate3-n32-compute-ablation`. Total compute: 80k run 6257s, 320k run 24249s (~6.7h). **Listening
+  verdict (2026-09-17), diverges from the metrics for the first time in this investigation: "the
+  best audio was generated at 80K steps. The audio from 320K is generally worse,"** despite 320k's
+  higher mean waveform correlation (0.666 vs. 0.629 for 80k). Likely partly an artifact of which
+  checkpoint the sent WAVs came from (320k's clips were its final-step checkpoint, a low point in
+  that run's oscillation, not its best-by-MSE checkpoint at step 88000) and partly a reminder that
+  this task's objective metrics are diagnostics, not proof of perceptual fidelity, especially in
+  this collapse-adjacent regime. Full write-up in [[task06-n32-compute-ablation]].
+- DAC shift/polarity sensitivity diagnostic CONCLUDED (2026-09-17, `tasks/TASK-07.md`): tested the
+  frozen DAC encoder alone (no MuQ, no translator, no training) for sensitivity to small sub-frame
+  input time shifts and global polarity flip, on 40 GTZAN val-split crops never used in any
+  training set in this project. **Result: DAC's `quantized_representation` is extremely
+  shift-fragile (mean cosine similarity 0.716 at a 1-*sample* shift, 0.157 by 16 samples --
+  approaching but not fully reaching the random-pair floor of 0.030 -- and never fully reaching it
+  even at 256 samples, ~10.7ms, still sub-frame relative to DAC's 320-sample/13.3ms hop), while the
+  two candidate translator inputs are comparatively near-invariant at the same shifts (log-mel
+  >=0.98, MuQ >=0.94, across the entire tested range up to 256 samples).** The pre-quantizer
+  encoder output is somewhat more stable than the post-RVQ representation (0.945 at k=1 vs. 0.716)
+  but collapses similarly by k=8-16 -- the fragility is substantially present in DAC's own
+  continuous encoder, not purely an RVQ/codebook discretization artifact. **Polarity: `x` and `-x`
+  are not merely dissimilar but *anti-correlated* (cosine similarity -0.435 quantized, -0.557
+  pre-quantizer) -- further apart than random unrelated crops (0.030/0.036 baseline), not merely
+  indifferent to sign.** This directly confirms and generalizes TASK-04's unplanned 2-sample
+  (83us) MuQ-checkpoint finding: the fragility is intrinsic to DAC's own target, not an artifact of
+  one trained model's narrow overfit, and it is not tracked by an equivalently shifted input --
+  ruling out "the target is just following a shifted input" as an alternative explanation. This
+  gives a structural, orthogonal-to-everything-else-ruled-out explanation for the collapse
+  pathology this investigation has studied since [[muq-to-dac-scale-data]]: a magnitude-only/
+  phase-blind translator input (log-mel, MuQ) cannot in principle determine this target uniquely
+  at sub-frame precision, so MSE regression must average over the resulting ambiguity set. Per
+  this task's explicit non-goal, **no conclusion drawn on whether to proceed with a complex-STFT
+  rerun of TASK-05 -- that decision is the user's**. Read-only diagnostic: no training, no
+  checkpoint, no cache/manifest modified. Figure: `artifacts/task07_dac_shift_sensitivity/
+  shift_sensitivity.png`. 12 new tests, full suite 145 passing. Total run time: 27 seconds. Full
+  write-up in [[task07-dac-shift-sensitivity]].
+- DAC latent-vs-audio shift diagnostic CONCLUDED (2026-09-21, `tasks/TASK-08.md`, extends
+  [[task07-dac-shift-sensitivity]]): measured whether TASK-07's latent-space shift fragility
+  actually translates into reconstructed-audio instability, on the exact same 40-crop set, frozen
+  DAC encoder-decoder only, no MuQ/translator/training. **Result: Outcome A, strongly supported --
+  DAC latent similarity collapses by an order of magnitude (0.72 -> 0.09 cosine) across shifts
+  1-1024 samples, while reconstructed-audio similarity stays essentially flat over that same
+  range** (waveform correlation 0.955-0.964, log-mel cosine similarity 0.988-0.990, no
+  discernible trend). Correlation analysis across 480 crop/shift points: Spearman rho between
+  latent cosine similarity and audio similarity is only 0.23-0.35 across all three audio metrics
+  (statistically real at this n, but a weak predictor practically) -- Figure 3 shows waveform
+  correlation clustering tightly in a narrow 0.85-1.0 band across the *entire* 0-1.0 latent-cosine
+  range, no visible slope. **A raw-waveform reference control (shift the pre-DAC audio, then
+  align) reads exactly 1.0/1.0/0.0 at every tested shift, by construction** (an integer-sample
+  shift is perfectly invertible by cropping, so the source signal carries zero inherent shift
+  ambiguity) -- proving the small, shift-independent gap between DAC reconstruction and this
+  perfect control is entirely attributable to DAC's own encode-decode process, not to any genuine
+  ambiguity in "what the audio should be." **This strengthens and sharpens the target-mismatch
+  explanation for TASK-01 through TASK-06**: DAC's latent target isn't merely fragile in a way
+  inputs aren't (TASK-07) -- that extra fragility is largely reconstruction-irrelevant, meaning a
+  shift-invariant translator input is penalized by MSE for sub-frame misalignments that barely
+  affect what any of the three audio-domain metrics used here would call "different audio." Per
+  this task's explicit instruction, stopped after answering its five required questions, no
+  follow-up experiment proposed. SI-SDR not computed (no existing implementation in this project,
+  task instruction is to reuse one rather than add a new dependency). 26 new tests, full suite 159
+  passing. Total run time: 93 seconds. Listening package produced
+  (`artifacts/task08_dac_latent_vs_audio_shift/listening/`), not yet reviewed by the user. Full
+  write-up in [[task08-dac-latent-vs-audio-shift]].
+- DAC Optimal Transport geometry diagnostic CONCLUDED (2026-09-22, `tasks/TASK-09.md`, extends
+  [[task08-dac-latent-vs-audio-shift]]): tested whether comparing DAC latents as unordered point
+  clouds (Optimal Transport / entropic Sinkhorn divergence, `POT` library, sqeuclidean ground
+  cost, per-crop-scaled epsilon) predicts reconstruction-audio similarity better than the
+  project's pointwise MSE/cosine metrics, on TASK-07/08's exact 40-crop shift-sweep dataset (no
+  training, no decode -- audio-similarity numbers reused verbatim from TASK-08's report). **Result:
+  OT is a consistently, moderately better predictor of audio similarity than MSE or cosine across
+  every audio metric tested, but the improvement is not dramatic** -- |Spearman| correlation with
+  waveform correlation: OT=0.521 vs. MSE=0.362 vs. cosine=0.229 (44-127% relative improvement,
+  consistent across log-mel-cosine and STFT-distance comparisons too, 0.546/0.625 for OT vs.
+  0.382/0.468 for MSE vs. 0.346/0.333 for cosine). **A second, partially independent finding**:
+  OT's raw dynamic range across the shift sweep is much smaller than MSE's or cosine's and
+  saturates almost immediately (by shift=4, vs. MSE/cosine continuing to drift gradually out to
+  shift=1024) -- a genuine but partial Outcome-C-like signature: the *long-range* continued
+  pointwise drift looks substantially transportable, but the *short-range* (shifts 1-4) initial
+  collapse, the largest single move in every metric, is not explained away by OT at all. Per this
+  task's own interpretation rules: **closest to Outcome B** ("the mismatch is deeper than
+  framewise comparison"), **with a partial Outcome-C saturation signature confined to the
+  long-range portion of the curve** -- neither fits cleanly alone. Strengthens the target-mismatch
+  hypothesis with a specific refinement: loss geometry is a contributing cause (OT recovers a
+  meaningfully better, though still far from strong, correspondence with audio similarity than the
+  project's actual MSE+cosine training objective), but the residual gap (rho still only ~0.5-0.6)
+  means geometry mismatch is unlikely to be the entire explanation. New dependency: `pot`
+  (python-optimal-transport), added via `uv add pot` -- this task's own instruction explicitly
+  permitted a new dependency here (unlike TASK-08's SI-SDR). Per this task's explicit instruction,
+  stopped after answering its five required questions, no follow-up experiment proposed or run. 6
+  new tests, full suite 165 passing. Total run time: 40.7 seconds (19.9s of which was the 880
+  Sinkhorn calls themselves). Full write-up in [[task09-dac-ot-geometry]].
+- EnCodec shift-sensitivity replication CONCLUDED (2026-09-22, `tasks/TASK-10.md`, replicates
+  TASK-07+TASK-08 on `facebook/encodec_24khz` instead of DAC): tests whether DAC's
+  latent-collapses/audio-stays-stable phenomenon is DAC-specific or general to neural codecs,
+  same 40-crop dataset and 0-1024-sample shift schedule as TASK-07/08/09. **Note: `tasks/TASK-10.md`
+  is truncated mid-sentence in its Final Questions section -- confirmed by direct byte
+  inspection, flagged to the user rather than guessed past.** EnCodec: 24kHz, 75Hz frame rate
+  (matches DAC exactly), 32 codebooks/1024 codebook size at max bandwidth (also matches DAC),
+  128-dim continuous+quantized latent (much smaller than DAC's 1024-dim), decoder reproduces
+  input length exactly (unlike DAC's 8-sample-shorter output). **Result: EnCodec's continuous
+  latent is dramatically more shift-stable than DAC's (cosine 0.999->0.953 across the full shift
+  range vs. DAC's 0.716->0.087) -- but this smoothness does NOT translate into more shift-robust
+  audio: EnCodec's reconstructed-audio waveform correlation (~0.89 flat) sits measurably BELOW
+  DAC's (~0.96 flat) throughout, despite the latent-stability gap.** A dramatically smoother
+  latent space did not buy EnCodec a more shift-robust reconstruction -- latent movement and audio
+  change are decoupled in both codecs, just at different points on the latent-stability axis.
+  **A further nuance**: EnCodec's latent cosine correlates 1.6-2.1x MORE strongly with its own
+  audio similarity than DAC's does (Spearman 0.36/0.60/-0.71 vs. DAC's 0.23/0.35/-0.33 across
+  waveform-correlation/log-mel/STFT), despite varying over a much narrower absolute range --
+  proportionally more informative, even though there's much less of it. **Mechanistic note**:
+  EnCodec's *discrete* codebook indices collapse under shift about as fast as DAC's do (mean-32-
+  stage agreement 0.115->0.0055) even though the *continuous* quantized latent does not -- the
+  smoothness is specific to the continuous embedding geometry (likely a 128-dim-vs-1024-dim
+  effect), not evidence EnCodec's underlying tokenization is intrinsically more shift-robust. Per
+  this task's own interpretation rules: **none of Outcome A/B/C fits cleanly alone** -- closest to
+  a combination of B (raw latent stability) and C (correlation strength), with the audio-
+  robustness complication anticipated by neither. No new dependency (EnCodec ships in this
+  project's pinned `transformers==4.55.0`); new module `src/muq_inversion/encodec_encoder.py`
+  (`FrozenEncodecEncoder`, mirrors `dac_encoder.py`'s interface, verified once against EnCodec's
+  own top-level API before trusting it, no dedicated unit test -- matching this project's existing
+  convention for model-loading encoder wrappers). Listening package produced
+  (`artifacts/task10_encodec_shift_sensitivity/listening/`), not yet reviewed. Total run time: 11.8
+  seconds -- the fastest of the four DAC/EnCodec diagnostics. Full write-up in
+  [[task10-encodec-shift-sensitivity]].
+- EnCodec continuous-latent controlled scaling probe CONCLUDED (2026-09-22, `tasks/TASK-11.md`, a
+  training experiment -- the first since TASK-06 in this line): tested whether TASK-05's sharp
+  DAC N=8->N=32 collapse moves when the target codec changes to EnCodec's continuous latent, with
+  literally everything else held fixed (same manifests, input, architecture except the mechanically
+  -necessary `dac_channels=128` instead of 1024, loss, optimizer, 20000-step budget, seed -- source
+  of truth: TASK-05's own report.json). The EnCodec translator has 98.3% *fewer* parameters
+  (262,656 vs. 15,863,808) than TASK-05's DAC translator, ruling out a capacity-increase confound.
+  **Result: the collapse is dramatically reduced, not just "improved" -- decisive support for the
+  target-mismatch hypothesis this project's TASK-07-10 line has been building.** At N=32: DAC's
+  norm/variance ratios collapse to 0.499/0.177 (classic collapse signature); EnCodec's stay at
+  0.985/0.650 (essentially no norm collapse). Waveform correlation (pred vs. target-decode): DAC
+  crashes from 0.997 (N=8) to 0.469 (N=32); EnCodec declines from 0.982 to 0.724 -- real, but
+  roughly half DAC's drop. **Oracle-relative (this task's own required framing, since DAC and
+  EnCodec have different reconstruction ceilings): EnCodec's translator recovers 79.2% of its own
+  oracle ceiling at N=32 (0.724/0.914), vs. DAC's 48.4% (0.469/0.969, using a newly-fixed lag-
+  aligned DAC oracle -- see below)** -- a relative, not just raw-number, advantage. Per-example
+  N=32: EnCodec's LATENT fit is uniform across all 32 examples (0.98-0.99 band) unlike DAC's wide
+  0.43-0.68 spread, but AUDIO-level per-example variation remains (0.37-0.98 waveform correlation)
+  despite the uniform latent fit -- pointing to decoder-side/content-dependent variation, not a
+  translator-side "easier subset" effect. **Two real bugs found and fixed during this task**: (1)
+  DAC's decoder has a previously-undocumented fixed 8-sample group delay relative to its input --
+  a naive lag-0 original-vs-oracle correlation gave ~0.37-0.47 (looked broken) until a
+  cross-correlation lag search (`find_best_lag_and_align`) recovered the true ~0.96-0.97 ceiling;
+  EnCodec has no equivalent delay (best lag 0); (2) EnCodec targets computed fresh are PyTorch
+  "inference tensors" and need an explicit `.clone()` before use as autograd targets (TASK-05's
+  DAC targets never hit this since they load from a cache as plain tensors). Per this task's own
+  interpretation rules: **Outcome B** ("EnCodec substantially outperforms DAC but remains clearly
+  below its own oracle... target geometry, optimization, and capacity/interference likely
+  coexist") -- not Outcome A (EnCodec N=32 isn't near its own oracle or its own N=8 level) and not
+  Outcome C (the two codecs' trajectories clearly differ in magnitude). Scope restricted to N in
+  {2,8,32} per the task's own instruction; N=128/512 and any follow-up explicitly not run. 12 new
+  tests, full suite 177 passing. Total training time ~5.8 minutes (all three levels). **Not
+  committed** -- per this task's explicit "do not commit without explicit user instruction" rule;
+  exact repository state (staged/unstaged/untracked) recorded in [[task11-encodec-controlled-scaling]]
+  and `notes/NEXT.md`. Full write-up in [[task11-encodec-controlled-scaling]].
+- EnCodec N=32 compute ablation CONCLUDED (2026-09-22, `tasks/TASK-12.md`, extends
+  [[task11-encodec-controlled-scaling]]): tested whether TASK-11's residual N=32 gap (79.2%
+  oracle-relative recovery at a 20k-step budget) is compute-limited, by training the identical
+  setup independently to 80k and 320k steps (same seed/init, early stopping disabled, same
+  rationale as TASK-06). **Result: Outcome B (Partial Response) -- compute helps substantially
+  but with clearly diminishing returns, and a meaningful gap remains at 320k.** Oracle-relative
+  recovery: 79.2% (20k) -> 88.0% (80k) -> 92.7% (320k); marginal gain in waveform correlation was
+  +8.05 points for 20k->80k (4x compute) but only +4.30 points for 80k->320k (another 4x compute)
+  -- roughly half the return for the same additional compute. Norm ratio never collapsed at any
+  budget (compute-independent, confirming TASK-11); variance ratio climbed steadily (0.650 ->
+  0.668 -> 0.738) but stayed 26 points short of 1.0 even at 320k. **Notable methodological
+  finding**: variance ratio (Spearman rho=0.819 vs. audio quality, pooled across budgets) predicts
+  audio-reconstruction quality far better than latent cosine similarity (rho=0.605) or latent MSE
+  (rho=0.199), despite cosine being the metric closest to its own ceiling -- a concrete,
+  actionable refinement of TASK-11's "high latent fit can coexist with audio variation" finding
+  for any future diagnostic on this pipeline. **Per-example**: compute preferentially benefits
+  examples that started worse (Pearson r=-0.85 between starting performance and subsequent gain)
+  while broadly preserving relative rank (Spearman rho 0.94-0.97 across budget pairs) -- an
+  equalizing, decelerating effect. One severe but transient instability spike occurred in the 320k
+  run (step 268,000, fully recovered within one checkpoint interval, did not affect best-checkpoint
+  selection). Both fixes carried over from TASK-11 (target `.clone()`, lag-aware DAC oracle
+  policy) preserved without needing rediscovery. No new tests needed (fully reused TASK-05/06/10/11's
+  unmodified infrastructure). Full required-template report at `artifacts/
+  task12_encodec_n32_compute_ablation/TASK-12_RESULTS.md`. Total training time: 80k run 570.5s
+  (~9.5 min), 320k run 2083.1s (~34.7 min) -- far faster than TASK-06's DAC equivalent (~6.7 hours
+  for 320k), consistent with EnCodec's much smaller translator. **Not committed** -- per this
+  task's explicit instruction; per this task's own instruction, no follow-up experiment proposed
+  or run. Full write-up in [[task12-encodec-n32-compute-ablation]].

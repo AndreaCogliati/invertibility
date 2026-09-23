@@ -1,0 +1,9 @@
+split,track_id,genre,path,checksum_sha256,crop_index,crop_start_seconds,crop_duration_seconds
+train,pop.00012,pop,data/raw/gtzan/genres/pop/pop.00012.wav,19d15aef15b0c22b5feacfb89d09fa4dbf6485a1a8d4355627f1bbe313f7f39d,7,14.00,2.00
+train,disco.00049,disco,data/raw/gtzan/genres/disco/disco.00049.wav,a45cc4005c96e8c00b684f852b5b9cc52be95867cf5ae36a1797c2ee4e630e23,7,14.00,2.00
+train,blues.00000,blues,data/raw/gtzan/genres/blues/blues.00000.wav,728e445a61ebb2ab9cefe779a9af5c44cff39f20308a0a29bce3e3ea597aa592,7,14.00,2.00
+train,classical.00000,classical,data/raw/gtzan/genres/classical/classical.00000.wav,8add3a7d1add1e157ce5de91be72372773b1ad2779742532c4f0ad1c7316f2a4,7,14.00,2.00
+train,country.00000,country,data/raw/gtzan/genres/country/country.00000.wav,4fb9f2f74ad041b9135e5f6b04f8cfa0093eec0ed4674c66f10babe988e9652d,7,14.00,2.00
+train,disco.00000,disco,data/raw/gtzan/genres/disco/disco.00000.wav,c26556f754a48fb226edf887beae321ac3eff804e0fb5a28fd93441f41b116f2,7,14.00,2.00
+train,hiphop.00001,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00001.wav,47729e8c087d347cc211ff672791f7f9d3ec8e83fb44f404213c47cc6c9f73ff,7,14.00,2.00
+train,jazz.00000,jazz,data/raw/gtzan/genres/jazz/jazz.00000.wav,97135f273616d39b11db37a1ec61e0bd729b82c085f7dcdc472b26a37affca8a,7,14.00,2.00

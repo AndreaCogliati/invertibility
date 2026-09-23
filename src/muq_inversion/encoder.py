@@ -54,6 +54,18 @@ class FrozenMuQEncoder:
         return output.last_hidden_state
 
     @torch.inference_mode()
+    def encode_all_hidden_states(self, waveform_24khz: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        """waveform_24khz: (batch, num_samples) at 24 kHz. Returns the full `hidden_states` tuple
+        from a single forward pass (`output_hidden_states=True`) -- index 0 is the frontend/
+        embedding output (before any transformer block), index `i` for `i>=1` is the output after
+        the `i`-th transformer block. `hidden_states[-1] == last_hidden_state` (verified by direct
+        comparison in `scripts/inspect_muq_hidden_states.py`, not assumed). Used only by
+        `experiment/muq-layer-sweep`; `encode()` above remains the single-layer path used
+        everywhere else in this project."""
+        output = self.model(waveform_24khz.to(self.device), output_hidden_states=True)
+        return output.hidden_states
+
+    @torch.inference_mode()
     def probe(self, waveform_24khz: torch.Tensor, sample_rate: int) -> MuQProbeResult:
         """Run one forward pass and measure the feature geometry (CLAUDE.md MuQ Feature Contract)."""
         assert waveform_24khz.ndim == 2, "expected (batch, num_samples)"

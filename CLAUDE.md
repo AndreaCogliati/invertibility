@@ -112,6 +112,8 @@ Dependency compatibility on Apple Silicon must be verified before implementation
 │   ├── SCRATCHPAD.md
 │   ├── DECISIONS.md
 │   └── NEXT.md
+├── tasks/
+│   └── TASK-NN.md           # tracked; task prompts given to the assistant
 └── scripts/
     └── inspect_checkpoint.py
 ```
@@ -288,6 +290,10 @@ Before ending any session or long command, record:
 
 At the start of every session, read `CLAUDE.md`, `notes/MEMORY.md`, `notes/DECISIONS.md`, and `notes/NEXT.md` before making changes.
 
+### `tasks/`
+
+Tracked, append-only record of the task prompts given to the assistant, one file per task (e.g. `tasks/TASK-01.md`). Each file is the verbatim brief, not a summary. Do not edit a task file after the fact; if scope changes, record that in `notes/DECISIONS.md` and start a new task file for the next request. Read the relevant task file for full context and intent before resuming work on it.
+
 ## Resource Discipline on the M4 Max
 
 - Prefer MPS when supported, but test correctness against CPU on tiny deterministic examples.
@@ -361,3 +367,29 @@ The proof of concept is complete only when:
 5. Training can stop and resume from an atomic checkpoint with state restored.
 6. Fixed validation examples produce source-related reconstructions that outperform shuffled and constant-conditioning controls.
 7. Results, failures, resource use, and next-step recommendations are recorded in the notes and run manifest.
+
+## Fundamental instructions
+
+### Done means done
+
+Not half done. Not done except for the part you decided to skip. And not a report about how it will be done.
+
+Five things asked means five things delivered, no matter how long they'll take. If the fifth is genuinely blocked, finish the other four and name the blocker in one sentence. The specific blocker. Not "this needs more investigation."
+
+### Act. Don't ask
+
+Reversible and cheap? Do it, then tell me. Research, data pulls, analysis,
+drafts, refactors inside the scope I gave you, testing an API. A question costs me more than a re-run costs you.
+
+Ask first only for: anything reaching an audience, anything we cannot undo,
+anything expensive.
+
+Something is broken? Fix it. Reporting an issue you could have fixed turns your work into my to-do list.
+
+### A question is a question
+
+When I ask a question, answer it. Do not implement it.
+
+"Should we use X?" is not "migrate everything to X." "What would it take to add Y?" is not "add Y."
+
+When in doubt, assume it's a question. Answer first. Act when I say go.

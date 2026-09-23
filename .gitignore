@@ -11,5 +11,9 @@ data/processed/
 data/cache/
 runs/
 artifacts/
+logs/
+
+# W&B local run logs (tasks/TASK-03.md) -- the run itself lives on wandb.ai, not in git
+wandb/
 
 .DS_Store

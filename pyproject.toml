@@ -10,8 +10,10 @@ requires-python = ">=3.12"
 dependencies = [
     "huggingface-hub>=0.34.0,<1.0",
     "librosa>=1.0.0",
+    "matplotlib>=3.11.2",
     "muq>=0.1.0",
     "numpy>=2.5.2",
+    "pot>=0.9.7.post1",
     "pyyaml>=6.0.3",
     "scipy>=1.18.1",
     "soundfile>=0.14.0",
@@ -20,6 +22,7 @@ dependencies = [
     "torchaudio>=2.11.0",
     "tqdm>=4.70.0",
     "transformers==4.55.0",
+    "wandb>=0.30.0",
 ]
 
 [project.scripts]
