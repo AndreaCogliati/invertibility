@@ -628,3 +628,28 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   for 320k), consistent with EnCodec's much smaller translator. **Not committed** -- per this
   task's explicit instruction; per this task's own instruction, no follow-up experiment proposed
   or run. Full write-up in [[task12-encodec-n32-compute-ablation]].
+- Gate 4 revalidation on the merged (post-`experiment/muq-layer-sweep`) architecture CONCLUDED
+  (2026-09-23, `tasks/TASK-13.md`, after `main` commit `a96fd4b` merged TASK-04-12's EnCodec
+  pipeline): re-ran CLAUDE.md's Gate 4 checkpoint/resume + four-way conditioning-control protocol
+  (`correct`/`shuffled_across`/`shuffled_time`/`constant_zero`) on `main`'s actual pipeline (MuQ ->
+  repeat_interleave -> `SpectrogramToDacTranslator` -> EnCodec), evaluating all four conditions
+  against one 20,000-step checkpoint trained with correct conditioning (`data/manifests/
+  gate4_crops.csv` Experiment B, 16 train / 2 val / 2 test track-disjoint crops). **Result: PASSED
+  by the pooled decision rule (correct 0.786 mean waveform correlation to oracle vs. -0.008/0.005/
+  0.001 for the three controls; resume equivalence exact, 0.0000 relative diff; variance ratio
+  1.080, no collapse) -- but this pass is a memorization artifact.** Split by data split: train
+  (n=16) correct=0.981 vs. controls ~0 (clean separation, including `shuffled_time` -- resolving
+  the old ambiguity on train data); held-out val+test (n=4) correct=0.002-0.007 vs. controls
+  -0.024-to-0.028 (**no separation at all** -- correct conditioning is statistically
+  indistinguishable from every control, including no conditioning). **This reproduces
+  [[muq-to-dac-minimal-gate4]]'s "the Gate 3 result does not generalize, it was memorization"
+  finding, now confirmed on the EnCodec-target pipeline too** -- the merged architecture didn't
+  resolve the prior Gate 4 `shuffled_time` ambiguity, it relocated it (clean on memorized data,
+  null on held-out data). `shuffled_time` is a genuine random frame permutation here (not the
+  older pipeline's fixed circular shift), verified correct by 14 new unit tests. **Recommendation:
+  do not treat this pooled PASS as license to proceed to Gate 5 without further held-out
+  conditioning-sensitivity evidence** -- flagged as an open decision-rule question for the user
+  (pooled- vs. held-out-only Gate 4 criteria), not resolved unilaterally. Held-out n is small (2
+  val + 2 test) -- a real power caveat, though both splits independently show the same null
+  result. Per this task's explicit instruction, Gate 5 not started. **Not committed** -- per this
+  task's explicit instruction. Full write-up in [[task13-gate4-encodec-revalidation]].

@@ -3102,3 +3102,84 @@ with EnCodec's much smaller 128-dim target and 262,656-parameter translator.
 **Rollback plan.** Entirely additive: new files only. Deleting them fully reverts this task's
 code; no existing file was modified. The two W&B runs live on wandb.ai independent of any local
 rollback. No checkpoint or manifest from TASK-01-11 was touched.
+
+---
+
+## task13-gate4-encodec-revalidation: Gate 4's pooled PASS is a memorization artifact -- on held-out crops, no conditioning mode separates from the others
+
+**Context (`tasks/TASK-13.md`).** After `experiment/muq-layer-sweep` merged into `main`
+(commit `a96fd4b`), this task re-ran CLAUDE.md's Gate 4 short-pilot protocol -- checkpoint/resume
+equivalence, then a four-way conditioning-control comparison (`correct`, `shuffled_across`,
+`shuffled_time`, `constant_zero`) -- on the pipeline actually present on `main`: frozen MuQ
+`last_hidden_state` -> `repeat_interleave` to EnCodec's 75Hz frame rate -> the existing,
+unmodified `SpectrogramToDacTranslator` (here: input_channels=1024, dac_channels=128) -> frozen
+EnCodec latent -> frozen EnCodec decoder. The prior Gate 4 result
+([[gate4-shuffled-time-finding]], the older HiFi-GAN-style pipeline) found `shuffled_across`/
+`constant_zero` clearly underperformed correct conditioning but `shuffled_time` did not (9-13%
+worse, short of a 20% margin) -- Gate 4 was reported not fully passed. This task's own protocol
+differs deliberately from `pilot.py`'s: ONE model is trained with correct conditioning for the
+full budget, then all four conditions are evaluated against that *same* trained checkpoint (per
+this task's explicit instruction), rather than training a separate model per control.
+
+**Setup.** `data/manifests/gate4_crops.csv`, Experiment B (8 train tracks x 2 crops = 16 train
+crops, 2 val crops, 2 test crops, all track-disjoint) -- the existing Gate 4 manifest, reused
+unchanged. 20,000 training steps (matches TASK-11's own N=32 EnCodec budget), Adam lr=1e-3,
+MSE + 0.1*cosine loss, seed 0, MPS. `shuffled_time` is a genuine random permutation of MuQ frames
+(not the older pipeline's fixed circular shift), matching `pilot.py`'s original definition and
+this task's own wording; verified correct with 14 new unit tests
+(`tests/test_gate4_encodec_common.py`), including an explicit check that it never equals any
+circular shift of the same sequence.
+
+**Result: PASSED by the pooled decision rule, but this pass is a memorization artifact.**
+
+Pooled across all 20 crops, correct conditioning's mean waveform correlation to the EnCodec oracle
+(0.786) beats every control by far more than this task's 0.05-absolute margin (shuffled_across
+-0.008, shuffled_time 0.005, constant_zero 0.001); checkpoint/resume equivalence passed with an
+exact 0.0000 relative match on both halves; variance ratio (1.080) shows no collapse. **By the
+letter of the decision rule, Gate 4 PASSED**, and notably `shuffled_time` -- the one control that
+failed to separate under the old pipeline -- separates decisively here.
+
+Split by data split, the story reverses:
+
+| split | correct | shuffled_across | shuffled_time | constant_zero |
+| --- | --- | --- | --- | --- |
+| train (n=16) | 0.9811 | -0.0059 | 0.0055 | 0.0006 |
+| val (n=2) | 0.0067 | -0.0126 | -0.0238 | -0.0015 |
+| test (n=2) | 0.0017 | -0.0223 | 0.0278 | 0.0048 |
+
+On training data the model has essentially memorized the 16 crops (0.98 correlation); on the 4
+held-out val+test crops, **correct conditioning does not separate from any control, including no
+conditioning at all**. Best/median/worst-by-correct-conditioning land exactly on this line too:
+best and median are both training crops, worst is a held-out test crop.
+
+**Interpretation.** This directly reproduces [[muq-to-dac-minimal-gate4]]'s earlier finding on the
+DAC-target pipeline ("the Gate 3 result does not generalize -- it was memorization"), now
+independently confirmed on the EnCodec-target pipeline. The merged architecture did not resolve
+the prior Gate 4 ambiguity about `shuffled_time`; it relocated it: `shuffled_time` now separates
+cleanly, but only because the model can be shown to depend on a *specific, memorized* frame
+sequence, not because it demonstrably uses *transferable* temporal MuQ structure. Variance ratio
+stayed healthy throughout (correct: 1.08; even the "wrong content" controls shuffled_across/
+shuffled_time show 1.33/1.91, i.e. *not* collapsed) -- confirming this is a content/generalization
+failure mode, not a collapse failure mode, a distinction this diagnostic makes cleanly visible.
+
+**Decision.** Gate 4's pooled PASS should **not** be read as license to proceed to Gate 5 without
+further evidence of held-out conditioning sensitivity -- the held-out null result is exactly the
+CLAUDE.md Stop-Condition scenario ("if the controls sound similar to the correctly conditioned
+model, assume conditioning collapse or leakage until disproven"), on the split that actually
+matters for generalization. Per this task's own explicit instruction, Gate 5 is not started here
+regardless. Whether the project's Gate 4 decision rule should be redefined to require held-out
+(not pooled) separation is flagged as an open process question for the user, not decided
+unilaterally by this task.
+
+**Consequences.** New files, none committed per this task's "do not commit unless explicitly
+requested" rule: `src/muq_inversion/gate4_encodec_common.py`, `scripts/
+train_gate4_encodec_wandb.py`, `tests/test_gate4_encodec_common.py` (14 tests, all passing),
+`artifacts/task13_gate4_encodec_revalidation/` (report.json, TASK-13_RESULTS.md, 12 listening
+WAVs, git-ignored), `runs/task13_gate4_encodec_revalidation/` (2 checkpoints, git-ignored). One
+W&B run, group `task13-gate4-encodec-revalidation`
+(https://wandb.ai/andrea-cogliati-university-of-rochester/muq-invertibility/runs/gwj2rn8d). No
+existing tracked file modified except `notes/*.md`. Full write-up: `artifacts/
+task13_gate4_encodec_revalidation/TASK-13_RESULTS.md`.
+
+**Rollback plan.** Entirely additive: new files only, none committed. Deleting the untracked
+files fully reverts this task. The W&B run lives on wandb.ai independent of any local rollback.
