@@ -3297,13 +3297,14 @@ incorrect data -- only this environment's local exit-code check was wrong.
 
 ---
 
-## task14-gate5-full-gtzan-result: MuQ generalizes spectral structure to unseen tracks, but not waveform detail -- Gate 5 not passed (Outcome C, possibly C->B)
+## task14-gate5-full-gtzan-result: Outcome C -- measurable coarse-structure generalization without recognizable audio reconstruction; Gate 5 not passed
 
 **Headline.** At full GTZAN scale there is a **small but statistically reliable held-out
-conditioning dependence** at the waveform level, and a **large, near-universal** one at the
-spectral level. MuQ generalizes spectral structure surprisingly well; the current pipeline cannot
-yet translate that into strong waveform-level reconstruction on unseen tracks. **TASK-14 did not
-find "nothing."**
+conditioning dependence** at the waveform level, and a **large, near-universal** one on log-mel.
+Listening and a contour analysis narrow down what transfers: a coarse loudness/brightness
+envelope over time, not recognizable musical content. **TASK-14 did not find "nothing"** -- the
+effect is measurable where TASK-13 found none -- **but it is barely audible**, and the pipeline
+cannot yet turn it into waveform-level reconstruction.
 
 **Context.** The user ran the full Gate 5 job on BlueHive (`sbatch bluehive/run_task14.slurm`,
 job `1956835`, Tesla T4, 2026-09-23/24; 300,000 steps over all 792 training tracks) and copied its
@@ -3332,10 +3333,28 @@ at ~1-3% of the EnCodec oracle (oracle waveform corr 0.91); the metric plateaued
 Over-smoothed, not collapsed: variance ratio 0.27/0.29, norm ratio 0.96. Latent cosine is
 0.945-0.975 even with zero conditioning -- uninformative, as TASK-12 found.
 
-**Classification: Outcome C, possibly C->B.** C fits the core pattern: MuQ predicts aspects of
-EnCodec space that transfer to unseen tracks but aren't decoder-relevant enough for waveform
-reconstruction. It may move to B because log-mel/STFT are audio-domain metrics that do separate
-the conditions; a listening pass decides. Not D (distinguishable from controls on every metric,
+**Listening (user, 2026-09-24; 6 blues crops, not blinded).** All `correct` reconstructions are
+bad; only `test_blues.00005_c0_correct` vaguely resembles the original/oracle, and for that crop
+`shuffled_across`/`shuffled_time` are not very different from it. **Contour analysis of the same
+WAVs**: correlation with the original's loudness contour (RMS dB) / brightness contour (spectral
+centroid) is 0.78 / 0.68 for `correct` vs. 0.19 / -0.01, 0.07 / 0.02, and 0.12 / -0.05 for the
+three controls; the crop the listener singled out has the best match (0.94 / 0.97). So the
+envelope does transfer and is track-specific, but with no pitch, harmony, timbre, or rhythmic
+detail it doesn't make the output sound like the song.
+
+**Classification: Outcome C -- measurable coarse-structure generalization without recognizable
+audio reconstruction.**
+1. The held-out signal is statistically reliable (CIs exclude zero vs. every control, both splits).
+2. Correct conditioning materially affects coarse spectral-energy trajectories (log-mel 0.73 vs.
+   0.35-0.39; loudness/brightness contour r 0.78/0.68 vs. ~0 for controls).
+3. Temporal ordering contributes, but less than track identity (log-mel cost ~0.07 for
+   time-shuffling vs. ~0.35 for another track's MuQ).
+4. Waveform recovery is negligible on average (~3% of oracle; deltas below the 0.05 bar).
+5. Listening does not support recognizable source correspondence.
+6. Gate 5 does not pass.
+
+Not B: B requires a practically meaningful or audibly convincing held-out reconstruction effect,
+and neither the waveform metric nor listening provides one. Not D, E, or F (see above). Not D (distinguishable from controls on every metric,
 split, and genre), not E (no collapse), not F (oracle invariant across controls, no non-finite
 values, splits disjoint).
 
@@ -3352,15 +3371,19 @@ against more of the same training fixing it. Plausible contributors to the wavef
 tested: phase-blind input (MuQ), a latent MSE+cosine objective with no decoder-aware term, and
 heavy over-smoothing.
 
-**Decision.** Gate 5 NOT PASSED: the primary endpoint misses materiality and no listening has been
-done. Next is a user decision: (a) listen to a representative held-out set, and (b) decide whether
-Gate 5's primary endpoint should remain waveform-only.
+**Decision.** Gate 5 NOT PASSED: the primary endpoint misses materiality and listening does not
+support source correspondence. The genre-diverse listening set (especially
+`test_classical.00031_c1`, once `best.pt` is copied from BlueHive) is a robustness check on this
+conclusion, not a likely route to passing Gate 5. Next direction is the user's call. Bottom line:
+do not say TASK-14 found nothing; do not call the reconstruction successful.
 
 **Follow-ups.** Fixed after the run: listening selection is now worst/median/best per split by the
 primary metric (`gate5_common.select_listening_labels`), replacing first-N-in-sort-order, which
 had yielded six blues crops; new `scripts/export_gate5_listening.py` regenerates that set for a
 finished run from its checkpoint (needs `best.pt` from BlueHive); the periodic validation print is
-correctly labelled. Still open: the outcome rule considers only the waveform metric; no
-`wandb.Audio` logging.
+correctly labelled; the W&B architecture tag `spectrogram-to-dac-translator` (the translator
+class's historical name, which mislabels a MuQ-to-EnCodec run) is replaced in both Gate 5 configs by
+`muq-to-encodec-temporal-conv` -- job 1956835's W&B run still carries the old tag. Still open: the
+outcome rule considers only the waveform metric; no `wandb.Audio` logging.
 
 **Rollback plan.** None needed -- experimental result. Checkpoints remain on BlueHive scratch.

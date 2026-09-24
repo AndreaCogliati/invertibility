@@ -2,12 +2,27 @@
 
 ## Current gate
 
-**Gate 5 full-GTZAN pilot: run complete, NOT PASSED. Outcome C, possibly C->B pending listening.**
+**Gate 5 full-GTZAN pilot: run complete, NOT PASSED. Outcome C -- measurable coarse-structure
+generalization without recognizable audio reconstruction.**
 
-**Headline: MuQ generalizes spectral structure to unseen tracks surprisingly well, but the
-current pipeline cannot yet turn that into strong waveform-level reconstruction. TASK-14 did not
-find "nothing."** There is a small but statistically reliable held-out conditioning dependence at
-the waveform level, and a large, near-universal one at the spectral level.
+1. The held-out signal is statistically reliable.
+2. Correct conditioning materially affects coarse spectral-energy trajectories.
+3. Temporal ordering contributes, but less than track identity.
+4. Waveform recovery is negligible on average.
+5. Listening does not support recognizable source correspondence.
+6. Gate 5 does not pass.
+
+**Bottom line: do not say TASK-14 found nothing; do not call the reconstruction successful.**
+Correct MuQ conditioning transfers a measurable coarse envelope to unseen tracks, but not enough
+to yield recognizable music in the listened examples. Not B: that would need a practically
+meaningful or audibly convincing effect.
+
+**Listening (user, 2026-09-24; 6 blues crops, not blinded):** all `correct` reconstructions are
+bad. Only `test_blues.00005_c0_correct` vaguely resembles the original/oracle, and its
+`shuffled_across`/`shuffled_time` versions sound similar. A contour check on the same WAVs:
+`correct` matches the original's loudness/brightness contours at r = 0.78 / 0.68 vs. ~0 for every
+control, and the listener's pick has the best match (0.94 / 0.97). The envelope transfers; nothing
+recognizable does.
 
 The user ran the full job on BlueHive (`sbatch bluehive/run_task14.slurm`, job `1956835`, Tesla
 T4, 31,078.4s) and copied its logs, `report.json`, and 36 WAVs into `bluehive/logs/` and
@@ -63,20 +78,22 @@ uv run pytest -q; uv run ruff check .   # 219 passed, clean
        --report bluehive/artifacts/task14_gate5_full_gtzan/report.json
    ```
    That writes worst/median/best per split: val hiphop.00016 / country.00031 / reggae.00012,
-   test hiphop.00004 / pop.00098 / classical.00031. Listen for whether correct conditioning keeps
-   the original's timbre, brightness, and energy contour where `shuffled_across` does not, and
-   whether it misses onsets and pitch contour. The result decides C vs. B.
+   test hiphop.00004 / pop.00098 / classical.00031. This is a robustness check on the Outcome C
+   conclusion across genres, not a likely route to passing Gate 5. Start with
+   `test_classical.00031_c1`, the crop most likely to be recognizable.
 2. **Decide Gate 5's primary endpoint.** Keep it waveform-only (then work on the waveform gap:
    objective, over-smoothing, phase), or add a spectral endpoint (needs a pre-registered
    threshold, since none was defined for log-mel).
 3. **Remaining script fixes** if another Gate 5 run is planned: make the outcome rule use more
-   than the waveform metric; add `wandb.Audio`; optionally track log-mel per checkpoint.
+   than the waveform metric; add `wandb.Audio`; optionally track log-mel per checkpoint. (The
+   stale `spectrogram-to-dac-translator` W&B tag is already fixed in both configs.)
 
 ## Blockers
 
 1. **User decision** on the endpoint question and next direction.
 2. **`best.pt` not local** -- needed for the representative listening set.
-3. **Listening verdicts pending**: TASK-14, plus the backlog (TASK-13, TASK-12 80k/320k, TASK-11,
+3. **Listening**: TASK-14 done on the blues-only subset (see above); genre-diverse set pending.
+   Backlog still pending (TASK-13, TASK-12 80k/320k, TASK-11,
    TASK-10, TASK-08, TASK-02, TASK-01).
 4. Carried over from TASK-13: pooled vs. held-out-only Gate 4 criteria.
 5. TASK-03's BlueHive job still not run; `experiment/mel-hifigan-sanity` diagnostic pending.
@@ -84,14 +101,16 @@ uv run pytest -q; uv run ruff check .   # 219 passed, clean
 ## Expected verification criteria for Gate 5
 
 Evaluated: NOT PASSED. Primary waveform endpoint missed materiality (max paired delta 0.025 vs.
-0.05); listening not done. Replication across val/test: yes. Breadth across tracks and genres:
+0.05); listening (limited) does not support source correspondence. Replication across val/test: yes. Breadth across tracks and genres:
 yes. Collapse: no. Defects: none found.
 
 ## Notes for whoever resumes this
 
 - Read `artifacts/task14_gate5_full_gtzan/TASK-14_RESULTS.md` first.
-- **Do not conclude TASK-14 found nothing.** It found reliable, temporally-ordered, per-track
-  spectral generalization from MuQ to unseen tracks. What failed is waveform-level recovery.
+- **Do not conclude TASK-14 found nothing, and do not oversell it.** It found a reliable,
+  temporally-ordered, per-track loudness/brightness envelope transferring from MuQ to unseen
+  tracks. It is measurable but barely audible; recognizable content and waveform-level recovery
+  did not transfer.
 - **Do not cite the script's printed "Outcome D".** Its rule is waveform-only.
 - **Separate waveform from spectral claims.** "No generalization" and "full generalization" are
   both wrong.

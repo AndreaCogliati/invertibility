@@ -65,4 +65,7 @@ run_dir_name: task14_gate5_full_gtzan
 artifact_dir_name: task14_gate5_full_gtzan
 
 wandb_group: task14-gate5-full-gtzan
-wandb_tags: [task14, gate5, gtzan-full, muq, encodec, bluehive, spectrogram-to-dac-translator]
+# Architecture tag: frozen MuQ -> temporal-conv translator -> frozen EnCodec latent. The Python
+# class is `SpectrogramToDacTranslator` for historical reasons (TASK-01); don't tag runs with that
+# name -- this pipeline uses neither spectrogram input nor a DAC target.
+wandb_tags: [task14, gate5, gtzan-full, muq, encodec, bluehive, muq-to-encodec-temporal-conv]
