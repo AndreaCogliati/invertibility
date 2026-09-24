@@ -43,7 +43,8 @@ early_diagnostic_step: 10
 intermediate_checkpoint_steps: [15]
 checkpoint_every: 10
 
-listening_subset_size: 1
+# Listening artifacts: worst/median/best crop per held-out split by the primary metric
+# (oracle_relative_waveform_recovery) -- see gate5_common.select_listening_labels.
 
 run_dir_name: task14_gate5_smoke
 artifact_dir_name: task14_gate5_smoke

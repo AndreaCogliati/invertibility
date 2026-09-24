@@ -3297,65 +3297,70 @@ incorrect data -- only this environment's local exit-code check was wrong.
 
 ---
 
-## task14-gate5-full-gtzan-result: Full scale yields spectral-level held-out generalization, not waveform-level -- Gate 5 not passed (Outcome B)
+## task14-gate5-full-gtzan-result: MuQ generalizes spectral structure to unseen tracks, but not waveform detail -- Gate 5 not passed (Outcome C, possibly C->B)
 
-**Context.** The user submitted the full Gate 5 job on BlueHive (`sbatch bluehive/run_task14.slurm`,
+**Headline.** At full GTZAN scale there is a **small but statistically reliable held-out
+conditioning dependence** at the waveform level, and a **large, near-universal** one at the
+spectral level. MuQ generalizes spectral structure surprisingly well; the current pipeline cannot
+yet translate that into strong waveform-level reconstruction on unseen tracks. **TASK-14 did not
+find "nothing."**
+
+**Context.** The user ran the full Gate 5 job on BlueHive (`sbatch bluehive/run_task14.slurm`,
 job `1956835`, Tesla T4, 2026-09-23/24; 300,000 steps over all 792 training tracks) and copied its
-logs, `report.json`, and 36 listening WAVs into `bluehive/logs/` and `bluehive/artifacts/`
-(git-ignored). Completed cleanly in 31,078.4s (~8.6 h). Full write-up:
+logs, `report.json`, and 36 WAVs into `bluehive/logs/` and `bluehive/artifacts/` (git-ignored).
+Completed cleanly in 31,078.4s (~8.6 h). Best checkpoint: step 38,000. Full write-up:
 `artifacts/task14_gate5_full_gtzan/TASK-14_RESULTS.md`.
 
-**Correction.** A first version of this entry, written from the stdout logs before `report.json`
-was available, called this Outcome D ("no held-out conditioning dependence") and said it refuted
-TASK-13's data-scale hypothesis. **Both claims were wrong.** The logs only showed aggregate
-waveform correlations, which are near zero for every condition. The per-example data shows a
-consistent held-out effect. The script's own automated rule also printed "D", because it only
-checks the waveform metric against the 0.05 margin -- too coarse to separate B from D.
+**Spectral result (not part of Gate 5's primary endpoint, but the main finding):**
 
-**Result (best checkpoint, step 38,000; val n=188 / test n=226 crops):**
+| held-out (val / test) | log-mel similarity | STFT distance |
+| --- | --- | --- |
+| correct | 0.728 / 0.726 | 2.56 / 2.56 |
+| shuffled_across | 0.353 / 0.388 | 3.90 / 3.60 |
+| shuffled_time | 0.661 / 0.647 | 2.76 / 2.80 |
+| constant_zero | -0.035 / -0.013 | 3.91 / 3.85 |
 
-| | oracle-rel. recovery (val / test) | log-mel sim (val / test) | variance ratio (val) |
-| --- | --- | --- | --- |
-| correct | 0.0285 / 0.0315 | 0.728 / 0.726 | 0.266 |
-| shuffled_across | 0.0152 / 0.0150 | 0.353 / 0.388 | 0.349 |
-| shuffled_time | 0.0173 / 0.0172 | 0.661 / 0.647 | 0.199 |
-| constant_zero | 0.0068 / 0.0068 | -0.035 / -0.013 | 0.0001 |
+Correct beats `shuffled_across` on log-mel for 99-100% of held-out crops, `shuffled_time` for
+98-99%, `constant_zero` for 100%; STFT agrees; every bootstrap CI excludes zero; positive in all
+10 genres. So the translator infers each unseen track's spectral content from MuQ, using temporal
+order (modest but near-universal: log-mel +0.07 over time-shuffled).
 
-- **Waveform (primary endpoint): real but not material.** Correct beats every control on both
-  splits, bootstrap 95% CIs exclude zero, 74-93% of paired examples positive. But mean deltas are
-  0.011-0.025 vs. the 0.05 bar, and all conditions sit at ~1-3% of the EnCodec oracle's waveform
-  correlation (oracle: 0.91). This metric plateaued by ~step 2,000-6,000 (150 checkpoints,
-  0.0254 +/- 0.0013).
-- **Spectral: large and near-universal.** Log-mel paired delta vs. shuffled_across +0.34 to
-  +0.38 (99-100% of examples positive), vs. shuffled_time +0.07 to +0.08 (98-99% positive), vs.
-  constant_zero +0.74 to +0.76 (100%). STFT distance agrees. Positive in all 10 genres. So the
-  translator infers each unseen track's spectral content from its MuQ features, and uses temporal
-  order to do it.
-- **Over-smoothed, not collapsed**: variance ratio 0.27/0.29 (vs. ~1.0 reference), norm ratio
-  0.96. Latent cosine is 0.945-0.975 for *all* conditions including zero conditioning --
-  uninformative again, as TASK-12 found.
-- Sanity: oracle metrics identical across controls (per example), no non-finite values, all 792
-  tracks sampled 318-432 times each.
+**Waveform result (Gate 5's primary endpoint, oracle-relative waveform recovery):** correct
+0.0285 val / 0.0315 test vs. controls 0.0068-0.0173. Paired deltas 0.011-0.025, CIs exclude zero,
+74-93% of examples positive -- reliable, but below the 0.05 materiality bar. Every condition sits
+at ~1-3% of the EnCodec oracle (oracle waveform corr 0.91); the metric plateaued by ~step 6,000.
+Over-smoothed, not collapsed: variance ratio 0.27/0.29, norm ratio 0.96. Latent cosine is
+0.945-0.975 even with zero conditioning -- uninformative, as TASK-12 found.
 
-**Interpretation.** Outcome B (partial generalization), with a specific shape: spectral-envelope
-generalization without waveform generalization. TASK-13's "too little data" hypothesis is
-**partly supported**: more data turned TASK-13's null held-out result (4 crops) into a
-consistent, source-specific, temporally-ordered spectral signal. It did not rescue waveform-level
-reconstruction, and that metric's early plateau argues against more of the same training fixing
-it. Plausible contributors to the waveform gap, none tested: phase-blind input (MuQ), a latent
-MSE+cosine objective with no decoder-aware term, and heavy over-smoothing.
+**Classification: Outcome C, possibly C->B.** C fits the core pattern: MuQ predicts aspects of
+EnCodec space that transfer to unseen tracks but aren't decoder-relevant enough for waveform
+reconstruction. It may move to B because log-mel/STFT are audio-domain metrics that do separate
+the conditions; a listening pass decides. Not D (distinguishable from controls on every metric,
+split, and genre), not E (no collapse), not F (oracle invariant across controls, no non-finite
+values, splits disjoint).
 
-**Decision.** Gate 5 NOT PASSED: the primary endpoint misses materiality and no listening
-evaluation has been done. Do not proceed as if passed. The next step is a user decision. Two
-cheap, direct follow-ups: (a) a listening pass on a genre-diverse held-out subset (the saved
-subset is all blues -- a script artifact, see below), and (b) deciding whether Gate 5's primary
-endpoint should remain waveform-based given this evidence. Beyond those, the evidence points at
-objective/target geometry and over-smoothing rather than data scale.
+**The implementation's automatic rule classified the run as D.** `scripts/train_gate5_full_gtzan_wandb.py`
+considers only the waveform metric and the 0.05 materiality threshold, so it cannot distinguish
+B, C, or D. Its printed "Outcome D" is superseded; do not cite it. A first, log-only version of
+this entry also said D and claimed TASK-13's data hypothesis was refuted -- both wrong once the
+per-example data was read.
 
-**Consequences / follow-ups found (not yet fixed):** in `scripts/train_gate5_full_gtzan_wandb.py`,
-(1) the automated outcome rule only distinguishes pass vs. D on the waveform metric; (2) the
-periodic validation print labels oracle-relative recovery as `wav_corr_to_oracle`; (3) no
-`wandb.Audio` logging; (4) the listening subset is the first N labels in sort order, so all six
-crops are blues. None affects recorded metrics.
+**Interpretation.** TASK-13's "too little data" hypothesis is partly supported: more data turned
+TASK-13's null held-out result into a consistent, source-specific, temporally-ordered spectral
+signal. It did not rescue waveform-level reconstruction, and that metric's early plateau argues
+against more of the same training fixing it. Plausible contributors to the waveform gap, none
+tested: phase-blind input (MuQ), a latent MSE+cosine objective with no decoder-aware term, and
+heavy over-smoothing.
+
+**Decision.** Gate 5 NOT PASSED: the primary endpoint misses materiality and no listening has been
+done. Next is a user decision: (a) listen to a representative held-out set, and (b) decide whether
+Gate 5's primary endpoint should remain waveform-only.
+
+**Follow-ups.** Fixed after the run: listening selection is now worst/median/best per split by the
+primary metric (`gate5_common.select_listening_labels`), replacing first-N-in-sort-order, which
+had yielded six blues crops; new `scripts/export_gate5_listening.py` regenerates that set for a
+finished run from its checkpoint (needs `best.pt` from BlueHive); the periodic validation print is
+correctly labelled. Still open: the outcome rule considers only the waveform metric; no
+`wandb.Audio` logging.
 
 **Rollback plan.** None needed -- experimental result. Checkpoints remain on BlueHive scratch.

@@ -37,7 +37,6 @@ from pathlib import Path
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import numpy as np
-import soundfile as sf
 import torch
 from torch import nn
 
@@ -64,7 +63,9 @@ from muq_inversion.gate5_common import (
     load_train_crop_waveform,
     load_train_tracks,
     paired_delta_stats,
+    select_listening_labels,
     write_limited_heldout_manifest,
+    write_listening_artifacts,
 )
 from muq_inversion.logging_utils import (
     DeviceSelectionError,
@@ -104,11 +105,6 @@ def _save_atomic(path: Path, state: dict) -> None:
     except BaseException:
         Path(tmp_path).unlink(missing_ok=True)
         raise
-
-
-def _write_wav(path: Path, waveform: torch.Tensor, sample_rate: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(str(path), waveform.detach().cpu().numpy().astype(np.float32), sample_rate)
 
 
 def _rng_snapshot() -> dict:
@@ -395,7 +391,7 @@ def main() -> None:
             log_payload = {f"val/distribution/{m}_{s}": agg[m][s] for m in agg for s in agg[m]}
             log_payload["val/checkpoint_selection_metric"] = val_metric
             run.log(log_payload, step=step)
-            print(f"    val (correct-conditioning) wav_corr_to_oracle mean={val_metric:.4f}")
+            print(f"    val (correct-conditioning) oracle_relative_waveform_recovery mean={val_metric:.4f}")
 
             if val_metric > best_metric:
                 best_metric = val_metric
@@ -542,23 +538,19 @@ def main() -> None:
         }
     )
 
-    # ---- Listening artifacts: fixed representative subset ----
+    # ---- Listening artifacts: worst/median/best per held-out split by the primary metric ----
     print("\n--- Saving listening artifacts ---")
-    listen_rng = random.Random(config.seed)
-    val_subset = val_labels[: config.listening_subset_size]
-    test_subset = test_labels[: config.listening_subset_size]
-    for label in val_subset + test_subset:
-        ex = heldout_examples[label]
-        with torch.no_grad():
-            oracle_audio = encodec.decode(ex.target.transpose(1, 2)).squeeze(0).cpu()
-        _write_wav(artifact_root / f"{label}_original.wav", ex.waveform.squeeze(0).cpu(), config.sample_rate)
-        _write_wav(artifact_root / f"{label}_encodec_oracle.wav", oracle_audio, config.sample_rate)
-        for mode in CONDITIONING_MODES:
-            with torch.no_grad():
-                conditioned = build_conditioning(mode, ex, all_heldout, frame_ratio, listen_rng)
-                pred_audio = encodec.decode(eval_model(conditioned).transpose(1, 2)).squeeze(0).cpu()
-            _write_wav(artifact_root / f"{label}_{mode}.wav", pred_audio, config.sample_rate)
-        print(f"  wrote listening artifacts for {label}")
+    correct_per_example = control_report["correct"]["per_example"]
+    listening_selection = {
+        split_name: select_listening_labels(correct_per_example, labels, PRIMARY_METRIC)
+        for split_name, labels in (("val", val_labels), ("test", test_labels))
+    }
+    for split_name, roles in listening_selection.items():
+        print(f"  {split_name}: " + ", ".join(f"{role}={lbl}" for role, lbl in roles.items()))
+    write_listening_artifacts(
+        [lbl for roles in listening_selection.values() for lbl in roles.values()],
+        heldout_examples, eval_model, encodec, frame_ratio, config.seed, artifact_root, config.sample_rate,
+    )
 
     ranking = rank_examples_by_metric(control_report["correct"]["per_example"])
     worst_label, median_label, best_label = ranking[0], ranking[len(ranking) // 2], ranking[-1]
@@ -585,6 +577,7 @@ def main() -> None:
             "passed": gate5_passed,
         },
         "best_median_worst_correct": {"best": best_label, "median": median_label, "worst": worst_label},
+        "listening_selection": {"metric": PRIMARY_METRIC, **listening_selection},
     }
     report_path = artifact_root / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)

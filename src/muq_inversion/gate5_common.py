@@ -64,7 +64,6 @@ class Gate5Config:
     early_diagnostic_step: int
     intermediate_checkpoint_steps: tuple[int, ...]
     checkpoint_every: int
-    listening_subset_size: int
     run_dir_name: str
     artifact_dir_name: str
     wandb_group: str
@@ -305,6 +304,59 @@ def compute_held_out_audio_metrics(
         "stft_distance": stft_distance,
         "lag_applied_original_vs_translator": lag2,
     }
+
+
+def select_listening_labels(
+    per_example: dict[str, dict[str, float]], labels: list[str], metric: str
+) -> dict[str, str]:
+    """Worst/median/best crop among `labels` by `metric` (ties broken by label, so the choice is
+    deterministic). Replaces the original first-N-in-sort-order listening subset, which picked six
+    blues crops from three tracks in TASK-14's full run."""
+    if not labels:
+        raise ValueError("select_listening_labels needs at least one label")
+    ranked = sorted(labels, key=lambda lbl: (per_example[lbl][metric], lbl))
+    return {"worst": ranked[0], "median": ranked[len(ranked) // 2], "best": ranked[-1]}
+
+
+def write_listening_artifacts(
+    labels: list[str],
+    heldout_examples: dict,
+    model: torch.nn.Module,
+    encodec,
+    frame_ratio: int,
+    seed: int,
+    out_dir: Path,
+    sample_rate: int,
+) -> None:
+    """Writes original, EnCodec oracle, and all four conditioning reconstructions for each label.
+    Shared by the training script and `scripts/export_gate5_listening.py` so both produce the same
+    files; the control RNG is seeded once and consumed in `labels` order, and `shuffled_across`
+    draws from the full held-out pool in both."""
+    import soundfile as sf
+
+    from muq_inversion.gate4_encodec_common import (
+        CONDITIONING_MODES,
+        build_conditioning,
+    )
+
+    def _write(path: Path, waveform: torch.Tensor) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(path), waveform.detach().cpu().numpy().astype(np.float32), sample_rate)
+
+    rng = random.Random(seed)
+    pool = list(heldout_examples.values())
+    model.eval()
+    for label in labels:
+        ex = heldout_examples[label]
+        with torch.no_grad():
+            oracle_audio = encodec.decode(ex.target.transpose(1, 2)).squeeze(0)
+        _write(out_dir / f"{label}_original.wav", ex.waveform.squeeze(0))
+        _write(out_dir / f"{label}_encodec_oracle.wav", oracle_audio)
+        for mode in CONDITIONING_MODES:
+            with torch.no_grad():
+                conditioned = build_conditioning(mode, ex, pool, frame_ratio, rng)
+                pred_audio = encodec.decode(model(conditioned).transpose(1, 2)).squeeze(0)
+            _write(out_dir / f"{label}_{mode}.wav", pred_audio)
 
 
 def paired_delta_stats(

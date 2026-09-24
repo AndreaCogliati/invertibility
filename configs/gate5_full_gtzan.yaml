@@ -58,9 +58,8 @@ early_diagnostic_step: 5000
 intermediate_checkpoint_steps: [50000, 100000, 150000, 200000, 250000]
 checkpoint_every: 10000
 
-# Fixed representative listening subset: first N val + N test tracks by track_id (deterministic,
-# no random selection), matching this project's existing "small fixed set" listening convention.
-listening_subset_size: 3
+# Listening artifacts: worst/median/best crop per held-out split by the primary metric
+# (oracle_relative_waveform_recovery) -- see gate5_common.select_listening_labels.
 
 run_dir_name: task14_gate5_full_gtzan
 artifact_dir_name: task14_gate5_full_gtzan

@@ -22,6 +22,7 @@ from muq_inversion.gate5_common import (
     load_train_tracks,
     oracle_relative_recovery,
     paired_delta_stats,
+    select_listening_labels,
     write_limited_heldout_manifest,
 )
 from muq_inversion.logging_utils import select_device
@@ -303,3 +304,29 @@ def test_compute_held_out_audio_metrics_uncorrelated_prediction(encodec, device,
     metrics = compute_held_out_audio_metrics(original, oracle_audio, unrelated_prediction, stft_loss_fn, device)
     assert abs(metrics["original_to_translator_correlation"]) < 0.2
     assert metrics["original_to_oracle_correlation"] > 0.5  # the oracle itself is a real reconstruction
+
+
+# ---- select_listening_labels ----
+
+
+def test_select_listening_labels_worst_median_best():
+    per_example = {f"val_t{i}_c0": {"m": float(v)} for i, v in enumerate([0.3, 0.1, 0.5, 0.2, 0.4])}
+    sel = select_listening_labels(per_example, sorted(per_example), "m")
+    assert sel == {"worst": "val_t1_c0", "median": "val_t0_c0", "best": "val_t2_c0"}
+
+
+def test_select_listening_labels_ties_are_deterministic():
+    per_example = {"b": {"m": 0.0}, "a": {"m": 0.0}, "c": {"m": 0.0}}
+    assert select_listening_labels(per_example, ["c", "b", "a"], "m") == {"worst": "a", "median": "b", "best": "c"}
+
+
+def test_select_listening_labels_only_considers_given_labels():
+    per_example = {"val_x": {"m": 0.9}, "test_y": {"m": 0.1}, "test_z": {"m": 0.5}}
+    sel = select_listening_labels(per_example, ["test_y", "test_z"], "m")
+    assert "val_x" not in sel.values()
+    assert sel["best"] == "test_z"
+
+
+def test_select_listening_labels_requires_labels():
+    with pytest.raises(ValueError, match="at least one label"):
+        select_listening_labels({}, [], "m")
