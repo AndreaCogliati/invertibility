@@ -681,3 +681,22 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   (~116ms/step), not a real BlueHive measurement -- correct after the first submission. TASK-13's
   own files untouched. **Not committed** -- per this task's explicit instruction; no Gate 5
   scientific conclusion drawn. Full write-up in [[task14-gate5-full-gtzan-pilot]].
+- Gate 5 full-GTZAN pilot RESULT (2026-09-23/24, BlueHive job `1956835`, submitted by the user;
+  logs + `report.json` + 36 WAVs in `bluehive/logs/` and `bluehive/artifacts/`, git-ignored):
+  **Gate 5 NOT PASSED, Outcome B (partial generalization)** -- spectral-level held-out
+  generalization, not waveform-level. (An earlier log-only version of this note said Outcome D /
+  "refutes TASK-13's data hypothesis"; that was wrong and is corrected.) Best checkpoint step
+  38,000. Waveform primary endpoint (oracle-relative recovery): correct 0.0285 val / 0.0315 test vs.
+  controls 0.0068-0.0173 -- CIs exclude zero, 74-93% of paired examples positive, but deltas
+  0.011-0.025 miss the 0.05 materiality bar; every condition is at ~1-3% of the EnCodec oracle
+  (oracle waveform corr 0.91); plateaued by ~step 6,000. **Log-mel similarity: correct 0.73 vs.
+  shuffled_across 0.35-0.39, shuffled_time 0.65-0.66, constant_zero ~0** -- correct beats
+  shuffled_across on 99-100% and shuffled_time on 98-99% of held-out crops, positive in all 10
+  genres. So MuQ-conditioned translation generalizes coarse, temporally-ordered spectral content
+  to unseen tracks, but not waveform detail. Variance ratio 0.27/0.29 (over-smoothed, not
+  collapsed); latent cosine 0.945-0.975 even with zero conditioning (uninformative). TASK-13's
+  data-scale hypothesis is partly supported (data fixed the spectral level, not the waveform
+  level). Listening not yet done; the saved listening subset is all blues (sort-order artifact).
+  Script follow-ups noted, not fixed: outcome rule only checks the waveform metric, mislabeled
+  periodic val print, no `wandb.Audio`, non-diverse listening subset. Full write-up in
+  [[task14-gate5-full-gtzan-result]].
