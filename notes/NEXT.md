@@ -14,6 +14,8 @@ regime.** Separate from the EnCodec line; not a generalization result. Write-up:
 - N=8: mel memorized within the vocoder's round-trip error on all 8 crops; 6/8 pass every
   criterion. hiphop.00001 and jazz.00000 miss only pred-vs-oracle waveform corr >= 0.90 (0.898,
   0.888), still rising when the fixed 5,000-step budget ended. Not extended.
+- **Listening (user, 2026-10-16): success at both N=2 and N=8**, including the two near-miss
+  crops. Conclusion: mechanically viable at N=2 and N=8.
 - Shuffled-across control fails on every crop.
 
 **Exact commands:**
@@ -25,13 +27,9 @@ uv run python scripts/train_task15_bigvgan_memorization.py --n 2         # W&B s
 uv run python scripts/train_task15_bigvgan_memorization.py --n 8         # W&B xl3nmbjt
 ```
 
-**Next (user's call; nothing authorized):**
-1. Listen: `artifacts/task15_bigvgan_memorization/{n2,n8}/<track>_{original,bigvgan_oracle,predicted,shuffled_across}.wav`,
-   and `oracle/` for the positive control. Does `predicted` match `bigvgan_oracle`?
-2. Optional: rerun N=8 with a longer, pre-declared budget to settle the two near-misses. A budget
-   change, so it needs your go-ahead.
-3. TASK-15 explicitly excludes held-out tests, N > 8, MuQ-layer changes, and loss/architecture
-   sweeps.
+**Next (user's call; nothing authorized):** TASK-15 is complete -- listening done (success at
+N=2 and N=8), so the optional longer N=8 rerun isn't needed. TASK-15 explicitly excluded held-out
+tests, N > 8, MuQ-layer changes, and loss/architecture sweeps; any of those would be a new task.
 
 Committed on request (code, config, tests, notes); artifacts and `third_party/` are git-ignored.
 

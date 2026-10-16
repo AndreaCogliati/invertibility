@@ -723,5 +723,6 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   pred-vs-oracle corr >= 0.90 (0.898, 0.888, still rising at the 5k-step budget end); mel
   memorized within vocoder round-trip on all 8. Shuffled-across fails everywhere. Adam + L1 at
   constant LR spikes near the minimum (N=2's final step jumped 0.025 -> 0.41) -- evaluate the best
-  checkpoint too. Listening pending. Not a generalization result. Full write-up in
+  checkpoint too. **Listening (user, 2026-10-16): success at N=2 and N=8**, including the two
+  near-miss crops -- viable at both N. Not a generalization result. Full write-up in
   [[task15-bigvgan-memorization]].

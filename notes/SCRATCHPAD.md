@@ -1727,3 +1727,7 @@ Checked n8/jazz.00000_mel_comparison.png by eye: pred indistinguishable from tar
 map; shuffled panel clearly the paired crop's mel.
 
 Runs: W&B seni7345 (N=2), xl3nmbjt (N=8). Train time 38 s / 69 s on MPS.
+
+2026-10-16 (later): user listening verdict -- success at N=2 and N=8, including the two N=8
+crops below the 0.90 pred-vs-oracle waveform-corr bar (hiphop.00001 0.898, jazz.00000 0.888).
+That bar was stricter than perceptual equivalence. TASK-15 closed: viable at N=2 and N=8.

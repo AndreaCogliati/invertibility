@@ -3436,8 +3436,11 @@ crops for training and evaluation. Not a generalization test. Full write-up:
 
 **Conclusion.** The pipeline is mechanically viable in the small-N memorization regime. N=2 passes
 fully. N=8 memorizes the mel well within the vocoder's own round-trip error on every crop but
-strictly misses one criterion on 2/8 crops. No claim about generalization or MuQ invertibility.
-Listening pending. The step budget was not extended after seeing the N=8 result.
+strictly misses one criterion on 2/8 crops. The step budget was not extended after seeing the N=8
+result. **Listening (user, 2026-10-16; one listener, not blinded): success at both N=2 and N=8** --
+predicted reconstructions match the BigVGAN oracle perceptually, including the two N=8 near-miss
+crops, so the 0.90 waveform-correlation bar was stricter than perceptual equivalence. Final:
+**mechanically viable at N=2 and N=8.** No claim about generalization or MuQ invertibility.
 
 **Rollback plan.** Entirely additive (new files + one `.gitignore` line). Delete them and
 `third_party/` to revert.
