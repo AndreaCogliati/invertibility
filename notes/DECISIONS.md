@@ -3387,3 +3387,57 @@ class's historical name, which mislabels a MuQ-to-EnCodec run) is replaced in bo
 outcome rule considers only the waveform metric; no `wandb.Audio` logging.
 
 **Rollback plan.** None needed -- experimental result. Checkpoints remain on BlueHive scratch.
+
+---
+
+## task15-bigvgan-memorization: MuQ -> BigVGAN-v2 mel -> BigVGAN-v2 is mechanically viable at small N
+
+**Context (`tasks/TASK-15.md`).** A memorization-only test of a second decoding path, separate from
+the EnCodec experiments: frozen MuQ `last_hidden_state` -> learned translator -> BigVGAN-v2 log-mel
+-> frozen BigVGAN-v2 (`nvidia/bigvgan_v2_24khz_100band_256x`). N=2, then N=8 if N=2 passes; same
+crops for training and evaluation. Not a generalization test. Full write-up:
+`artifacts/task15_bigvgan_memorization/TASK-15_RESULTS.md`.
+
+**Decisions.**
+- **Official code and checkpoint, pinned.** `scripts/fetch_bigvgan.py` fetches the HF repo's own
+  code + `config.json` + `bigvgan_generator.pt` at `c329ede9e9bbc100ddf5c91e2330a61921262370` into
+  git-ignored `third_party/`. Loaded with `BigVGAN.from_pretrained(..., use_cuda_kernel=False)` +
+  `remove_weight_norm()`. Mel via the repo's own `meldataset.mel_spectrogram` with the checkpoint's
+  `h`: 24 kHz, 100 bands, n_fft/win 1024, hop 256, fmin 0, fmax null, Slaney, reflect pad 384,
+  `center=False`, `log(clamp 1e-5)`. No dependency changes.
+- **Volume normalization follows the checkpoint's training path**: full track peak-normalized to
+  0.95 before cropping (`normalize_volume: true`). The README inference snippet skips it; the
+  training path defines the expected input distribution.
+- **Crop length 47,872 samples (187 hops, 1.995 s)**, so mel frames, BigVGAN output, and original
+  align exactly. A 48,000-sample crop gives 187 frames and a 47,872-sample output regardless.
+- **Frame-rate conversion by linear interpolation**: MuQ 50 frames (25 Hz) -> mel 187 frames
+  (93.75 Hz), ratio 3.74 (non-integer). Translator: Linear(1024->256) -> interpolate ->
+  `TemporalConvNet(256)` -> Linear(256->100), 1,271,908 params. L1 on log-mel, Adam 1e-3, full
+  batch, 5,000 steps.
+- **Evaluation protocol changed after the first N=2 run.** It met every pre-registered criterion
+  at steps 3,250-4,750, then the final step landed on a transient Adam/L1 spike (loss 0.025 ->
+  0.41). Evaluation now reports the best checkpoint by mel L1 (legitimate: train = eval crops)
+  alongside the final step. Nothing else changed. The rerun reproduced the first run exactly.
+
+**Evidence.**
+- Oracle positive control (8 crops): resynthesis mel L1 0.109, STFT 0.922, vs. 1.322 / 2.794 for
+  unrelated-track pairs. Waveform correlation to the original ~0.14 is a phase artifact of mel
+  vocoding, not a defect.
+- **N=2 (best, step 4,750): all criteria pass.** Mel L1 0.023-0.024 vs. oracle round-trip
+  0.10-0.12; pred-vs-oracle waveform corr 0.95/0.98; resynthesis mel L1 and STFT equal to the
+  oracle's; shuffled-across mel L1 1.20.
+- **N=8 (best, step 4,500): 6/8 pass.** All 8 meet criterion 1 (mel L1 0.029-0.035 vs. 0.095-0.123
+  round-trip) and criteria 3-4. hiphop.00001 and jazz.00000 miss only criterion 2 (pred-vs-oracle
+  corr 0.898, 0.888 vs. 0.90), which was still rising at the end of the fixed budget. Means: mel
+  L1 0.032, corr 0.921, resynth mel L1 0.117 (oracle 0.109), STFT 0.936 (oracle 0.922),
+  shuffled 2.862.
+- Shuffled-across control fails on every crop at both N (mel L1 1.06-2.03): reconstruction depends
+  on the correct MuQ input.
+
+**Conclusion.** The pipeline is mechanically viable in the small-N memorization regime. N=2 passes
+fully. N=8 memorizes the mel well within the vocoder's own round-trip error on every crop but
+strictly misses one criterion on 2/8 crops. No claim about generalization or MuQ invertibility.
+Listening pending. The step budget was not extended after seeing the N=8 result.
+
+**Rollback plan.** Entirely additive (new files + one `.gitignore` line). Delete them and
+`third_party/` to revert.

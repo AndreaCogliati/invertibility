@@ -17,3 +17,6 @@ logs/
 wandb/
 
 .DS_Store
+
+# Third-party code/checkpoints fetched by explicit preparation scripts (e.g. scripts/fetch_bigvgan.py)
+third_party/

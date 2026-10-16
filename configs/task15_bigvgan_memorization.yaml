@@ -1,0 +1,54 @@
+# TASK-15: MuQ -> BigVGAN-v2 mel -> frozen BigVGAN-v2, small-N memorization test (N=2, then N=8).
+# Mechanical viability only -- not a generalization experiment. Separate from the EnCodec work.
+
+task: TASK-15
+seed: 0
+device_request: auto
+allow_cpu_fallback: false
+
+# Frozen models. BigVGAN code + weights fetched by scripts/fetch_bigvgan.py at this revision; all
+# mel hyperparameters (24 kHz, 100 bands, n_fft 1024, hop 256, win 1024, fmin 0, fmax null ->
+# 12 kHz, Slaney mel, Hann, reflect pad 384, center=False, log(clamp 1e-5)) come from the
+# checkpoint's own config.json and meldataset.py, never from this file.
+muq_model_id: OpenMuQ/MuQ-large-msd-iter
+bigvgan_repo_id: nvidia/bigvgan_v2_24khz_100band_256x
+bigvgan_revision: c329ede9e9bbc100ddf5c91e2330a61921262370
+
+# Crops: the project's existing nested deterministic sets (2.00 s at 14.0 s per track), trimmed to
+# 187 BigVGAN hops = 47,872 samples (1.995 s) so mel frames, BigVGAN output, and the original align
+# exactly. A full 48,000-sample crop gives 187 frames and a 47,872-sample BigVGAN output anyway.
+manifests:
+  "2": data/manifests/gate3_scale_2.csv
+  "8": data/manifests/gate3_scale_8.csv
+num_mel_hops: 187
+
+# Translator: Linear(1024->256) at 25 Hz, linear interpolation to 187 frames, TemporalConvNet(256)
+# (3x Conv1d k=5, residual), Linear(256->100). See models/muq_mel_translator.py.
+hidden_channels: 256
+
+# Optimization: full batch (all N crops every step; features and targets are fixed, so this is
+# deterministic). L1 on log-mel -- the form BigVGAN's own mel loss uses. Adam at the project's
+# usual 1e-3, no schedule.
+loss: l1_log_mel
+learning_rate: 0.001
+adam_betas: [0.9, 0.999]
+steps: 5000
+eval_every: 250
+
+# Pre-registered memorization criteria, all required for every crop:
+#   1. mel_l1(pred, target) <= the BigVGAN oracle's own resynthesis mel L1 for that crop
+#      (translator error no larger than the vocoder's inherent round-trip error).
+#   2. waveform correlation(pred reconstruction, oracle reconstruction) >= 0.90 (same frozen
+#      decoder, so near-identical mels should give near-identical audio).
+#   3. resynthesis mel L1 of the pred reconstruction vs the original <= 1.25 x the oracle's.
+#   4. shuffled-across control: its mel_l1 vs this crop's target >= 3 x the correct mel_l1.
+# Listening by the user decides "perceptually approaches the oracle".
+criteria:
+  pred_vs_oracle_waveform_corr_min: 0.90
+  resynthesis_mel_l1_ratio_max: 1.25
+  shuffled_mel_l1_ratio_min: 3.0
+
+run_dir_name: task15_bigvgan_memorization
+artifact_dir_name: task15_bigvgan_memorization
+wandb_group: task15-bigvgan-memorization
+wandb_tags: [task15, bigvgan-v2, mel, memorization, muq, muq-to-bigvgan-mel-temporal-conv]

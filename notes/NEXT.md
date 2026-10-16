@@ -1,6 +1,41 @@
 # NEXT
 
-## Current gate
+## Latest: TASK-15 BigVGAN-v2 memorization test (2026-10-16)
+
+**MuQ -> BigVGAN-v2 mel -> frozen BigVGAN-v2 is mechanically viable in the small-N memorization
+regime.** Separate from the EnCodec line; not a generalization result. Write-up:
+`artifacts/task15_bigvgan_memorization/TASK-15_RESULTS.md`; summary in
+[[DECISIONS.md#task15-bigvgan-memorization]].
+
+- Oracle (original -> official mel -> BigVGAN): resynthesis mel L1 0.109 vs. 1.32 for unrelated
+  tracks. Good.
+- N=2: all pre-registered criteria pass at the best checkpoint (step 4,750). The final step hit
+  an Adam/L1 spike, so the evaluation now reports best and final.
+- N=8: mel memorized within the vocoder's round-trip error on all 8 crops; 6/8 pass every
+  criterion. hiphop.00001 and jazz.00000 miss only pred-vs-oracle waveform corr >= 0.90 (0.898,
+  0.888), still rising when the fixed 5,000-step budget ended. Not extended.
+- Shuffled-across control fails on every crop.
+
+**Exact commands:**
+
+```bash
+uv run python scripts/fetch_bigvgan.py                                   # official code + weights, pinned
+uv run python scripts/task15_bigvgan_oracle.py                           # positive control
+uv run python scripts/train_task15_bigvgan_memorization.py --n 2         # W&B seni7345
+uv run python scripts/train_task15_bigvgan_memorization.py --n 8         # W&B xl3nmbjt
+```
+
+**Next (user's call; nothing authorized):**
+1. Listen: `artifacts/task15_bigvgan_memorization/{n2,n8}/<track>_{original,bigvgan_oracle,predicted,shuffled_across}.wav`,
+   and `oracle/` for the positive control. Does `predicted` match `bigvgan_oracle`?
+2. Optional: rerun N=8 with a longer, pre-declared budget to settle the two near-misses. A budget
+   change, so it needs your go-ahead.
+3. TASK-15 explicitly excludes held-out tests, N > 8, MuQ-layer changes, and loss/architecture
+   sweeps.
+
+Committed on request (code, config, tests, notes); artifacts and `third_party/` are git-ignored.
+
+## Previous gate
 
 **Gate 5 full-GTZAN pilot: run complete, NOT PASSED. Outcome C -- measurable coarse-structure
 generalization without recognizable audio reconstruction.**

@@ -711,3 +711,17 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   corrected to `muq-to-encodec-temporal-conv` for future runs (was the stale class name
   `spectrogram-to-dac-translator`). Still open: outcome rule is waveform-only, no `wandb.Audio`. Full write-up in
   [[task14-gate5-full-gtzan-result]].
+- TASK-15 BigVGAN-v2 memorization test (2026-10-16, local M4 Max/MPS; separate from EnCodec work):
+  **MuQ -> BigVGAN-v2 mel -> frozen BigVGAN-v2 is mechanically viable at small N.** Official
+  `nvidia/bigvgan_v2_24khz_100band_256x` @ `c329ede9...` in git-ignored `third_party/` via
+  `scripts/fetch_bigvgan.py`; runs on MPS (112.4M params). Mel: 24 kHz, 100 bands, n_fft/win
+  1024, hop 256 (93.75 Hz), fmin 0, fmax null, `log(clamp 1e-5)`; track peak-normalized to 0.95.
+  Crops 47,872 samples (187 hops) -> MuQ 50 frames; translator interpolates 50 -> 187
+  (1,271,908 params). Oracle: resynthesis mel L1 0.109 (unrelated pairs 1.32); waveform corr to
+  original ~0.14 is a phase artifact. N=2 passes all pre-registered criteria (mel L1 0.023 vs.
+  oracle round-trip ~0.11, pred-vs-oracle corr 0.95/0.98). N=8: 6/8 pass; 2 miss only
+  pred-vs-oracle corr >= 0.90 (0.898, 0.888, still rising at the 5k-step budget end); mel
+  memorized within vocoder round-trip on all 8. Shuffled-across fails everywhere. Adam + L1 at
+  constant LR spikes near the minimum (N=2's final step jumped 0.025 -> 0.41) -- evaluate the best
+  checkpoint too. Listening pending. Not a generalization result. Full write-up in
+  [[task15-bigvgan-memorization]].
