@@ -30,6 +30,15 @@ uv run python scripts/task15_bigvgan_oracle.py                     # positive co
 uv run python scripts/train_task15_bigvgan_memorization.py --n 2   # then --n 8
 ```
 
+TASK-16 reran N=2 with the two TASK-15 audit corrections (MuQ features interpolated at each mel
+frame's physical center time; predicted mel clamped to BigVGAN's log floor before decoding),
+switched on by its own config. TASK-15's config keeps the original behavior:
+
+```bash
+uv run python scripts/train_task15_bigvgan_memorization.py --config configs/task16_bigvgan_corrected.yaml --n 2
+uv run python scripts/task16_compare_n2.py                         # TASK-15 vs TASK-16 table
+```
+
 `tests/test_bigvgan_common.py` skips its BigVGAN-dependent tests until the fetch has run. Results:
 `artifacts/task15_bigvgan_memorization/TASK-15_RESULTS.md` (local) and
 `notes/DECISIONS.md#task15-bigvgan-memorization`.

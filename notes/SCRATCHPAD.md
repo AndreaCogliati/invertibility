@@ -1731,3 +1731,24 @@ Runs: W&B seni7345 (N=2), xl3nmbjt (N=8). Train time 38 s / 69 s on MPS.
 2026-10-16 (later): user listening verdict -- success at N=2 and N=8, including the two N=8
 crops below the 0.90 pred-vs-oracle waveform-corr bar (hiphop.00001 0.898, jazz.00000 0.888).
 That bar was stricter than perceptual equivalence. TASK-15 closed: viable at N=2 and N=8.
+
+---
+
+## 2026-10-19 -- TASK-16: audit corrections + N=2 rerun
+
+MuQ geometry read from the loaded model: mel_stft.spectrogram hop 240, center True, pad 0;
+Conv2dSubsampling blocks: conv1 k3 s(2,2) p1, conv2 k3 s1 p1, shortcut conv3 = conv1 geometry
+(time axis = last dim). Composed: token i -> mel frame 4i -> sample 960i. (MelSpectrogram has no
+`.center`; it lives on `.spectrogram`.)
+
+Test failure: explicit interpolation vs F.interpolate differed by 1.1e-5 (float rounding of
+50/187 inside PyTorch) -> atol 1e-4.
+
+Regression: TASK-15 config with switches off, after the refactor -> loss history identical over
+5,000 steps, metrics identical. Kept as artifacts/task16_bigvgan_corrected/task15_baseline_rerun.
+
+Corrected run: best 4750 (same as TASK-15), final step 5000 spiked again (0.195). Clamp: 288/440 of
+18,700 bins. Last 3 mel frames clamp to token 49.
+
+Audit trace updated to the corrected pipeline; pre-fix files archived with _task15 /
+_pre_task16 suffixes.

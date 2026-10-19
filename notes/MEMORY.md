@@ -726,3 +726,11 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   checkpoint too. **Listening (user, 2026-10-16): success at N=2 and N=8**, including the two
   near-miss crops -- viable at both N. Not a generalization result. Full write-up in
   [[task15-bigvgan-memorization]].
+- TASK-16 (2026-10-19): the two TASK-15 audit corrections -- MuQ->mel interpolation at physical
+  frame centers (MuQ token i @ 960·i, BigVGAN frame j @ 256·j+128, derived from the loaded models
+  in `time_alignment.py`, impulse-verified) and a decode-time clamp to BigVGAN's log floor
+  (log(1e-5), from `spectral_normalize_torch`) -- **don't materially change the TASK-15 N=2
+  result**: both crops pass all criteria at best step 4,750; metric changes ≤ ~0.02 in both
+  directions; clamp raises 1.5-2.4% of bins. TASK-15 config (switches off) reproduces TASK-15
+  bit-for-bit. W&B `fjh80gyn`. Write-up: `artifacts/task16_bigvgan_corrected/TASK-16_RESULTS.md`;
+  [[task16-bigvgan-alignment-and-floor]].

@@ -8,6 +8,12 @@ the same crops. Not a generalization experiment and not evidence of MuQ invertib
 
     uv run python scripts/train_task15_bigvgan_memorization.py --n 2
     uv run python scripts/train_task15_bigvgan_memorization.py --n 8
+    uv run python scripts/train_task15_bigvgan_memorization.py --config configs/task16_bigvgan_corrected.yaml --n 2
+
+Two config switches, both off for TASK-15 and on for TASK-16:
+  temporal_alignment: length_resize (F.interpolate) | frame_centers (time-coordinate interpolation)
+  decode_clamp_to_mel_floor: clamp the predicted mel to BigVGAN's log floor right before decoding.
+Training, losses, and mel metrics always use the raw translator output.
 """
 
 from __future__ import annotations
@@ -34,6 +40,8 @@ import wandb
 from muq_inversion.bigvgan_common import (
     BIGVGAN_DIR,
     audio_metrics,
+    bigvgan_log_mel_floor,
+    clamp_to_mel_floor,
     load_bigvgan,
     load_mel_crops,
     mel_l1,
@@ -43,6 +51,11 @@ from muq_inversion.encoder import FrozenMuQEncoder
 from muq_inversion.logging_utils import capture_environment_manifest, select_device
 from muq_inversion.models.losses import MultiResolutionSTFTLoss
 from muq_inversion.models.muq_mel_translator import MuQToMelTranslator
+from muq_inversion.time_alignment import (
+    bigvgan_mel_frame_centers,
+    muq_token_centers,
+    source_positions,
+)
 from muq_inversion.wandb_logging import init_run, log_artifact_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -88,11 +101,18 @@ def plot_mels(path: Path, title: str, target: torch.Tensor, pred: torch.Tensor, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--n", choices=["2", "8"], required=True, help="number of fixed crops (TASK-15 caps at 8)")
+    parser.add_argument("--config", type=Path, default=CONFIG)
+    parser.add_argument("--n", required=True, help="number of fixed crops; must be a key of the config's `manifests`")
     parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], default="online")
     args = parser.parse_args()
-    cfg = yaml.safe_load(CONFIG.read_text())
+    cfg = yaml.safe_load(args.config.read_text())
     n = args.n
+    if n not in cfg["manifests"]:
+        raise SystemExit(f"--n {n} not allowed by {args.config} (manifests: {sorted(cfg['manifests'])})")
+    alignment = cfg.get("temporal_alignment", "length_resize")
+    if alignment not in ("length_resize", "frame_centers"):
+        raise SystemExit(f"unknown temporal_alignment {alignment!r}")
+    clamp_decode = bool(cfg.get("decode_clamp_to_mel_floor", False))
 
     random.seed(cfg["seed"])
     np.random.seed(cfg["seed"])
@@ -112,11 +132,23 @@ def main() -> None:
 
     muq = FrozenMuQEncoder(cfg["muq_model_id"], device)
     muq_feats = torch.cat([muq.encode(c.waveform.to(device)).clone() for c in crops])  # (N, T_muq, 1024)
-    del muq
     targets = torch.cat([c.target_mel for c in crops]).to(device)  # (N, 100, T_mel)
     if not (torch.isfinite(muq_feats).all() and torch.isfinite(targets).all()):
         raise SystemExit("STOP CONDITION: non-finite MuQ features or target mel")
     t_muq, t_mel = muq_feats.shape[1], targets.shape[-1]
+    muq_centers = muq_token_centers(muq.model.model, t_muq)
+    mel_centers = bigvgan_mel_frame_centers(h, t_mel)
+    del muq
+    positions = source_positions(mel_centers, muq_centers).to(device) if alignment == "frame_centers" else None
+    mel_floor = bigvgan_log_mel_floor()
+
+    def decode(mel: torch.Tensor) -> tuple[torch.Tensor, int]:
+        """Frozen BigVGAN on a (1, mels, T) mel; clamps to the official log floor first if enabled.
+        Returns the waveform and the number of bins the clamp raised."""
+        clamped = 0
+        if clamp_decode:
+            mel, clamped = clamp_to_mel_floor(mel, mel_floor)
+        return bigvgan(mel.to(device)).squeeze().cpu(), clamped
 
     model = MuQToMelTranslator(muq_feats.shape[-1], cfg["hidden_channels"], h.num_mels).to(device)
     params = sum(p.numel() for p in model.parameters())
@@ -131,7 +163,23 @@ def main() -> None:
         "mel_frames": t_mel,
         "mel_frame_rate_hz": h.sampling_rate / h.hop_size,
         "mel_bands": h.num_mels,
-        "temporal_conversion": f"linear interpolation {t_muq} -> {t_mel} frames after Linear(1024->{cfg['hidden_channels']})",
+        "temporal_alignment": alignment,
+        "temporal_conversion": (
+            f"linear interpolation {t_muq} -> {t_mel} frames after Linear(1024->{cfg['hidden_channels']}), "
+            + ("F.interpolate(align_corners=False)" if alignment == "length_resize"
+               else "at each mel frame's physical center (time_alignment.source_positions)")
+        ),
+        "muq_token_center_samples": {"first": float(muq_centers[0]), "spacing": float(muq_centers[1] - muq_centers[0]),
+                                     "last": float(muq_centers[-1])},
+        "mel_frame_center_samples": {"first": float(mel_centers[0]), "spacing": float(mel_centers[1] - mel_centers[0]),
+                                     "last": float(mel_centers[-1])},
+        "mel_frames_clamped_to_first_token": int((mel_centers <= muq_centers[0]).sum()),
+        "mel_frames_clamped_to_last_token": int((mel_centers >= muq_centers[-1]).sum()),
+        "source_positions_first_last": (
+            [float(positions[0]), float(positions[-1])] if positions is not None else None
+        ),
+        "decode_clamp_to_mel_floor": clamp_decode,
+        "bigvgan_log_mel_floor": mel_floor,
         "translator_parameters": params,
         "receptive_field_mel_frames": model.receptive_field_mel_frames,
         "bigvgan_parameters": sum(p.numel() for p in bigvgan.parameters()),
@@ -148,7 +196,7 @@ def main() -> None:
         "bigvgan_mel_hparams": {k: h[k] for k in ("sampling_rate", "num_mels", "n_fft", "hop_size", "win_size", "fmin", "fmax")},
     }
     run = init_run(
-        config=resolved, environment=environment, run_name=f"task15_bigvgan_n{n}", mode=args.wandb_mode,
+        config=resolved, environment=environment, run_name=f"{cfg.get('run_name_prefix', 'task15_bigvgan')}_n{n}", mode=args.wandb_mode,
         group=cfg["wandb_group"], job_type="memorization", tags=[*cfg["wandb_tags"], f"n{n}"],
     )
 
@@ -161,7 +209,7 @@ def main() -> None:
     best = {"mel_l1": float("inf"), "step": 0, "state": None}
     for step in range(1, cfg["steps"] + 1):
         model.train()
-        pred = model(muq_feats, t_mel)
+        pred = model(muq_feats, t_mel, positions)
         loss = (pred - targets).abs().mean()
         if not torch.isfinite(loss):
             raise SystemExit(f"STOP CONDITION: non-finite loss at step {step}")
@@ -174,10 +222,10 @@ def main() -> None:
         if step % cfg["eval_every"] == 0 or step == cfg["steps"]:
             model.eval()
             with torch.inference_mode():
-                pred = model(muq_feats, t_mel)
-                pred_shuf = model(muq_feats[shuffled_idx], t_mel)
+                pred = model(muq_feats, t_mel, positions)
+                pred_shuf = model(muq_feats[shuffled_idx], t_mel, positions)
                 corr = [
-                    audio_metrics(oracle_audio[i], bigvgan(pred[i : i + 1]).squeeze().cpu(), h,
+                    audio_metrics(oracle_audio[i], decode(pred[i : i + 1])[0], h,
                                   lambda a, b: torch.zeros(1))["waveform_correlation"]
                     for i in range(len(crops))
                 ]
@@ -219,13 +267,13 @@ def main() -> None:
         m.load_state_dict(state)
         m.eval()
         with torch.inference_mode():
-            pred = m(muq_feats, t_mel).cpu()
-            pred_shuf = m(muq_feats[shuffled_idx], t_mel).cpu()
+            pred = m(muq_feats, t_mel, positions).cpu()
+            pred_shuf = m(muq_feats[shuffled_idx], t_mel, positions).cpu()
         per_crop = {}
         for i, c in enumerate(crops):
             with torch.inference_mode():
-                pred_audio = bigvgan(pred[i : i + 1].to(device)).squeeze().cpu()
-                shuf_audio = bigvgan(pred_shuf[i : i + 1].to(device)).squeeze().cpu()
+                pred_audio, pred_clamped = decode(pred[i : i + 1])
+                shuf_audio, shuf_clamped = decode(pred_shuf[i : i + 1])
             original = c.waveform.squeeze()
             oracle_m = audio_metrics(original, oracle_audio[i], h, stft)
             pred_m = audio_metrics(original, pred_audio, h, stft)
@@ -234,6 +282,13 @@ def main() -> None:
             r = {
                 "mel_l1_pred_vs_target": mel_l1(pred[i], c.target_mel),
                 "mel_l1_shuffled_vs_target": mel_l1(pred_shuf[i], c.target_mel),
+                # Diagnostics on the raw translator output (before any decode-time clamp).
+                "mel_variance_ratio": float((pred[i].var(dim=-1, unbiased=False)
+                                             / c.target_mel[0].var(dim=-1, unbiased=False).clamp(min=1e-8)).mean()),
+                "raw_bins_below_mel_floor": int((pred[i] < mel_floor).sum()),
+                "raw_fraction_below_mel_floor": float((pred[i] < mel_floor).float().mean()),
+                "bins_clamped_at_decode": pred_clamped,
+                "shuffled_bins_clamped_at_decode": shuf_clamped,
                 "shuffled_source": pairing[c.track_id],
                 "oracle_vs_original": oracle_m, "pred_vs_original": pred_m, "shuffled_vs_original": shuf_m,
                 "pred_vs_oracle": pred_vs_oracle,
@@ -277,6 +332,10 @@ def main() -> None:
             "pred_stft": mean(lambda r: r["pred_vs_original"]["stft_distance"]),
             "shuffled_stft": mean(lambda r: r["shuffled_vs_original"]["stft_distance"]),
             "pred_vs_oracle_waveform_corr": mean(lambda r: r["pred_vs_oracle"]["waveform_correlation"]),
+            "mel_variance_ratio": mean(lambda r: r["mel_variance_ratio"]),
+            "raw_fraction_below_mel_floor": mean(lambda r: r["raw_fraction_below_mel_floor"]),
+            "bins_clamped_at_decode": int(sum(r["bins_clamped_at_decode"] for r in per_crop.values())),
+            "shuffled_bins_clamped_at_decode": int(sum(r["shuffled_bins_clamped_at_decode"] for r in per_crop.values())),
             "memorization_criteria_passed": all(all(r["criteria"].values()) for r in per_crop.values()),
         }
         run.log({f"{label}/{k}": float(v) for k, v in summary.items()})

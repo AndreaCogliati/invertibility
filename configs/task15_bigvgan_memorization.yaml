@@ -26,6 +26,12 @@ num_mel_hops: 187
 # (3x Conv1d k=5, residual), Linear(256->100). See models/muq_mel_translator.py.
 hidden_channels: 256
 
+# Pipeline switches added in TASK-16; TASK-15 ran with both off (these values reproduce it):
+#   temporal_alignment: length_resize = F.interpolate(align_corners=False) to the mel length.
+#   decode_clamp_to_mel_floor: false = predicted mel sent to BigVGAN unclamped.
+temporal_alignment: length_resize
+decode_clamp_to_mel_floor: false
+
 # Optimization: full batch (all N crops every step; features and targets are fixed, so this is
 # deterministic). L1 on log-mel -- the form BigVGAN's own mel loss uses. Adam at the project's
 # usual 1e-3, no schedule.

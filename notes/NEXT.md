@@ -1,5 +1,26 @@
 # NEXT
 
+## Latest: TASK-16 audit corrections, N=2 rerun (2026-10-19)
+
+**The two TASK-15 audit corrections don't materially change the TASK-15 N=2 result.** Both crops
+still pass all four criteria at the best checkpoint (step 4,750); changes are small and mixed in
+direction; the shuffled-across control is unchanged. The decode-time clamp raises 1.5-2.4% of mel
+bins. Write-up: `artifacts/task16_bigvgan_corrected/TASK-16_RESULTS.md`; summary in
+[[DECISIONS.md#task16-bigvgan-alignment-and-floor]]. The audit Markdown now traces the corrected
+pipeline (raw vs clamped mel shown separately).
+
+```bash
+uv run python scripts/train_task15_bigvgan_memorization.py --config configs/task16_bigvgan_corrected.yaml --n 2   # W&B fjh80gyn
+uv run python scripts/task16_compare_n2.py
+uv run python artifacts/task15_bigvgan_memorization/audit/trace_pipeline.py   # corrected-pipeline trace
+uv run pytest -q; uv run ruff check .   # 243 passed, clean
+```
+
+**Next (user's call):** listen to `artifacts/task16_bigvgan_corrected/n2/<track>_predicted.wav`
+against `..._bigvgan_oracle.wav` (and TASK-15's `predicted`). TASK-16 forbids N=8 and
+generalization runs. `bluehive/run_task15.slurm` still runs TASK-15's original (uncorrected) config.
+Committed on request; artifacts are git-ignored.
+
 ## Latest: TASK-15 BigVGAN-v2 memorization test (2026-10-16)
 
 **MuQ -> BigVGAN-v2 mel -> frozen BigVGAN-v2 is mechanically viable in the small-N memorization

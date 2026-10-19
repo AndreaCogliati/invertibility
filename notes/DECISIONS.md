@@ -3444,3 +3444,39 @@ crops, so the 0.90 waveform-correlation bar was stricter than perceptual equival
 
 **Rollback plan.** Entirely additive (new files + one `.gitignore` line). Delete them and
 `third_party/` to revert.
+
+---
+
+## task16-bigvgan-alignment-and-floor: audit corrections don't change the TASK-15 N=2 result
+
+**Context (`tasks/TASK-16.md`).** The TASK-15 pipeline audit
+(`artifacts/task15_bigvgan_memorization/audit/TASK-15_PIPELINE_AUDIT.md`) found two minor
+discrepancies: (D1) `F.interpolate(align_corners=False)` conditioned each mel frame on MuQ content
+~15-20 ms early (MuQ token *i* is centered at sample 960·i, BigVGAN frame *j* at 256·j + 128), and
+(D2) the unbounded translator output dipped below BigVGAN's log-mel floor on ~2% of bins.
+
+**Decision.**
+- Fix both behind config switches (`temporal_alignment`, `decode_clamp_to_mel_floor`), off in
+  `configs/task15_bigvgan_memorization.yaml` (TASK-15 reproducible) and on in
+  `configs/task16_bigvgan_corrected.yaml`.
+- Frame centers are derived from the loaded MuQ model (STFT hop/centering plus conv time geometry)
+  and BigVGAN's `h` and padding rule, in `src/muq_inversion/time_alignment.py`, and verified by
+  impulse tests. MuQ features are interpolated at pos_j = clamp((256j+128)/960, 0, 49).
+- The floor is derived from `meldataset.spectral_normalize_torch(0)` = log(1e-5). It is applied
+  only immediately before BigVGAN; the loss and mel metrics use the raw output.
+
+**Evidence.**
+- With both switches off, the TASK-15 config reproduces the original N=2 run bit-for-bit.
+- Corrected N=2 run (W&B `fjh80gyn`): best checkpoint again step 4,750; both crops pass all four
+  criteria. Changes vs TASK-15 are all small and mixed in direction: mel L1 0.023/0.024 ->
+  0.025/0.023; pred-vs-oracle waveform corr 0.950/0.983 -> 0.966/0.969; variance ratio ~1.00 in
+  both; shuffled-across mel L1 ~1.20 in both.
+- The clamp raised 288 and 440 of 18,700 bins (1.5%, 2.4%). Mel frames 184-186 clamp to the last
+  MuQ token.
+- Full table: `artifacts/task16_bigvgan_corrected/TASK-16_RESULTS.md`.
+
+**Conclusion.** The corrections do not materially change the TASK-15 N=2 result. No N=8, no
+generalization claim. Listening on the corrected files pending.
+
+**Rollback plan.** Set both switches off (or use the TASK-15 config); the legacy path is untouched
+and verified identical.

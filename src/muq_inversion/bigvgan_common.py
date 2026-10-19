@@ -68,6 +68,19 @@ def official_mel(waveform: torch.Tensor, h, bigvgan_dir: Path = BIGVGAN_DIR) -> 
     )
 
 
+def bigvgan_log_mel_floor(bigvgan_dir: Path = BIGVGAN_DIR) -> float:
+    """Smallest value the official preprocessing can produce: `spectral_normalize_torch` applied
+    to zero magnitude, i.e. log(clip_val * C) from `dynamic_range_compression_torch`'s defaults
+    (log(1e-5) for this checkpoint)."""
+    _, meldataset = _import_official_modules(bigvgan_dir)
+    return float(meldataset.spectral_normalize_torch(torch.zeros(1)))
+
+
+def clamp_to_mel_floor(mel: torch.Tensor, floor: float) -> tuple[torch.Tensor, int]:
+    """Returns the mel clamped to `floor` (for BigVGAN input) and how many bins were raised."""
+    return mel.clamp(min=floor), int((mel < floor).sum())
+
+
 @dataclasses.dataclass(frozen=True)
 class MelCrop:
     track_id: str
