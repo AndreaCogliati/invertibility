@@ -15,6 +15,8 @@ from muq_inversion.logging_utils import DeviceSelectionError, select_device
 def _patch_backends(monkeypatch: pytest.MonkeyPatch, *, cuda: bool, mps: bool) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: mps)
+    if hasattr(torch, "xpu"):  # keep these CUDA/MPS cases hermetic on XPU hosts too
+        monkeypatch.setattr(torch.xpu, "is_available", lambda: False)
 
 
 def test_auto_prefers_cuda_over_mps(monkeypatch):

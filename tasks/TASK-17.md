@@ -1,0 +1,17 @@
+# TASK-17: multi-backend (MPS / CUDA / XPU / CPU) portability for the TASK-15 code
+
+(Given in chat on 2026-10-20; recorded verbatim.)
+
+Update the TASK-15 codebase so the same experiment can run on Apple MPS, NVIDIA CUDA, Intel XPU/PVC, and CPU without changing the scientific pipeline.
+Start by auditing all TASK-15 code and dependencies for backend-specific assumptions. Inspect training, evaluation, BigVGAN inference, MuQ inference, checkpointing, seeding, synchronization, autocast, memory reporting, and W&B metadata.
+Requirements:
+1. Centralize device handling — Add one reusable device utility rather than scattered backend checks. Support explicit `--device auto|mps|cuda|xpu|cpu`. For `auto`, prefer CUDA, then XPU, then MPS, then CPU. Fail clearly when an explicitly requested backend is unavailable. Never silently fall back to CPU.
+2. Remove direct CUDA assumptions — Replace hard-coded `.cuda()`, `"cuda"`, `torch.cuda.*`, CUDA autocast, CUDA synchronization, and CUDA memory calls with backend-aware equivalents. Move models, tensors, losses, and temporary tensors consistently to the selected device. Preserve checkpoint portability by loading with an appropriate `map_location`.
+3. Preserve experimental behavior — Do not change MuQ, the translator, BigVGAN, mel preprocessing, temporal alignment, decode-time mel clamp, crops, seed, optimizer, loss, step budget, checkpoint policy, controls, or metrics. Use FP32 by default on every backend. Do not introduce mixed precision in this task. Keep MuQ and BigVGAN frozen.
+4. Handle XPU compatibility — Detect XPU through the installed PyTorch API. Do not require CUDA-only APIs or packages at import time. Surface unsupported XPU operators with clear diagnostic context rather than silently moving part of the graph to CPU. Keep Intel-specific dependency/environment changes separate from the canonical project dependencies unless they are genuinely portable.
+5. Reproducibility and metadata — Seed CPU plus the selected accelerator backend where supported. Record requested device, resolved device, backend, dtype, PyTorch version, device name, and relevant accelerator availability in logs, run manifests, checkpoints, and W&B. Document that numerical trajectories need not be bit-identical across MPS, CUDA, and XPU; the scientific pass criteria must remain identical.
+6. Tests — Add tests for: automatic backend-selection priority; explicit backend selection; unavailable-backend errors; checkpoint loading across devices; absence of unconditional CUDA calls in TASK-15 paths; CPU execution of a minimal forward/backward/checkpoint cycle; mocked CUDA, XPU, and MPS selection without requiring all hardware locally.
+7. Smoke-test entry point — Provide a bounded smoke-test command that exercises: MuQ forward; corrected MuQ-to-mel time alignment; translator forward/backward; raw predicted mel; decode-time mel-floor clamp; BigVGAN inference; optimizer step; checkpoint save/load; shuffled-across control. Do not run full training. Run only tests and small diagnostics available on the current machine.
+8. Documentation — Update the relevant README/task documentation with: commands for `--device mps`, `--device cuda`, and `--device xpu`; required environment differences for each backend; the ACES PVC smoke-test procedure; a backend-independent pipeline diagram.
+At the end, report: files changed; every backend-specific assumption removed; tests and diagnostics run; anything still incompatible with XPU; exact final `git status`.
+Do not commit unless explicitly requested.

@@ -14,6 +14,10 @@ Two config switches, both off for TASK-15 and on for TASK-16:
   temporal_alignment: length_resize (F.interpolate) | frame_centers (time-coordinate interpolation)
   decode_clamp_to_mel_floor: clamp the predicted mel to BigVGAN's log floor right before decoding.
 Training, losses, and mel metrics always use the raw translator output.
+
+`--device auto|cuda|xpu|mps|cpu` overrides the config's `device_request` (see
+`muq_inversion.device`). FP32 on every backend; trajectories need not be bit-identical across
+backends, but the pass criteria are the same.
 """
 
 from __future__ import annotations
@@ -22,7 +26,6 @@ import argparse
 import hashlib
 import json
 import os
-import random
 import tempfile
 import time
 from pathlib import Path
@@ -46,6 +49,15 @@ from muq_inversion.bigvgan_common import (
     load_mel_crops,
     mel_l1,
     shuffled_across_pairing,
+)
+from muq_inversion.device import (
+    DEVICE_CHOICES,
+    backend_stage,
+    device_metadata,
+    load_portable,
+    memory_stats,
+    require_fp32_default,
+    seed_everything,
 )
 from muq_inversion.encoder import FrozenMuQEncoder
 from muq_inversion.logging_utils import capture_environment_manifest, select_device
@@ -104,6 +116,8 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=CONFIG)
     parser.add_argument("--n", required=True, help="number of fixed crops; must be a key of the config's `manifests`")
     parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], default="online")
+    parser.add_argument("--device", choices=DEVICE_CHOICES, default=None,
+                        help="overrides the config's device_request (auto = CUDA, then XPU, then MPS)")
     args = parser.parse_args()
     cfg = yaml.safe_load(args.config.read_text())
     n = args.n
@@ -114,24 +128,28 @@ def main() -> None:
         raise SystemExit(f"unknown temporal_alignment {alignment!r}")
     clamp_decode = bool(cfg.get("decode_clamp_to_mel_floor", False))
 
-    random.seed(cfg["seed"])
-    np.random.seed(cfg["seed"])
-    torch.manual_seed(cfg["seed"])
-    device = select_device(cfg["device_request"], cfg["allow_cpu_fallback"])
+    device_request = args.device or cfg["device_request"]
+    device = select_device(device_request, cfg["allow_cpu_fallback"])
+    require_fp32_default()
+    seeding = seed_everything(cfg["seed"], device)
     environment = capture_environment_manifest(REPO_ROOT)
+    device_info = device_metadata(device_request, device)
+    print(f"device: {json.dumps(device_info)}")
     run_root = REPO_ROOT / "runs" / cfg["run_dir_name"] / f"n{n}"
     out = REPO_ROOT / "artifacts" / cfg["artifact_dir_name"] / f"n{n}"
     out.mkdir(parents=True, exist_ok=True)
 
-    bigvgan = load_bigvgan(device)
+    with backend_stage("load BigVGAN", device):
+        bigvgan = load_bigvgan(device)
     h = bigvgan.h
     manifest = REPO_ROOT / cfg["manifests"][n]
     crops = load_mel_crops(manifest, h, cfg["num_mel_hops"])
     assert len(crops) == int(n), f"expected {n} crops, got {len(crops)}"
     ids = [c.track_id for c in crops]
 
-    muq = FrozenMuQEncoder(cfg["muq_model_id"], device)
-    muq_feats = torch.cat([muq.encode(c.waveform.to(device)).clone() for c in crops])  # (N, T_muq, 1024)
+    with backend_stage("MuQ forward", device):
+        muq = FrozenMuQEncoder(cfg["muq_model_id"], device)
+        muq_feats = torch.cat([muq.encode(c.waveform.to(device)).clone() for c in crops])  # (N, T_muq, 1024)
     targets = torch.cat([c.target_mel for c in crops]).to(device)  # (N, 100, T_mel)
     if not (torch.isfinite(muq_feats).all() and torch.isfinite(targets).all()):
         raise SystemExit("STOP CONDITION: non-finite MuQ features or target mel")
@@ -192,6 +210,7 @@ def main() -> None:
         "bigvgan_config_hash": file_hash(BIGVGAN_DIR / "config.json"),
         "bigvgan_generator_hash": file_hash(BIGVGAN_DIR / "bigvgan_generator.pt"),
         "uv_lock_hash": file_hash(REPO_ROOT / "uv.lock"), "device": str(device),
+        "device_metadata": device_info, "seeding": seeding,
         "geometry": geometry, "crops": ids, "shuffled_across_pairing": pairing,
         "bigvgan_mel_hparams": {k: h[k] for k in ("sampling_rate", "num_mels", "n_fft", "hop_size", "win_size", "fmin", "fmax")},
     }
@@ -201,7 +220,7 @@ def main() -> None:
     )
 
     # Oracle reconstructions: fixed for the whole run.
-    with torch.inference_mode():
+    with torch.inference_mode(), backend_stage("BigVGAN oracle inference", device):
         oracle_audio = [bigvgan(c.target_mel.to(device)).squeeze().cpu() for c in crops]
 
     t0 = time.perf_counter()
@@ -209,14 +228,15 @@ def main() -> None:
     best = {"mel_l1": float("inf"), "step": 0, "state": None}
     for step in range(1, cfg["steps"] + 1):
         model.train()
-        pred = model(muq_feats, t_mel, positions)
-        loss = (pred - targets).abs().mean()
-        if not torch.isfinite(loss):
-            raise SystemExit(f"STOP CONDITION: non-finite loss at step {step}")
-        opt.zero_grad()
-        loss.backward()
-        grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf")))  # measure only
-        opt.step()
+        with backend_stage(f"translator train step {step}", device):
+            pred = model(muq_feats, t_mel, positions)
+            loss = (pred - targets).abs().mean()
+            if not torch.isfinite(loss):
+                raise SystemExit(f"STOP CONDITION: non-finite loss at step {step}")
+            opt.zero_grad()
+            loss.backward()
+            grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf")))  # measure only
+            opt.step()
         train_loss_history.append(loss.item())
         log = {"train/l1_log_mel": loss.item(), "train/grad_norm": grad_norm}
         if step % cfg["eval_every"] == 0 or step == cfg["steps"]:
@@ -251,9 +271,10 @@ def main() -> None:
         path = run_root / "checkpoints" / f"{name}.pt"
         save_atomic(path, {"step": step, "model_state_dict": state, "optimizer_state_dict": opt.state_dict() if name == "final" else None,
                            "resolved_config": resolved, "git_commit": environment.get("git_commit"),
-                           "git_dirty": environment.get("git_dirty"), "wandb_run_id": run.id})
+                           "git_dirty": environment.get("git_dirty"), "wandb_run_id": run.id,
+                           "device_metadata": device_info, "seeding": seeding})
         check = MuQToMelTranslator(muq_feats.shape[-1], cfg["hidden_channels"], h.num_mels).to(device)
-        check.load_state_dict(torch.load(path, map_location=device, weights_only=False)["model_state_dict"])
+        check.load_state_dict(load_portable(path)["model_state_dict"])
         return path
 
     save_checkpoint("final", model.state_dict(), cfg["steps"])
@@ -359,6 +380,7 @@ def main() -> None:
                        "steps_above_0p1_after_step_1000": int((losses[1000:] > 0.1).sum()),
                        "history": losses.round(5).tolist()},
         "resolved_config": resolved, "wandb_run_id": run.id,
+        "device_metadata": device_info, "device_memory": memory_stats(device),
     }
     (out / "report.json").write_text(json.dumps(report, indent=2))
     log_artifact_file(run, out / "report.json", f"task15-report-n{n}", "report")

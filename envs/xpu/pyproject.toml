@@ -1,0 +1,156 @@
+# Intel XPU (e.g. Data Center GPU Max / PVC on TAMU ACES) environment for this project.
+#
+# Kept separate from the canonical ../../pyproject.toml + ../../uv.lock, which stay the source of
+# truth for MPS, CUDA, and CPU. The only difference here is that `torch` comes from PyTorch's XPU
+# wheel index (`+xpu` build, same version as the canonical lock) instead of PyPI's CUDA build.
+# Everything else, including this project's code, resolves exactly as declared in the canonical
+# pyproject.
+#
+#   uv sync --project envs/xpu --frozen
+#   uv run --project envs/xpu python scripts/task15_smoke_test.py --device xpu
+#
+# Linux x86_64 only (the platform XPU wheels are published for).
+
+[project]
+name = "muq-inversion-xpu-env"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "muq-inversion",
+    "torch==2.14.0",
+    "triton-xpu",
+]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Every package shared with the canonical lock is pinned to the canonical version; regenerate this
+# list from ../../uv.lock whenever that lock changes (see README "Intel XPU").
+constraint-dependencies = [
+    "absl-py==2.5.0",
+    "annotated-types==0.8.0",
+    "ast-serialize==0.9.0",
+    "beartype==0.22.9",
+    "certifi==2026.7.22",
+    "cffi==2.1.1",
+    "charset-normalizer==3.5.1",
+    "click==8.5.0",
+    "cloudpickle==3.1.2",
+    "colorama==0.4.6",
+    "contourpy==1.4.0",
+    "cuda-bindings==13.3.1",
+    "cuda-pathfinder==1.8.1",
+    "cuda-toolkit==13.0.3.0",
+    "cycler==0.12.1",
+    "decorator==5.3.1",
+    "easydict==1.13",
+    "einops==0.8.2",
+    "filelock==3.32.5",
+    "fonttools==4.65.0",
+    "fsspec==2026.7.0",
+    "ftfy==6.3.1",
+    "googleapis-common-protos==1.75.3",
+    "grpcio==1.83.1",
+    "hf-xet==1.6.0",
+    "huggingface-hub==0.36.2",
+    "idna==3.19",
+    "iniconfig==2.3.0",
+    "jinja2==3.1.6",
+    "joblib==1.6.0",
+    "kiwisolver==1.5.1",
+    "lazy-loader==0.5",
+    "librosa==1.0.0",
+    "librt==0.15.0",
+    "llvmlite==0.49.0",
+    "markdown==3.10.3",
+    "markupsafe==3.0.3",
+    "matplotlib==3.11.2",
+    "mpmath==1.3.0",
+    "msgpack==1.2.2",
+    "muq==0.1.0",
+    "mypy-extensions==1.1.0",
+    "mypy==2.3.1",
+    "narwhals==2.25.0",
+    "networkx==3.6.1",
+    "nnaudio==0.3.4",
+    "numba==0.67.0",
+    "numpy==2.5.2",
+    "nvidia-cublas==13.1.1.3",
+    "nvidia-cuda-cupti==13.0.85",
+    "nvidia-cuda-nvrtc==13.0.88",
+    "nvidia-cuda-runtime==13.0.96",
+    "nvidia-cudnn-cu13==9.24.0.43",
+    "nvidia-cufft==12.0.0.61",
+    "nvidia-cufile==1.15.1.6",
+    "nvidia-curand==10.4.0.35",
+    "nvidia-cusolver==12.0.4.66",
+    "nvidia-cusparse==12.6.3.3",
+    "nvidia-cusparselt-cu13==0.8.1",
+    "nvidia-nccl-cu13==2.30.7",
+    "nvidia-nvjitlink==13.3.33",
+    "nvidia-nvshmem-cu13==3.4.5",
+    "nvidia-nvtx==13.0.85",
+    "opentelemetry-api==1.44.0",
+    "opentelemetry-exporter-otlp-proto-common==1.44.0",
+    "opentelemetry-exporter-otlp-proto-http==1.44.0",
+    "opentelemetry-proto==1.44.0",
+    "opentelemetry-sdk==1.44.0",
+    "opentelemetry-semantic-conventions==0.65b0",
+    "packaging==26.3",
+    "pathspec==1.1.1",
+    "pillow==12.3.0",
+    "platformdirs==4.11.7",
+    "pluggy==1.6.0",
+    "pooch==1.9.0",
+    "pot==0.9.7.post1",
+    "protobuf==7.36.1",
+    "pycparser==3.0",
+    "pydantic-core==2.46.5",
+    "pydantic==2.13.5",
+    "pygments==2.21.0",
+    "pyparsing==3.3.2",
+    "pytest==9.1.1",
+    "python-dateutil==2.9.0.post0",
+    "pyyaml==6.0.3",
+    "regex==2026.9.3",
+    "requests==2.34.2",
+    "ruff==0.16.6",
+    "safetensors==0.8.0",
+    "scikit-learn==1.9.0",
+    "scipy==1.18.1",
+    "setuptools==84.0.0",
+    "six==1.17.0",
+    "soundfile==0.14.0",
+    "soxr==1.1.0",
+    "sympy==1.14.0",
+    "tensorboard-data-server==0.7.2",
+    "tensorboard==2.21.0",
+    "threadpoolctl==3.6.0",
+    "tokenizers==0.21.4",
+    "torchaudio==2.11.0",
+    "torchvision==0.29.0",
+    "tqdm==4.70.0",
+    "transformers==4.55.0",
+    "triton==3.8.0",
+    "typing-extensions==4.16.0",
+    "typing-inspection==0.4.4",
+    "urllib3==2.7.0",
+    "wandb==0.30.0",
+    "wcwidth==0.8.3",
+    "werkzeug==3.1.8",
+    "x-clip==0.14.4",
+    "xxhash==4.0.1",
+]
+
+[tool.uv.sources]
+muq-inversion = { path = "../..", editable = true }
+torch = { index = "pytorch-xpu" }
+triton-xpu = { index = "pytorch-xpu" }  # torch+xpu needs a newer triton-xpu than PyPI has
+
+[[tool.uv.index]]
+name = "pytorch-xpu"
+url = "https://download.pytorch.org/whl/xpu"
+explicit = true

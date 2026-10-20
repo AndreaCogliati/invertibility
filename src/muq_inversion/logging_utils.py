@@ -17,51 +17,25 @@ from typing import Any
 import numpy
 import torch
 
+from muq_inversion.device import (
+    DeviceSelectionError,
+    availability,
+    device_count,
+    device_name,
+    resolve_device,
+)
 
-class DeviceSelectionError(RuntimeError):
-    """Raised when the requested device is unavailable and fallback is not permitted."""
+__all__ = ["DeviceSelectionError", "capture_environment_manifest", "select_device"]
 
 
 def select_device(requested: str, allow_cpu_fallback: bool) -> torch.device:
-    """Resolve `requested` ("auto", "cuda", "mps", or "cpu") to a torch.device.
+    """Resolve `requested` ("auto", "cuda", "xpu", "mps", or "cpu") to a torch.device.
 
-    Never silently falls back to CPU (CLAUDE.md rule 10): if a GPU backend is
-    requested or chosen by "auto" but unavailable, this raises unless
-    `allow_cpu_fallback` is explicitly True. "auto" prefers CUDA (BlueHive/other
-    CUDA hosts, `tasks/TASK-03.md`), then MPS (this project's original target,
-    the M4 Max) -- added for CUDA without changing MPS-only behavior on this
-    machine, where `torch.cuda.is_available()` is simply always False.
+    Thin wrapper kept for the many existing callers; the logic lives in
+    `muq_inversion.device.resolve_device` ("auto" = CUDA, then XPU, then MPS; never a silent
+    CPU fallback, CLAUDE.md rule 10).
     """
-    cuda_available = torch.cuda.is_available()
-    mps_available = torch.backends.mps.is_available()
-
-    if requested == "cpu":
-        return torch.device("cpu")
-
-    if requested == "cuda":
-        if cuda_available:
-            return torch.device("cuda")
-        raise DeviceSelectionError("Requested device='cuda' but CUDA is not available on this machine.")
-
-    if requested == "mps":
-        if mps_available:
-            return torch.device("mps")
-        raise DeviceSelectionError("Requested device='mps' but MPS is not available on this machine.")
-
-    if requested == "auto":
-        if cuda_available:
-            return torch.device("cuda")
-        if mps_available:
-            return torch.device("mps")
-        if not allow_cpu_fallback:
-            raise DeviceSelectionError(
-                "Requested device='auto' but neither CUDA nor MPS is available on this "
-                "machine and allow_cpu_fallback is False. Set environment."
-                "allow_cpu_fallback: true in the config to permit CPU fallback."
-            )
-        return torch.device("cpu")
-
-    raise ValueError(f"Unknown device request: {requested!r}")
+    return resolve_device(requested, allow_cpu_fallback)
 
 
 def _git_commit_info(repo_root: Path) -> dict[str, Any]:
@@ -110,9 +84,11 @@ PACKAGE_VERSIONS_TRACKED = (
 
 def capture_environment_manifest(repo_root: Path) -> dict[str, Any]:
     """Collect the fields CLAUDE.md requires in every run manifest."""
-    mps_available = torch.backends.mps.is_available()
+    avail = availability()
+    mps_available = avail["mps"]
     mps_built = torch.backends.mps.is_built()
-    cuda_available = torch.cuda.is_available()
+    cuda_available = avail["cuda"]
+    xpu_available = avail["xpu"]
 
     return {
         "python_version": sys.version,
@@ -125,8 +101,11 @@ def capture_environment_manifest(repo_root: Path) -> dict[str, Any]:
         "mps_available": mps_available,
         "mps_built": mps_built,
         "cuda_available": cuda_available,
-        "cuda_device_name": torch.cuda.get_device_name(0) if cuda_available else None,
-        "cuda_device_count": torch.cuda.device_count() if cuda_available else 0,
+        "cuda_device_name": device_name(torch.device("cuda", 0)) if cuda_available else None,
+        "cuda_device_count": device_count("cuda"),
+        "xpu_available": xpu_available,
+        "xpu_device_name": device_name(torch.device("xpu", 0)) if xpu_available else None,
+        "xpu_device_count": device_count("xpu"),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "package_versions": {
             name: _package_version(name) for name in PACKAGE_VERSIONS_TRACKED

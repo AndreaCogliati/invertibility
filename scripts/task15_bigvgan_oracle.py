@@ -5,11 +5,12 @@
 on all 8 crops of the N=8 set (a superset of N=2). Writes original/oracle WAVs, mel plots, and
 metrics to artifacts/task15_bigvgan_memorization/oracle/.
 
-    uv run python scripts/task15_bigvgan_oracle.py
+    uv run python scripts/task15_bigvgan_oracle.py [--device auto|cuda|xpu|mps|cpu]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -28,6 +29,12 @@ from muq_inversion.bigvgan_common import (
     mel_l1,
     official_mel,
 )
+from muq_inversion.device import (
+    DEVICE_CHOICES,
+    backend_stage,
+    device_metadata,
+    require_fp32_default,
+)
 from muq_inversion.logging_utils import select_device
 from muq_inversion.models.losses import MultiResolutionSTFTLoss
 
@@ -37,12 +44,21 @@ STFT = ((512, 1024, 2048), (50, 120, 240), (240, 600, 1200))  # this project's S
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--device", choices=DEVICE_CHOICES, default=None,
+                        help="overrides the config's device_request (auto = CUDA, then XPU, then MPS)")
+    args = parser.parse_args()
     cfg = yaml.safe_load(CONFIG.read_text())
-    device = select_device(cfg["device_request"], cfg["allow_cpu_fallback"])
+    device_request = args.device or cfg["device_request"]
+    device = select_device(device_request, cfg["allow_cpu_fallback"])
+    require_fp32_default()
+    device_info = device_metadata(device_request, device)
+    print(f"device: {json.dumps(device_info)}")
     out = REPO_ROOT / "artifacts" / cfg["artifact_dir_name"] / "oracle"
     out.mkdir(parents=True, exist_ok=True)
 
-    model = load_bigvgan(device)
+    with backend_stage("load BigVGAN", device):
+        model = load_bigvgan(device)
     h = model.h
     print({k: h[k] for k in ("sampling_rate", "num_mels", "n_fft", "hop_size", "win_size", "fmin", "fmax")})
     stft = MultiResolutionSTFTLoss(*STFT)
@@ -50,7 +66,7 @@ def main() -> None:
 
     results = {}
     for c in crops:
-        with torch.inference_mode():
+        with torch.inference_mode(), backend_stage(f"BigVGAN oracle inference ({c.track_id})", device):
             oracle = model(c.target_mel.to(device)).squeeze().cpu()
         original = c.waveform.squeeze()
         assert oracle.shape == original.shape, (oracle.shape, original.shape)
@@ -77,7 +93,8 @@ def main() -> None:
     mean = {k: sum(r[k] for r in results.values()) / len(results) for k in keys}
     print("mean", {k: round(v, 4) for k, v in mean.items()})
     (out / "oracle_metrics.json").write_text(json.dumps({"per_crop": results, "mean": mean,
-                                                         "bigvgan_config": dict(h)}, indent=2))
+                                                         "bigvgan_config": dict(h),
+                                                         "device_metadata": device_info}, indent=2))
 
 
 if __name__ == "__main__":

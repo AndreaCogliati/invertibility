@@ -39,6 +39,8 @@ def build_run_metadata(environment: dict[str, Any], job_id: str | None) -> dict[
         "cuda_available": environment.get("cuda_available"),
         "cuda_device_name": environment.get("cuda_device_name"),
         "mps_available": environment.get("mps_available"),
+        "xpu_available": environment.get("xpu_available"),
+        "xpu_device_name": environment.get("xpu_device_name"),
         "slurm_job_id": job_id or environment.get("slurm_job_id"),
     }
 

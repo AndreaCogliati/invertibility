@@ -77,6 +77,14 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   [[muq-transformers-compat]]) -- do not let a bare `uv add`/`uv sync` drift the resolved
   transformers version past `<5.0` without re-testing Gate 0.
 
+- Device handling (2026-10-20, TASK-17): all backend calls live in `src/muq_inversion/device.py`;
+  `--device auto` = CUDA > XPU > MPS, CPU only when explicit or `allow_cpu_fallback: true`.
+  `PYTORCH_ENABLE_MPS_FALLBACK=1` is refused. Local torch 2.14.0 has `torch.xpu` (unavailable here).
+- Intel XPU uses the separate uv project `envs/xpu/` (torch 2.14.0+xpu + triton-xpu 3.8.0 from
+  download.pytorch.org/whl/xpu; all other packages pinned to the canonical lock). Linux x86_64 only;
+  not yet run on XPU hardware. Regenerate its constraint list when `uv.lock` changes.
+- `scripts/task15_smoke_test.py --device X` passed on MPS and CPU (2026-10-20).
+
 ## Benchmark / gate results that passed sanity checks
 
 - Gate 0 (environment doctor): PASSED on 2026-09-04, device=mps, see run output above.

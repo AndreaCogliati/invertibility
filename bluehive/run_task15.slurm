@@ -74,14 +74,15 @@ cat third_party/bigvgan_v2_24khz_100band_256x/REVISION
 # MuQ (OpenMuQ/MuQ-large-msd-iter) is loaded through huggingface_hub; if the compute node has no
 # network, run any TASK-15 script once on a login node to populate $HF_HOME, or set HF_HUB_OFFLINE=1.
 
-# No silent CPU fallback (CLAUDE.md rule 10).
-uv run python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'; print('CUDA OK:', torch.cuda.get_device_name(0))"
+# No silent CPU fallback (CLAUDE.md rule 10): --device cuda fails if CUDA is unavailable. The bounded
+# smoke test exercises every pipeline stage on the GPU before the real runs start.
+uv run python -u scripts/task15_smoke_test.py --device cuda
 
 echo "--- step 1/3: BigVGAN oracle positive control ---"
-uv run python -u scripts/task15_bigvgan_oracle.py
+uv run python -u scripts/task15_bigvgan_oracle.py --device cuda
 
 echo "--- step 2/3: N=2 memorization ---"
-uv run python -u scripts/train_task15_bigvgan_memorization.py --n 2 --wandb-mode online
+uv run python -u scripts/train_task15_bigvgan_memorization.py --n 2 --device cuda --wandb-mode online
 
 # TASK-15 decision rule: run N=8 only if N=2 memorizes. The pre-registered numerical criteria are
 # read from the N=2 report (best checkpoint); listening remains a separate, manual check.
@@ -93,7 +94,7 @@ if [ "$N2_PASSED" != "True" ]; then
 fi
 
 echo "--- step 3/3: N=8 memorization ---"
-uv run python -u scripts/train_task15_bigvgan_memorization.py --n 8 --wandb-mode online
+uv run python -u scripts/train_task15_bigvgan_memorization.py --n 8 --device cuda --wandb-mode online
 
 echo "=== job $SLURM_JOB_ID finished ==="
 echo "Outputs: artifacts/task15_bigvgan_memorization/{oracle,n2,n8}/ (WAVs, mel plots, report.json), runs/task15_bigvgan_memorization/"

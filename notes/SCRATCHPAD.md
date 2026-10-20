@@ -1752,3 +1752,19 @@ Corrected run: best 4750 (same as TASK-15), final step 5000 spiked again (0.195)
 
 Audit trace updated to the corrected pipeline; pre-fix files archived with _task15 /
 _pre_task16 suffixes.
+
+## 2026-10-20 TASK-17 multi-backend
+
+Audit: no .cuda()/autocast/synchronize/memory calls in TASK-15 paths; select_device lacked XPU;
+MuQ is_flash False (flash_conformer, the only torch.backends.cuda user, never imported); BigVGAN
+use_cuda_kernel=False (CUDA kernel import lazy). muq_mulan/extend_distributed uses torch.cuda but
+is not imported by our path.
+
+XPU wheels: torch 2.14.0+xpu cp312 manylinux exists; first lock failed (PyPI triton-xpu <= 3.3.0b1,
+needs >= 3.8) -> source triton-xpu from XPU index. Free resolution drifted ~45 packages -> pinned
+via constraint-dependencies generated from uv.lock; now only torch differs.
+
+Smoke mps: PASSED 7.0s / 4.2s; cpu: PASSED 20.7s. mps vs cpu ckpt pred max diff 8.1e-6.
+Seeding equivalence (old random/np/torch.manual_seed vs seed_everything) on MPS: params, mps rng,
+cpu rng all identical.
+pytest 285 passed; ruff clean.

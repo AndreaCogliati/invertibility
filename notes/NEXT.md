@@ -1,5 +1,25 @@
 # NEXT
 
+## Latest: TASK-17 multi-backend device handling (2026-10-20)
+
+TASK-15/16 scripts now take `--device auto|cuda|xpu|mps|cpu`. All backend calls are in
+`src/muq_inversion/device.py`. Intel XPU uses the separate uv project `envs/xpu/`. There's a
+bounded per-backend smoke test. The scientific pipeline is unchanged. See
+[[DECISIONS.md#task17-multi-backend-device-handling]] and the README section "Running TASK-15/16 on
+MPS, CUDA, XPU, or CPU".
+
+```bash
+uv run pytest -q; uv run ruff check .                        # 285 passed, clean
+uv run python scripts/task15_smoke_test.py --device mps      # PASSED
+uv run python scripts/task15_smoke_test.py --device cpu      # PASSED
+```
+
+**Next (user's call):** on ACES PVC, follow the README's "ACES PVC smoke-test procedure"
+(`uv sync --project envs/xpu --frozen`, then
+`uv run --project envs/xpu python scripts/task15_smoke_test.py --device xpu`). Verify the
+partition and GRES names against ACES docs first. The `bluehive/run_task15.slurm` job now runs
+the CUDA smoke test first and passes `--device cuda`. Not committed.
+
 ## Latest: TASK-16 audit corrections, N=2 rerun (2026-10-19)
 
 **The two TASK-15 audit corrections don't materially change the TASK-15 N=2 result.** Both crops

@@ -3480,3 +3480,56 @@ generalization claim. Listening on the corrected files pending.
 
 **Rollback plan.** Set both switches off (or use the TASK-15 config); the legacy path is untouched
 and verified identical.
+
+## task17-multi-backend-device-handling: one device module; XPU in a separate uv project
+
+**Context (`tasks/TASK-17.md`).** Run the TASK-15/16 experiment unchanged on MPS, CUDA, Intel XPU
+(ACES PVC), and CPU. The audit found no `.cuda()`, autocast, CUDA synchronize, or CUDA memory calls
+in TASK-15 paths. Backend logic was confined to `logging_utils.select_device`, which handled
+auto/cuda/mps/cpu and knew nothing about XPU. The manifest and W&B metadata had no XPU fields.
+Checkpoints were reloaded with `map_location=device`, and nothing recorded which device produced a
+checkpoint. Third-party code is clean as used: BigVGAN's CUDA kernel is lazy and we pass
+`use_cuda_kernel=False`; MuQ's flash conformer (`torch.backends.cuda.sdp_kernel`) is imported only
+when `is_flash` is set, and the loaded checkpoint has `is_flash False`; MuQ's `.half()` runs only
+for fp16 input.
+
+**Decision.**
+- `src/muq_inversion/device.py` is the only module that calls `torch.cuda`, `torch.xpu`, or
+  `torch.mps`. It provides:
+  - `resolve_device`: auto order CUDA, XPU, MPS; CPU only when explicit or allowed by config;
+    explicit unavailable backends raise.
+  - Refusal of `PYTORCH_ENABLE_MPS_FALLBACK` (silent CPU ops).
+  - `seed_everything`, `device_metadata`, `memory_stats`, `synchronize`, `load_portable`
+    (`map_location="cpu"`).
+  - `backend_stage`, which adds stage/device notes to exceptions and never falls back.
+- `logging_utils.select_device` delegates to it, so all ~37 existing callers keep working.
+- TASK-15 scripts get `--device`. Device metadata goes into the console, `report.json`,
+  checkpoints, and W&B config.
+- A bounded smoke test, `scripts/task15_smoke_test.py`, covers every pipeline stage.
+- XPU lives in `envs/xpu/` as a separate uv project: torch `2.14.0+xpu` from PyTorch's XPU index,
+  plus `triton-xpu` from that index. Every other package is constrained to the canonical lock's
+  version (verified: only `torch` differs). The canonical `pyproject.toml`/`uv.lock` are unchanged.
+
+**Alternatives rejected.**
+- Adding the XPU index or extras to the canonical pyproject: this would change the lock that every
+  MPS/CUDA run depends on.
+- `torch.accelerator`: it covers less in this torch version (no device name), and it would hide the
+  explicit backend dispatch.
+- Automatic CPU retry of unsupported ops: forbidden by rule 10.
+
+**Evidence (2026-10-20, this Mac, torch 2.14.0).**
+- `pytest`: 285 passed, including 42 new tests in `tests/test_device.py` with mocked
+  CUDA/XPU/MPS. `ruff`: clean.
+- Smoke test passed on `--device mps` (4-7 s) and `--device cpu` (21 s). MPS vs CPU checkpoint
+  prediction differs by at most 8e-6.
+- `--device cuda`/`xpu` fail clearly here, as does `PYTORCH_ENABLE_MPS_FALLBACK=1`.
+- New and old seeding give identical MPS initialization and RNG state.
+- No full training was run, so the claim that the TASK-15/16 numbers are unchanged on MPS rests
+  on identical code paths and seeding, not on a rerun.
+
+**Consequences.** Trajectories are not expected to be bit-identical across backends. Backends are
+compared by the TASK-15 pass criteria. XPU itself is untested: no XPU hardware is available
+locally.
+
+**Rollback plan.** `git checkout` the touched files and remove `device.py`, `envs/xpu/`, the smoke
+test, and `tests/test_device.py`. Callers only use `select_device`, whose signature is unchanged.
