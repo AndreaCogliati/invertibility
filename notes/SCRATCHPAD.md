@@ -1768,3 +1768,7 @@ Smoke mps: PASSED 7.0s / 4.2s; cpu: PASSED 20.7s. mps vs cpu ckpt pred max diff 
 Seeding equivalence (old random/np/torch.manual_seed vs seed_everything) on MPS: params, mps rng,
 cpu rng all identical.
 pytest 285 passed; ruff clean.
+
+ACES first smoke attempt (user): ImportError loading torchaudio/_torchaudio.abi3.so --
+libcudart.so.13 missing. PyPI torchaudio 2.11.0 Linux wheel is a CUDA build. Fix: torchaudio and
+torchvision from XPU index (2.11.0+xpu, 0.29.0+xpu); relocked, no nvidia/cuda packages remain.

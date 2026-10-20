@@ -1,8 +1,9 @@
 # Intel XPU (e.g. Data Center GPU Max / PVC on TAMU ACES) environment for this project.
 #
 # Kept separate from the canonical ../../pyproject.toml + ../../uv.lock, which stay the source of
-# truth for MPS, CUDA, and CPU. The only difference here is that `torch` comes from PyTorch's XPU
-# wheel index (`+xpu` build, same version as the canonical lock) instead of PyPI's CUDA build.
+# truth for MPS, CUDA, and CPU. The only difference here is that `torch`, `torchaudio`, and
+# `torchvision` come from PyTorch's XPU wheel index (`+xpu` builds, same versions as the canonical
+# lock) instead of PyPI's CUDA builds.
 # Everything else, including this project's code, resolves exactly as declared in the canonical
 # pyproject.
 #
@@ -19,6 +20,8 @@ dependencies = [
     "muq-inversion",
     "torch==2.14.0",
     "triton-xpu",
+    "torchaudio",
+    "torchvision",
 ]
 
 [dependency-groups]
@@ -149,6 +152,10 @@ constraint-dependencies = [
 muq-inversion = { path = "../..", editable = true }
 torch = { index = "pytorch-xpu" }
 triton-xpu = { index = "pytorch-xpu" }  # torch+xpu needs a newer triton-xpu than PyPI has
+# PyPI's Linux torchaudio/torchvision wheels link CUDA (libcudart.so.13), absent here; use the +xpu
+# builds of the same versions.
+torchaudio = { index = "pytorch-xpu" }
+torchvision = { index = "pytorch-xpu" }
 
 [[tool.uv.index]]
 name = "pytorch-xpu"

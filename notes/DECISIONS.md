@@ -3508,7 +3508,7 @@ for fp16 input.
 - A bounded smoke test, `scripts/task15_smoke_test.py`, covers every pipeline stage.
 - XPU lives in `envs/xpu/` as a separate uv project: torch `2.14.0+xpu` from PyTorch's XPU index,
   plus `triton-xpu` from that index. Every other package is constrained to the canonical lock's
-  version (verified: only `torch` differs). The canonical `pyproject.toml`/`uv.lock` are unchanged.
+  version (verified: only `torch`/`torchaudio`/`torchvision` differ, by their `+xpu` suffix). Update 2026-10-20: the first ACES run failed importing torchaudio (`libcudart.so.13: cannot open shared object file`) because PyPI's Linux torchaudio wheel links CUDA, so torchaudio and torchvision now also come from the XPU index. The canonical `pyproject.toml`/`uv.lock` are unchanged.
 
 **Alternatives rejected.**
 - Adding the XPU index or extras to the canonical pyproject: this would change the lock that every

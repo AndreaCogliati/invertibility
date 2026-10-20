@@ -145,13 +145,13 @@ git-ignored.
 | --- | --- | --- |
 | MPS | canonical `pyproject.toml` + `uv.lock` | macOS arm64 PyPI torch wheel. Leave `PYTORCH_ENABLE_MPS_FALLBACK` unset. |
 | CUDA | canonical `pyproject.toml` + `uv.lock` | The Linux x86_64 PyPI torch wheel is the CUDA build, and its `nvidia-*` libraries are in the lock. Needs an NVIDIA driver on the node. Determinism flags as in `bluehive/*.slurm`. |
-| XPU | `envs/xpu/pyproject.toml` + `envs/xpu/uv.lock` | Same torch version, `2.14.0+xpu`, from `download.pytorch.org/whl/xpu`, plus Intel runtime wheels (`intel-sycl-rt`, `onemkl-*`, `triton-xpu`, ...). Every other package is pinned to the canonical lock's version. Needs the Intel GPU driver (Level Zero) on the node. Linux x86_64 only. |
+| XPU | `envs/xpu/pyproject.toml` + `envs/xpu/uv.lock` | Same torch/torchaudio/torchvision versions as `+xpu` builds (`2.14.0+xpu`, `2.11.0+xpu`, `0.29.0+xpu`) from `download.pytorch.org/whl/xpu`, because PyPI's Linux torchaudio/torchvision link CUDA (`libcudart.so.13`), plus Intel runtime wheels (`intel-sycl-rt`, `onemkl-*`, `triton-xpu`, ...). Every other package is pinned to the canonical lock's version. Needs the Intel GPU driver (Level Zero) on the node. Linux x86_64 only. |
 | CPU | canonical | `--device cpu` explicitly. Slow, but useful for checks. |
 
 The XPU environment is a separate uv project, so the canonical lock never changes for Intel. It
 installs this repository editable and gets its own `envs/xpu/.venv`. When the canonical `uv.lock`
 changes, regenerate the `constraint-dependencies` list in `envs/xpu/pyproject.toml` from it. Then
-run `uv lock --project envs/xpu` and check that only `torch` differs between the two locks.
+run `uv lock --project envs/xpu` and check that only `torch`, `torchaudio`, and `torchvision` differ (by the `+xpu` suffix) between the two locks.
 
 ### ACES PVC smoke-test procedure
 
