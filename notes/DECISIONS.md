@@ -3528,8 +3528,17 @@ for fp16 input.
   on identical code paths and seeding, not on a rerun.
 
 **Consequences.** Trajectories are not expected to be bit-identical across backends. Backends are
-compared by the TASK-15 pass criteria. XPU itself is untested: no XPU hardware is available
-locally.
+compared by the TASK-15 pass criteria.
+
+**Update 2026-10-21 (ACES).** The XPU smoke test passed on an Intel Data Center GPU Max 1100
+(torch 2.14.0+xpu, 46.6 s), so every pipeline stage runs on XPU with no unsupported operators.
+The failures on the way were environmental, not XPU operators:
+- PyPI torchaudio linking CUDA (fixed in `envs/xpu`);
+- an OOM kill below 32G;
+- no network for MuQ weights (fixed by pre-downloading and setting `HF_HUB_OFFLINE=1`);
+- GTZAN audio missing at its path on ACES.
+
+No full XPU training run yet.
 
 **Rollback plan.** `git checkout` the touched files and remove `device.py`, `envs/xpu/`, the smoke
 test, and `tests/test_device.py`. Callers only use `select_device`, whose signature is unchanged.

@@ -14,7 +14,9 @@ uv run python scripts/task15_smoke_test.py --device mps      # PASSED
 uv run python scripts/task15_smoke_test.py --device cpu      # PASSED
 ```
 
-**Next (user's call):** on ACES PVC, follow the README's "ACES PVC smoke-test procedure"
+**2026-10-21: XPU smoke test PASSED on ACES** (Intel Data Center GPU Max 1100, 46.6 s). Next:
+`mkdir -p aces/logs && sbatch aces/run_task15.slurm` (XPU, W&B offline, HF offline; then
+`uv run wandb sync wandb/offline-run-*` on a login node). Earlier procedure, for reference: on ACES PVC, follow the README's "ACES PVC smoke-test procedure"
 (`uv sync --project envs/xpu --frozen`, then
 `uv run --project envs/xpu python scripts/task15_smoke_test.py --device xpu`). Verify the
 partition and GRES names against ACES docs first. The `bluehive/run_task15.slurm` job now runs

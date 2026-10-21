@@ -1772,3 +1772,7 @@ pytest 285 passed; ruff clean.
 ACES first smoke attempt (user): ImportError loading torchaudio/_torchaudio.abi3.so --
 libcudart.so.13 missing. PyPI torchaudio 2.11.0 Linux wheel is a CUDA build. Fix: torchaudio and
 torchvision from XPU index (2.11.0+xpu, 0.29.0+xpu); relocked, no nvidia/cuda packages remain.
+
+2026-10-21 ACES: after OOM (fixed with more memory), HF network (pre-download + HF_HUB_OFFLINE=1),
+and missing GTZAN file (libsndfile "System error"), the XPU smoke test PASSED: Intel Data Center GPU
+Max 1100, torch 2.14.0+xpu, 46.6 s. ACES copy of the smoke test predates the load_data stage label.

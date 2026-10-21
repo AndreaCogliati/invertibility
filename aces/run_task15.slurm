@@ -5,6 +5,7 @@
 #SBATCH --time=01:00:00
 #SBATCH --partition=pvc          # Intel Data Center GPU Max (PVC) nodes on ACES
 #SBATCH --gres=gpu:pvc:1
+#SBATCH --ntasks=1               # one Python process at a time (required on ACES)
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --mail-type=ALL

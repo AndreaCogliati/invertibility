@@ -107,8 +107,10 @@ def main() -> int:
             assert not muq.model.training and not bigvgan.training, "MuQ/BigVGAN must be in eval mode"
         stages["load_models"] = {"status": "ok"}
 
-        crops = load_mel_crops(REPO_ROOT / cfg["manifests"][args.n], h, cfg["num_mel_hops"])
-        ids = [c.track_id for c in crops]
+        with stage("load_data"):
+            crops = load_mel_crops(REPO_ROOT / cfg["manifests"][args.n], h, cfg["num_mel_hops"])
+            ids = [c.track_id for c in crops]
+        stages["load_data"] = {"status": "ok", "crops": ids}
 
         with stage("muq_forward"):
             feats = torch.cat([muq.encode(c.waveform.to(device)).clone() for c in crops])

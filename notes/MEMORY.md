@@ -82,7 +82,9 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   `PYTORCH_ENABLE_MPS_FALLBACK=1` is refused. Local torch 2.14.0 has `torch.xpu` (unavailable here).
 - Intel XPU uses the separate uv project `envs/xpu/` (torch 2.14.0+xpu, torchaudio 2.11.0+xpu, torchvision 0.29.0+xpu, triton-xpu 3.8.0 from
   download.pytorch.org/whl/xpu; all other packages pinned to the canonical lock). Linux x86_64 only. PyPI's Linux torchaudio/torchvision link libcudart, so they must come from the XPU index too. Regenerate its constraint list when `uv.lock` changes.
-- `scripts/task15_smoke_test.py --device X` passed on MPS and CPU (2026-10-20).
+- `scripts/task15_smoke_test.py --device X` passed on MPS and CPU (2026-10-20) and on XPU, ACES
+  Intel Data Center GPU Max 1100, torch 2.14.0+xpu, 46.6 s (2026-10-21, run by the user). ACES needs
+  >= 32G memory, `HF_HUB_OFFLINE=1` with MuQ pre-downloaded on a login node, and GTZAN copied over.
 
 ## Benchmark / gate results that passed sanity checks
 
