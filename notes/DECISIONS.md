@@ -3542,3 +3542,66 @@ No full XPU training run yet.
 
 **Rollback plan.** `git checkout` the touched files and remove `device.py`, `envs/xpu/`, the smoke
 test, and `tests/test_device.py`. Callers only use `select_device`, whose signature is unchanged.
+
+## task18-heldout-protocol: 32/8/8 held-out generalization of the corrected BigVGAN pipeline
+
+**Context (`tasks/TASK-18.md`).** TASK-15/16 showed the MuQ -> BigVGAN-mel pipeline is mechanically
+viable when memorizing up to 8 crops. TASK-18 asks whether a translator trained on 32 tracks
+predicts BigVGAN mels for unseen crops and unseen tracks. It runs on ACES PVC.
+
+**Decision (pre-registered in `configs/task18_heldout.yaml` before any full run).**
+- **Scientific pipeline.** Unchanged from TASK-16 (`frame_centers`, decode clamp, translator,
+  L1, Adam 1e-3, frozen MuQ/BigVGAN, FP32).
+- **Tracks.** Taken from the committed checksum-deduplicated split (not artist-aware; no artist
+  metadata). 32 train, 3 or 4 per genre. 8 val and 8 test, one per genre each; test is forced to
+  include the 2 genres val omits, so val and test cover all 10. Every track with a duplicated
+  checksum anywhere in GTZAN is excluded. Manifests: `data/manifests/task18_{tracks,crops}.csv`,
+  sha256 `6a75bda9...` / `73f96d2e...`.
+- **Crops.** TASK-15 geometry (47,872 samples).
+  - Training pool: 24 stratified random starts per training track, never overlapping the 2
+    reserved `train_unseen` windows (9 s, 23 s).
+  - `memorized`: pool crops 6 and 18 of each track.
+  - val/test: 2, 9, 16 and 23 s.
+  - 24 listening examples, fixed in the manifest.
+- **Training.** Track-balanced minibatches of 64; 20,000 steps; eval every 500 steps on
+  memorized, train_unseen and val (mel only). Best checkpoint = lowest val mel L1. The test set
+  is evaluated once, after selection.
+  - Minibatches replace TASK-15's full batch, where every crop is seen each step. A full batch
+    of 768 crops would still fit in memory, but the task asks for sampled training crops and
+    logged track exposure. That makes batch composition dataset sampling, which the task allows
+    to change; the optimizer is unchanged.
+- **Checkpoints.** latest/best/final, numbered every 2,000 steps. They save Adam, the sampler
+  and RNG states, the lineage, and the W&B id. Writes are atomic and validated on write.
+  `--resume auto`; SIGTERM saves and exits 3.
+- **Evaluation.**
+  - Mel L1 against BigVGAN's round trip and against four controls: `shuffled_across`,
+    `shuffled_time`, `constant_zero`, and the training-pool per-bin average mel.
+  - Track-clustered bootstrap.
+  - Secondary metrics: mel cosine/r, variance ratio, RMS/centroid contour r, chroma cosine, onset
+    r at 0/50/200/500 ms, resynthesis mel L1, STFT distance. Waveform correlation is reported as
+    phase-dependent only.
+- **Outcome rule** (`task18.classify_outcome`):
+  - `UNDERFIT` / `ALL_FAIL` / `TRACK_SPECIFIC_ONLY` / `HELDOUT_COARSE` / `HELDOUT_NEAR_ORACLE`.
+  - "Beats a control" needs both the 95% CI > 0 and >= 75% of tracks favoring correct
+    conditioning.
+  - Underfit if memorized mel L1 > 2x the round trip; near-oracle means <= 1.25x the round trip
+    on both val and test.
+  - Recognizability needs the user's listening.
+
+**Disclosure.** A bounded timing probe (full config, 500 steps, MPS) printed val mel L1 at step
+500. After it, the only protocol change was adding the >= 75%-of-tracks condition, which makes
+"beats" stricter. It was motivated by the 2-track smoke run's narrow intervals, not by the probe's
+numbers. No other value was changed.
+
+**Evidence that the machinery works.** See `artifacts/task18_smoke/LOCAL_SMOKE_REPORT.md`.
+- 24 new tests.
+- MPS smoke run end to end.
+- Single-threaded CPU resume is bit-identical (3/3). Multithreaded CPU and MPS differ by kernel
+  noise (about 1e-5..1e-4), the same size as two identical uninterrupted runs.
+- Found and fixed: MuQ's forward pass consumes torch RNG, so the translator's initialization
+  depended on the feature cache. The script now re-seeds right before creating the translator.
+
+**Execution.** `aces/task18_smoke.sh` runs interactively; then `aces/run_task18_v1.slurm`, only
+when the user instructs it. Instructions: `aces/TASK18_ACES.md`.
+
+**Rollback.** Everything is new files plus two helper modules; nothing in TASK-15/16 changed.

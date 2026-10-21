@@ -1,0 +1,90 @@
+# TASK-18: 32/8/8 held-out generalization of the corrected MuQ -> BigVGAN-mel -> BigVGAN pipeline.
+# Everything scientific is TASK-16's (configs/task16_bigvgan_corrected.yaml): frozen MuQ
+# last_hidden_state, frame-center alignment, the unchanged MuQToMelTranslator, L1 on raw log-mel,
+# Adam 1e-3, decode-time clamp to BigVGAN's log floor, frozen BigVGAN-v2. New here: dataset
+# sampling (32/8/8 tracks, a training-crop pool, fixed evaluation crops), minibatches, validation
+# checkpoint selection, resumable checkpointing, and the evaluation protocol below.
+# All values are pre-registered: fixed before training, not tuned on validation or test.
+
+task: TASK-18
+seed: 0
+device_request: auto
+allow_cpu_fallback: false
+
+muq_model_id: OpenMuQ/MuQ-large-msd-iter
+bigvgan_repo_id: nvidia/bigvgan_v2_24khz_100band_256x
+bigvgan_revision: c329ede9e9bbc100ddf5c91e2330a61921262370
+hidden_channels: 256
+temporal_alignment: frame_centers
+decode_clamp_to_mel_floor: true
+
+# --- data (scripts/build_task18_manifests.py) ----------------------------------------------
+# Source: the committed checksum-deduplicated GTZAN split (793/94/113; not artist-aware -- no artist
+# metadata exists in this distribution, see DECISIONS.md#gate1). Tracks whose checksum occurs
+# more than once in GTZAN are excluded entirely. Genre labels are used only to balance selection.
+source_manifest: data/manifests/gtzan_manifest_smoke.csv
+track_counts: {train: 32, val: 8, test: 8}
+track_manifest: data/manifests/task18_tracks.csv
+crop_manifest: data/manifests/task18_crops.csv
+
+# Crop geometry: TASK-15's 187 BigVGAN hops = 47,872 samples = 1.995 s at 24 kHz.
+num_mel_hops: 187
+hop_size: 256
+end_margin_samples: 2400          # never crop within 0.1 s of a track's end
+# Val/test tracks: 4 fixed crops each at these offsets (32 + 32 crops).
+heldout_eval_offsets_seconds: [2.0, 9.0, 16.0, 23.0]
+# Training tracks: 2 reserved "unseen crop" windows each (64 crops); no training crop overlaps them.
+train_unseen_offsets_seconds: [9.0, 23.0]
+# Training pool: 24 stratified random starts per training track, outside the reserved windows
+# (768 crops; overlapping each other, which gives sub-frame shift diversity).
+train_pool_crops_per_track: 24
+# Memorized eval: these pool crops of every training track (64 crops), evaluated as trained on.
+memorized_pool_indices: [6, 18]
+# Listening: crop 1 (9.0 s) of every val/test track, plus the unseen and one memorized crop of the
+# first training track of each of the first 4 genres. Fixed before training.
+listening_crop_index: 1
+listening_train_tracks: 4
+
+# --- training -------------------------------------------------------------------------------
+# Track-balanced minibatches (each batch walks a shuffled cycle over the 32 tracks). 20,000 steps x
+# 64 crops = 1.28 M crop draws = ~1,667 passes over the 768-crop pool; enough to overfit the
+# pool, which is why the checkpoint is selected on validation mel L1.
+loss: l1_log_mel
+learning_rate: 0.001
+adam_betas: [0.9, 0.999]
+batch_size: 64
+steps: 20000
+eval_every: 500                   # memorized, train_unseen, val (mel only); test is never looked at
+checkpoint_every: 2000            # numbered checkpoints, in addition to latest/best
+log_every: 50
+
+# --- evaluation (best checkpoint = lowest val mel L1; final step reported alongside) --------
+# Primary endpoint: correct-conditioning mel L1 (raw prediction vs official target mel), per regime,
+# against BigVGAN's own round trip and the controls shuffled_across, shuffled_time, constant_zero,
+# average_mel (per-bin mean of the training-pool target mels). Advantages use a track-clustered
+# bootstrap.
+bootstrap_samples: 2000
+onset_smoothing_ms: [0, 50, 200, 500]
+decode_batch_size: 8
+
+# Outcome rule (src/muq_inversion/task18.py:classify_outcome). "Beats" a control = the
+# track-clustered 95% CI of (control - correct) mel L1 is entirely > 0 AND correct conditioning has
+# the lower mean mel L1 on >= 75% of the regime's tracks (6 of 8 val/test tracks, 24 of 32 training
+# tracks) -- an 8-cluster bootstrap alone gives optimistic intervals.
+#   UNDERFIT            memorized fails to beat every control, or its mel L1 > memorized_fit_ratio_max x round trip
+#   HELDOUT_NEAR_ORACLE val and test beat every control, both with mel L1 <= near_oracle_ratio_max x round trip
+#   HELDOUT_COARSE      val and test beat every control, but not near the round trip
+#   TRACK_SPECIFIC_ONLY train_unseen beats every control, val or test does not
+#   ALL_FAIL            otherwise
+# Recognizable audio additionally needs the user's listening verdict.
+outcome_rule:
+  min_track_fraction_positive: 0.75
+  memorized_fit_ratio_max: 2.0
+  near_oracle_ratio_max: 1.25     # TASK-15's resynthesis-ratio criterion
+
+run_name_prefix: task18_heldout
+run_root: runs/task18_heldout
+artifact_root: artifacts/task18_heldout
+feature_cache_dir: data/cache/task18
+wandb_group: task18-heldout-generalization
+wandb_tags: [task18, bigvgan-v2, mel, heldout, muq, muq-to-bigvgan-mel-temporal-conv, frame-center-alignment, decode-mel-floor-clamp]

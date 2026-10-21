@@ -1,5 +1,27 @@
 # NEXT
 
+## Latest: TASK-18 held-out generalization, prepared for ACES (2026-10-21)
+
+TASK-18 (32/8/8 held-out generalization of the corrected MuQ -> BigVGAN-mel pipeline) is built
+and smoke-tested locally. It has **not** been run at full scale; the full job waits for the
+user's go-ahead. Protocol: [[DECISIONS.md#task18-heldout-protocol]]. Instructions:
+`aces/TASK18_ACES.md`. Local smoke report: `artifacts/task18_smoke/LOCAL_SMOKE_REPORT.md`.
+
+```bash
+uv run python scripts/build_task18_manifests.py --verify-audio      # manifests unchanged, 48 WAVs verified
+uv run python scripts/train_task18_heldout.py --config configs/task18_smoke.yaml --device mps --run-name smoke_mps_final --wandb-mode disabled
+uv run pytest -q; uv run ruff check .                                # 309 passed, clean
+```
+
+**Next (user):**
+1. On ACES, do the login-node prep from `aces/TASK18_ACES.md`, step 0.
+2. On a PVC node, run `bash aces/task18_smoke.sh` and send back `ACES_SMOKE_REPORT.md`.
+3. Only when instructed: `sbatch aces/run_task18_v1.slurm`. Record the job ID, `sacct`, and SUs.
+4. Copy back `artifacts/task18_heldout/task18_heldout_v1/`, `run_manifest.json`, and the logs.
+5. Listen to `listening/val` and `listening/test`. I then write up the outcome.
+
+Not committed.
+
 ## Latest: TASK-17 multi-backend device handling (2026-10-20)
 
 TASK-15/16 scripts now take `--device auto|cuda|xpu|mps|cpu`. All backend calls are in

@@ -86,6 +86,15 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   Intel Data Center GPU Max 1100, torch 2.14.0+xpu, 46.6 s (2026-10-21, run by the user). ACES needs
   >= 32G memory, `HF_HUB_OFFLINE=1` with MuQ pre-downloaded on a login node, and GTZAN copied over.
 
+- TASK-18 (2026-10-21): MuQ's forward pass consumes torch RNG. Seed right before creating any
+  trained module, or initialization depends on whether features were cached.
+- Translator training on CPU is bit-reproducible only single-threaded (`OMP_NUM_THREADS=1`).
+  Multithreaded CPU and MPS give ~1e-5..1e-4 run-to-run weight differences after 40 steps, so
+  resume checks must use a measured noise floor.
+- TASK-18 manifests: `data/manifests/task18_tracks.csv` (sha256 6a75bda9...) and
+  `task18_crops.csv` (73f96d2e...). Throughput on MPS: 896 MuQ crops in 12 s; translator 500
+  steps of batch 64 in ~20 s.
+
 ## Benchmark / gate results that passed sanity checks
 
 - Gate 0 (environment doctor): PASSED on 2026-09-04, device=mps, see run output above.

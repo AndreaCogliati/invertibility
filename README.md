@@ -192,4 +192,14 @@ against the ACES documentation before use**. They have not been tested from this
 5. Only after a pass, run the oracle and N=2 commands above with `--device xpu`. Judge the run by
    the same pass criteria as MPS/CUDA.
 
+## TASK-18: held-out generalization (32/8/8) on ACES
+
+```bash
+uv run python scripts/build_task18_manifests.py --verify-audio            # fixed manifests (committed)
+uv run python scripts/train_task18_heldout.py --config configs/task18_smoke.yaml --device mps --wandb-mode disabled   # bounded smoke
+```
+
+The full run is the SLURM job `aces/run_task18_v1.slurm` on one PVC. Step-by-step instructions,
+including the interactive smoke test `aces/task18_smoke.sh`, are in `aces/TASK18_ACES.md`.
+
 See `notes/NEXT.md` for current status and the next command to run.

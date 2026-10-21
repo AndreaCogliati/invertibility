@@ -1776,3 +1776,16 @@ torchvision from XPU index (2.11.0+xpu, 0.29.0+xpu); relocked, no nvidia/cuda pa
 2026-10-21 ACES: after OOM (fixed with more memory), HF network (pre-download + HF_HUB_OFFLINE=1),
 and missing GTZAN file (libsndfile "System error"), the XPU smoke test PASSED: Intel Data Center GPU
 Max 1100, torch 2.14.0+xpu, 46.6 s. ACES copy of the smoke test predates the load_data stage label.
+
+## 2026-10-21 TASK-18 build
+
+- Manifests: the first build left disco and rock out of both val and test (coincidence). Changed
+  so test is forced to take the genres val omits, then rebuilt. Rebuilds are byte-identical.
+- Smoke MPS (4/2/2 tracks, 40 steps): runs end to end, UNDERFIT (expected).
+- Resume check: the first runs diverged from step 10 because of a feature-cache hit vs miss.
+  MuQ forward uses RNG, so I re-seed before translator init.
+- After that fix, CPU resume differs by 4e-6..6e-5, and identical runs are flaky at the same
+  level. OMP_NUM_THREADS=1 makes it bit-exact (3/3). MPS: noise 8e-5, resumed 1.1e-4.
+- W&B offline resume works: same run id in both offline segments.
+- Timing probe on the full config (MPS): features 12 s, 500 steps ~20 s, RSS 3.7 GB.
+- Added the >= 75%-of-tracks condition to "beats": the 2-track bootstrap CIs were too narrow.
