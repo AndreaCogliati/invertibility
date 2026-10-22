@@ -1,0 +1,202 @@
+{
+  "task18_tracks": {
+    "distorted": {},
+    "heldout_artist_seen_in_training": {
+      "blues.00029": "Kelly Joe Phelps",
+      "blues.00073": "Buckwheat Zydeco",
+      "country.00056": "Vince Gill",
+      "pop.00093": "Mandy Moore",
+      "reggae.00027": "Bob Marley",
+      "rock.00018": "Queen"
+    },
+    "heldout_artist_unknown": [
+      "country.00031",
+      "hiphop.00099",
+      "jazz.00056",
+      "reggae.00061"
+    ],
+    "n_tracks": 48,
+    "repetition_groups_crossing_splits": [],
+    "repetition_members": [
+      {
+        "repeats": [
+          "country.00051"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "country.00008"
+      },
+      {
+        "repeats": [
+          "hiphop.00050"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "hiphop.00072"
+      },
+      {
+        "repeats": [
+          "pop.00087"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "pop.00090"
+      },
+      {
+        "repeats": [
+          "reggae.00005"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "reggae.00056"
+      },
+      {
+        "repeats": [
+          "reggae.00075",
+          "reggae.00091"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "reggae.00092"
+      },
+      {
+        "repeats": [
+          "pop.00094"
+        ],
+        "repeats_selected": {},
+        "split": "val",
+        "track_id": "pop.00093"
+      },
+      {
+        "repeats": [
+          "disco.00074"
+        ],
+        "repeats_selected": {},
+        "split": "test",
+        "track_id": "disco.00071"
+      }
+    ],
+    "source": "Sturm 2013, arXiv:1306.1461v2, Table 2"
+  },
+  "task19_tracks": {
+    "distorted": {},
+    "heldout_artist_seen_in_training": {
+      "blues.00027": "Robert Johnson",
+      "blues.00029": "Kelly Joe Phelps",
+      "blues.00036": "Kelly Joe Phelps",
+      "blues.00073": "Buckwheat Zydeco",
+      "blues.00091": "Hot Toddy",
+      "classical.00017": "Mozart",
+      "classical.00031": "Debussy",
+      "classical.00099": "Vivaldi",
+      "country.00056": "Vince Gill",
+      "hiphop.00016": "Beastie Boys",
+      "hiphop.00073": "A Tribe Called Quest",
+      "hiphop.00082": "Public Enemy",
+      "hiphop.00085": "Public Enemy",
+      "jazz.00003": "James Carter",
+      "jazz.00006": "James Carter",
+      "jazz.00007": "James Carter",
+      "jazz.00095": "Joe Henderson",
+      "metal.00015": "Dark Tranquillity",
+      "metal.00053": "The New Bomb Turks",
+      "metal.00056": "The New Bomb Turks",
+      "pop.00034": "Britney Spears",
+      "pop.00035": "Britney Spears",
+      "pop.00093": "Mandy Moore",
+      "pop.00098": "Mariah Carey",
+      "reggae.00001": "Bob Marley",
+      "reggae.00012": "Bob Marley",
+      "reggae.00020": "Bob Marley",
+      "reggae.00027": "Bob Marley",
+      "rock.00018": "Queen",
+      "rock.00030": "The Rolling Stones",
+      "rock.00071": "Simply Red",
+      "rock.00072": "Simply Red",
+      "rock.00077": "Simply Red"
+    },
+    "heldout_artist_unknown": [
+      "classical.00058",
+      "country.00005",
+      "country.00015",
+      "country.00018",
+      "country.00031",
+      "country.00045",
+      "disco.00006",
+      "disco.00052",
+      "disco.00053",
+      "disco.00096",
+      "disco.00097",
+      "hiphop.00077",
+      "hiphop.00099",
+      "jazz.00056",
+      "metal.00020",
+      "metal.00021",
+      "metal.00080",
+      "reggae.00061",
+      "reggae.00093"
+    ],
+    "n_tracks": 192,
+    "repetition_groups_crossing_splits": [],
+    "repetition_members": [
+      {
+        "repeats": [
+          "country.00051"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "country.00008"
+      },
+      {
+        "repeats": [
+          "hiphop.00050"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "hiphop.00072"
+      },
+      {
+        "repeats": [
+          "pop.00087"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "pop.00090"
+      },
+      {
+        "repeats": [
+          "reggae.00005"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "reggae.00056"
+      },
+      {
+        "repeats": [
+          "reggae.00075",
+          "reggae.00091"
+        ],
+        "repeats_selected": {},
+        "split": "train",
+        "track_id": "reggae.00092"
+      },
+      {
+        "repeats": [
+          "pop.00094"
+        ],
+        "repeats_selected": {},
+        "split": "val",
+        "track_id": "pop.00093"
+      },
+      {
+        "repeats": [
+          "disco.00074"
+        ],
+        "repeats_selected": {},
+        "split": "test",
+        "track_id": "disco.00071"
+      }
+    ],
+    "source": "Sturm 2013, arXiv:1306.1461v2, Table 2"
+  }
+}

@@ -18,6 +18,12 @@ Phases, all resumable/idempotent:
 `--resume auto` (default) continues an existing run directory from `checkpoints/latest.pt`
 (model, Adam, sampler, RNG, best-so-far, W&B run id); a finished run is never overwritten.
 SIGTERM/SIGINT save `latest.pt` at the end of the current step and exit with code 3.
+
+TASK-19 reuses this script; TASK-18 configs behave exactly as before. TASK-19 configs add `arms`
+(selected with `--arm`): which training tracks form the pool (`train_tracks: core|all`), the
+learning-rate schedule (`lr_schedule`), extra evaluation sets (`eval_sets`), and an
+evaluation-only mode for existing checkpoints (`evaluate_checkpoints`). Every default reproduces
+TASK-18.
 """
 
 from __future__ import annotations
@@ -81,6 +87,7 @@ from muq_inversion.task18 import (
     shuffled_time_perms,
 )
 from muq_inversion.task18_report import render_results
+from muq_inversion.task19 import lr_multiplier
 from muq_inversion.time_alignment import (
     bigvgan_mel_frame_centers,
     muq_token_centers,
@@ -111,9 +118,14 @@ def apply_smoke_limits(rows: list[dict], limits: dict | None, memorized: list[in
     if not limits:
         return rows
     keep: set[str] = set()
-    for split, n in (("train", limits["train_tracks"]), ("val", limits["heldout_tracks_per_split"]),
-                     ("test", limits["heldout_tracks_per_split"])):
-        keep |= set(sorted({r["track_id"] for r in rows if r["split"] == split})[:n])
+    groups: dict[tuple, set] = {}
+    for r in rows:  # TASK-18 rows: one group per split; TASK-19 rows: also by core/tier
+        groups.setdefault((r["split"], r.get("core", ""), r.get("tier", "")), set()).add(r["track_id"])
+    for (split, *_), ids in groups.items():
+        n = limits["train_tracks"] if split == "train" else limits["heldout_tracks_per_split"]
+        if split == "train" and len([g for g in groups if g[0] == "train"]) > 1:
+            n = max(1, n // 2)
+        keep |= set(sorted(ids)[:n])
     out = []
     for r in rows:
         if r["track_id"] not in keep:
@@ -212,10 +224,24 @@ def main() -> int:
     parser.add_argument("--run-name", default=None, help="run directory name (default: prefix + UTC time)")
     parser.add_argument("--resume", choices=["auto", "never"], default="auto")
     parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], default="online")
+    parser.add_argument("--arm", default=None, help="TASK-19: arm name from the config's `arms`")
+    parser.add_argument("--evaluate-checkpoints", default=None,
+                        help="override the arm's evaluate_checkpoints dir (evaluation-only; e.g. smoke tests)")
     parser.add_argument("--stop-after-step", type=int, default=None,
                         help="simulate an interruption: save latest.pt after this step and exit 3 (resume test)")
     args = parser.parse_args()
     cfg = load_config(args.config)
+    if args.arm is not None:
+        if args.arm not in cfg.get("arms", {}):
+            raise SystemExit(f"--arm {args.arm} not in {args.config} arms {sorted(cfg.get('arms', {}))}")
+        cfg = {**cfg, **cfg["arms"][args.arm], "arm": args.arm}
+        cfg["run_name_prefix"] = f"{cfg['run_name_prefix']}_{args.arm}"
+    eval_sets = list(cfg.get("eval_sets", EVAL_SETS))
+    if eval_sets[:4] != list(EVAL_SETS):
+        raise SystemExit(f"eval_sets must start with {EVAL_SETS} (TASK-18 regimes, same control seeds)")
+    if args.evaluate_checkpoints:
+        cfg["evaluate_checkpoints"] = args.evaluate_checkpoints
+    evaluate_only = cfg.get("evaluate_checkpoints")
     if cfg.get("temporal_alignment") != "frame_centers" or not cfg.get("decode_clamp_to_mel_floor"):
         raise SystemExit("TASK-18 uses the corrected pipeline: frame_centers alignment + decode clamp")
 
@@ -252,7 +278,7 @@ def main() -> int:
     # Run manifest + lineage (appended on every start, including resumes).
     manifest_path = run_dir / "run_manifest.json"
     run_manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {
-        "task": "TASK-18", "run_name": run_name, "config_path": str(args.config), "resolved_config": cfg,
+        "task": cfg["task"], "arm": cfg.get("arm"), "run_name": run_name, "config_path": str(args.config), "resolved_config": cfg,
         "hashes": hashes, "output_paths": {"run_dir": str(run_dir.relative_to(REPO_ROOT)),
                                            "artifact_dir": str(out_dir.relative_to(REPO_ROOT))}, "starts": []}
     if run_manifest["hashes"] != hashes:
@@ -283,16 +309,17 @@ def main() -> int:
         return index_of[(r["path"], int(r["crop_start_sample"]))]
 
     pool_by_track: dict[str, list[int]] = {}
+    train_tracks = cfg.get("train_tracks", "all")
     for r in rows:
-        if r["role"] == "train_pool":
+        if r["role"] == "train_pool" and (train_tracks == "all" or r.get("core") == "1"):
             pool_by_track.setdefault(r["track_id"], []).append(idx(r))
     pool_all = sorted({i for v in pool_by_track.values() for i in v})
     avg_mel = tensors["mel"][pool_all].mean(dim=(0, 2))  # (num_mels,) per-bin training-pool mean
-    eval_rows = {s: [r for r in rows if r["eval_set"] == s] for s in EVAL_SETS}
-    eval_idx = {s: torch.tensor([idx(r) for r in eval_rows[s]]) for s in EVAL_SETS}
-    eval_tracks = {s: [r["track_id"] for r in eval_rows[s]] for s in EVAL_SETS}
-    across = {s: torch.tensor(shuffled_across_index(eval_tracks[s])) for s in EVAL_SETS}
-    perms = {s: shuffled_time_perms(len(eval_rows[s]), t_muq, cfg["seed"] + k) for k, s in enumerate(EVAL_SETS)}
+    eval_rows = {s: [r for r in rows if r["eval_set"] == s] for s in eval_sets}
+    eval_idx = {s: torch.tensor([idx(r) for r in eval_rows[s]]) for s in eval_sets}
+    eval_tracks = {s: [r["track_id"] for r in eval_rows[s]] for s in eval_sets}
+    across = {s: torch.tensor(shuffled_across_index(eval_tracks[s])) for s in eval_sets}
+    perms = {s: shuffled_time_perms(len(eval_rows[s]), t_muq, cfg["seed"] + k) for k, s in enumerate(eval_sets)}
 
     # Re-seed right before the translator exists: MuQ's forward pass consumes torch RNG, so without
     # this the initialization would depend on whether the feature cache was hit.
@@ -301,7 +328,7 @@ def main() -> int:
     opt = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"], betas=tuple(cfg["adam_betas"]))
     sampler = TrackBalancedSampler(pool_by_track, cfg["batch_size"], random.Random(f"task18-{cfg['seed']}-sampler"))
     resolved = {**cfg, "run_name": run_name, **hashes, "feature_cache": str(cache_path.relative_to(REPO_ROOT)),
-                "num_pool_crops": len(pool_all), "eval_crops": {s: len(eval_rows[s]) for s in EVAL_SETS},
+                "num_pool_crops": len(pool_all), "eval_crops": {s: len(eval_rows[s]) for s in eval_sets},
                 "translator_parameters": sum(p.numel() for p in model.parameters()),
                 "receptive_field_mel_frames": model.receptive_field_mel_frames, "device_metadata": device_info,
                 "seeding": seeding, "slurm": slurm_resources()}
@@ -337,7 +364,9 @@ def main() -> int:
         x = conditioned_features(condition, feats_dev[ix.to(device)], across[eval_set].to(device), perms[eval_set])
         return torch.cat([m(x[i:i + 64], t_mel, positions).cpu() for i in range(0, len(ix), 64)])
 
-    def quick_eval(sets=("memorized", "train_unseen", "val")) -> dict:
+    quick_sets = tuple(cfg.get("quick_eval_sets", ("memorized", "train_unseen", "val")))
+
+    def quick_eval(sets=quick_sets) -> dict:
         model.eval()
         out = {}
         for s in sets:
@@ -368,9 +397,23 @@ def main() -> int:
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
-    # --- phase 2: training ---
+    # --- phase 2: training (skipped when evaluating existing checkpoints) ---
+    lr_schedule = cfg.get("lr_schedule", {"type": "constant"})
     t0 = time.perf_counter()
     model.train()
+    if evaluate_only:
+        src_ckpt = REPO_ROOT / evaluate_only
+        src_final = load_portable(src_ckpt / "final.pt")
+        state["history"] = src_final["train_state"]["history"]
+        sampler.load_state_dict(src_final["sampler_state"])
+        run_manifest["evaluated_checkpoints"] = {n: {"path": str((src_ckpt / n).relative_to(REPO_ROOT)), "sha256": file_sha256(src_ckpt / n)}
+                                                 for n in ("best.pt", "final.pt")}
+        atomic_write_text(manifest_path, json.dumps(run_manifest, indent=2, default=str))
+        for entry in state["history"]:  # replay the source run's curves into this arm's W&B run
+            run.log({f"eval/{k}": v for k, v in entry.items() if "/" in k and not k.startswith("exposure")}
+                    | {"train/l1_log_mel": entry["train_l1"]}, step=entry["step"])
+        ckpt_dir = src_ckpt
+        state["step"] = cfg["steps"]
     while state["step"] < cfg["steps"]:
         step = state["step"] + 1
         batch = torch.tensor(sampler.next_batch(), device=device)
@@ -382,11 +425,14 @@ def main() -> int:
             opt.zero_grad()
             loss.backward()
             grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf")))  # measure only
+            lr_now = cfg["learning_rate"] * lr_multiplier(step, lr_schedule, cfg["steps"])
+            for group in opt.param_groups:  # a pure function of the step, so resuming needs no extra state
+                group["lr"] = lr_now
             opt.step()
         state["step"] = step
         log = {}
         if step % cfg["log_every"] == 0:
-            log |= {"train/l1_log_mel": loss.item(), "train/grad_norm": grad_norm}
+            log |= {"train/l1_log_mel": loss.item(), "train/grad_norm": grad_norm, "train/lr": lr_now}
         if step % cfg["eval_every"] == 0 or step == cfg["steps"]:
             ev = quick_eval()
             exposure = sampler.exposure_summary()
@@ -416,7 +462,7 @@ def main() -> int:
             print(f"interrupted at step {step}; resume with the same --run-name")
             return 3
     train_seconds = time.perf_counter() - t0
-    if not (ckpt_dir / "final.pt").exists():
+    if not evaluate_only and not (ckpt_dir / "final.pt").exists():
         checkpoint(ckpt_dir / "final.pt")
 
     # --- phase 3: evaluation ---
@@ -434,7 +480,7 @@ def main() -> int:
 
     print("oracle round trips ...")
     oracle = {}
-    for s in EVAL_SETS:
+    for s in eval_sets:
         target = tensors["mel"][eval_idx[s]]
         audio = decode(target)
         oracle[s] = {"audio": audio, "rt_mel_l1": [float((official_mel(audio[i:i + 1], h)[0] - target[i]).abs().mean())
@@ -445,7 +491,7 @@ def main() -> int:
         m.load_state_dict(state_dict)
         m.eval()
         aggregates, examples, audio_out = {}, [], {}
-        for s in EVAL_SETS:
+        for s in eval_sets:
             target, wave = tensors["mel"][eval_idx[s]], tensors["wave"][eval_idx[s]]
             per_cond: dict[str, list[dict]] = {}
             for c in CONDITIONS:
@@ -503,7 +549,7 @@ def main() -> int:
     # --- listening package (best checkpoint; crops fixed in the manifest) ---
     listen_dir = out_dir / "listening"
     listening = []
-    for s in EVAL_SETS:
+    for s in eval_sets:
         for i, r in enumerate(eval_rows[s]):
             if r["listening"] != "1":
                 continue
@@ -536,7 +582,7 @@ def main() -> int:
         w.writeheader()
         w.writerows(examples)
     report = {
-        "task": "TASK-18", "run_name": run_name, "wandb_run_id": run.id, "train_seconds_this_start": train_seconds,
+        "task": cfg["task"], "arm": cfg.get("arm"), "run_name": run_name, "wandb_run_id": run.id, "train_seconds_this_start": train_seconds,
         "best_checkpoint": {"step": best_ck["step"], "val_mel_l1": best_ck["val_mel_l1"], "selection": "lowest val mel L1 (correct conditioning); test never used"},
         "final_step": cfg["steps"], "outcome_best": outcome, "outcome_final": final_outcome,
         "best": best_agg, "final": final_agg, "exposure": sampler.exposure_summary(),
@@ -546,10 +592,10 @@ def main() -> int:
                   "per_example_csv": "per_example.csv", "listening": "listening/"},
     }
     atomic_write_text(out_dir / "report.json", json.dumps(report, indent=2, default=_json_default))
-    atomic_write_text(out_dir / "TASK-18_RESULTS.md", render_results(report))
+    atomic_write_text(out_dir / cfg.get("results_name", "TASK-18_RESULTS.md"), render_results(report))
     run.summary.update({"outcome": outcome["code"], "best_step": best_ck["step"],
-                        **{f"best/{s}/mel_l1_correct": best_agg[s]["conditions"]["correct"]["mel_l1"]["mean"] for s in EVAL_SETS}})
-    log_artifact_file(run, out_dir / "report.json", f"task18-report-{run_name}", "report")
+                        **{f"best/{s}/mel_l1_correct": best_agg[s]["conditions"]["correct"]["mel_l1"]["mean"] for s in eval_sets}})
+    log_artifact_file(run, out_dir / "report.json", f"{cfg['task'].lower()}-report-{run_name}", "report")
     run.finish()
     run_manifest["finished_utc"] = datetime.now(UTC).isoformat()
     run_manifest["outcome"] = outcome["code"]

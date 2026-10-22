@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import math
 
-from muq_inversion.task18 import CONDITIONS, EVAL_SETS
+from muq_inversion.task18 import CONDITIONS, regime_status
 
 REGIME_TITLES = {
     "memorized": "1. memorized training crops (not evidence of invertibility)",
     "train_unseen": "2. unseen crops from known training tracks",
     "val": "3. validation tracks (unseen; used for checkpoint selection)",
     "test": "4. test tracks (unseen; never used for any decision)",
+    "memorized_new": "memorized crops of the 96 TASK-19 training tracks (unseen tracks for 32-track arms)",
+    "train_unseen_new": "unseen crops of the 96 TASK-19 training tracks (unseen tracks for 32-track arms)",
+    "val2": "secondary validation tracks (24; not used for selection)",
+    "test2": "secondary test tracks (24; never used for any decision)",
 }
 SECONDARY = ["mel_cosine", "mel_pearson", "mel_variance_ratio", "rms_corr", "centroid_corr", "chroma_cosine",
              "onset_corr_0ms", "onset_corr_50ms", "onset_corr_200ms", "onset_corr_500ms", "resynthesis_mel_l1",
@@ -24,8 +28,11 @@ def _f(x: float, nd: int = 3) -> str:
 def render_results(report: dict) -> str:
     best, outcome = report["best"], report["outcome_best"]
     cfg = report["resolved_config"]
+    sets = list(best)
+    status = {s: outcome["regimes"].get(s) or regime_status(best[s], cfg["outcome_rule"]) for s in sets}
     lines = [
-        f"# TASK-18 results: {report['run_name']}",
+        f"# {report.get('task', 'TASK-18')} results: {report['run_name']}"
+        + (f" (arm {report['arm']})" if report.get("arm") else ""),
         "",
         f"**Outcome (pre-registered rule, best checkpoint): `{outcome['code']}`.** {outcome['text']}",
         "",
@@ -46,8 +53,8 @@ def render_results(report: dict) -> str:
         + " | correct / round trip | beats all |",
         "| --- | --- | --- | --- | " + " | ".join("---" for c in CONDITIONS if c != "correct") + " | --- | --- |",
     ]
-    for s in EVAL_SETS:
-        a, st = best[s], outcome["regimes"][s]
+    for s in sets:
+        a, st = best[s], status[s]
         cells = []
         for c in CONDITIONS:
             if c == "correct":
@@ -62,9 +69,9 @@ def render_results(report: dict) -> str:
     lines += ["", "## Secondary metrics (mean; best checkpoint)", "",
               ("Correlations are Pearson r against the original audio (contours) or the target mel. "
                "`waveform_correlation_phase_dependent` needs sample-level phase agreement and is a diagnostic only."), ""]
-    for s in EVAL_SETS:
+    for s in sets:
         a = best[s]
-        lines += [f"### {REGIME_TITLES[s]}", "", "| metric | oracle | " + " | ".join(CONDITIONS) + " |",
+        lines += [f"### {REGIME_TITLES.get(s, s)}", "", "| metric | oracle | " + " | ".join(CONDITIONS) + " |",
                   "| --- | --- | " + " | ".join("---" for _ in CONDITIONS) + " |"]
         for k in SECONDARY:
             if k not in a["conditions"]["correct"]:

@@ -3693,3 +3693,79 @@ The difference cannot be attributed to the mel target alone.
 2. Run a blinded listening test.
 3. Use an artist-aware or fault-filtered held-out set.
 4. Scale the number of training tracks.
+
+## task19-data-x-recipe-protocol: 2x2 data (32 vs 128 tracks) x recipe (A vs B), pre-registered
+
+**Context (`tasks/TASK-19.md`).** TASK-18 gave recognizable held-out audio, but its quality is
+limited mainly by translator fit and optimization (see task18-heldout-result). The question: is
+held-out mel reconstruction limited by data, by optimization, or by both?
+
+**Preflight (2026-10-22).**
+- The TASK-18 notes and the WebProxy edit are committed (`be1521c`, not yet pushed).
+- TASK-18 job 2240151 used 10:27 at billing=8, ~1.4 billing-hours.
+
+**Fault list.** Sturm (2013), arXiv:1306.1461 Table 2, transcribed to
+`data/manifests/gtzan_sturm2013_faults.yaml`: exact, recording and version repetitions, including
+cross-genre ones and pop 37 (same recording as pop 15/21/22 per the Distortions column);
+distortions; and artists. All 14 checksum-duplicate pairs fall inside Sturm's groups.
+
+- **TASK-18 check: not affected.** No repetition group spans two TASK-18 splits and no TASK-18
+  track is distorted. TASK-18 manifests are unchanged.
+- **7 TASK-18 tracks have repetition partners**, none used anywhere:
+  - train `country.00008` (partner 51);
+  - train `hiphop.00072` (partner 50);
+  - train `pop.00090` (partner 87);
+  - train `reggae.00056` (partner 05);
+  - train `reggae.00092` (partners 75, 91);
+  - val `pop.00093` (version partner 94);
+  - test `disco.00071` (exact partner 74).
+- **Artist overlap.** 6 of the 16 TASK-18 held-out tracks share a known artist with TASK-18
+  training. TASK-18's held-out result is therefore partly within-artist. This was already a
+  caveat; now it is quantified.
+
+**Decision (all in `configs/task19.yaml`, fixed before any run).**
+- **Tracks.** 128 training = the TASK-18 32 + 96 new (12 or 13 per genre). Held-out = the
+  TASK-18 8 + 8 (primary, identical crops) + 24 + 24 new (secondary, 3 or 4 per genre with
+  val/test). New tracks come from the committed split and are never a Sturm repetition member,
+  distorted, or a checksum duplicate. Manifests: `task19_tracks.csv` (sha256 6563a6cf...),
+  `task19_crops.csv` (f99ca8de...), `task19_fault_report.json` (69e0d988...). TASK-18 crop rows
+  are reproduced byte-for-byte.
+- **Arms.**
+  - A32 = the TASK-18 checkpoints, re-evaluated and not retrained.
+  - A128 = recipe A on 128 tracks.
+  - Recipe B (B32, B128) = A + a linear warmup over 1,000 steps (from 1e-6) to the same 1e-3
+    peak, then cosine decay to 1e-5 at step 20,000. Nothing else changes: batch 64 (the code
+    already uses minibatches), the same Adam, seed and budget, and no clipping.
+  - The schedule is a function of the step only, so resuming is exact (verified bit-identical on
+    single-threaded CPU).
+- **Code.** One code path: `scripts/train_task18_heldout.py`, generalized with config switches
+  (`--arm`, `train_tracks`, `lr_schedule`, `eval_sets`, `evaluate_checkpoints`). With a TASK-18
+  config it is bit-identical to the committed TASK-18 script (CPU, single thread, 40 steps).
+- **Evaluation and selection.**
+  - Eval sets: memorized and train_unseen on the core 32; val/test primary;
+    memorized_new/train_unseen_new on the 96 new tracks; val2/test2 secondary.
+  - Controls and metrics as in TASK-18. Selection on primary val mel L1 only; best and final
+    are both reported.
+- **Interpretation.**
+  - "Much better" than A32, on primary held-out mel L1 paired by crop: >= 10% relative
+    improvement, AND a track-clustered 95% CI > 0, AND >= 75% of the 16 tracks improve.
+  - Codes: DATA_LIMITED / OPTIMIZATION_LIMITED / BOTH_MATTER / BOTH_NEEDED_JOINTLY /
+    NEITHER_CAPACITY_OR_OBJECTIVE_LIMIT, plus a per-arm generalization-gap flag.
+  - The same rule is reported on the secondary held-out set. The artist-overlap split is a
+    secondary analysis.
+- **Listening.** Blinded package: the 16 TASK-18 listening crops; per example a labeled original
+  plus 8 randomly named clips (oracle, 4 arms' correct predictions, A32's 3 controls). The key is
+  in a separate folder.
+
+**Verification (local, MPS/CPU).**
+- 18 new tests.
+- All four arms, the analysis and the blinded package run on the smoke subset.
+- The A32 path reproduces TASK-18 smoke correct-conditioning mel L1 exactly (max diff 0.0).
+- Regression: the generalized script is bit-identical to TASK-18's.
+
+**SU estimate.** Scaled from TASK-18 (627 s at billing=8; ~1.9 s per evaluation crop): A32 ~3.8,
+other arms ~4.3 each, ~17 billing-hours in total (+/-50%), plus ~3-4 for the interactive smoke.
+Evaluation dominates (768 evaluation crops per arm).
+
+**Rollback.** New files plus config-gated additions to the TASK-18 script. TASK-18 configs are
+unaffected (verified).

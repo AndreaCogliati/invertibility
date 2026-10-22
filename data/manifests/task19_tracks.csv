@@ -1,0 +1,193 @@
+split,track_id,genre,path,checksum_sha256,duration_seconds,resampled_num_samples,tier,core,artist_sturm2013
+train,blues.00031,blues,data/raw/gtzan/genres/blues/blues.00031.wav,6d19d9f612237be2d67960022eb1aa2271ea024ccca5b49f6f83caeacb1fa122,30.013333333333332,720320,train,1,Kelly Joe Phelps
+train,blues.00037,blues,data/raw/gtzan/genres/blues/blues.00037.wav,3a6623eacdf8da4ab2f0e4e7e3209fa839a20ac0332db117055fcc6c093bac09,30.013333333333332,720320,train,1,Kelly Joe Phelps
+train,blues.00080,blues,data/raw/gtzan/genres/blues/blues.00080.wav,031aeddd207ca8cc592113f4600465207c2e78ae5178bd2f32d85e511d3e54d2,30.013333333333332,720320,train,1,Buckwheat Zydeco
+train,classical.00005,classical,data/raw/gtzan/genres/classical/classical.00005.wav,dfacd31534627ad86a7b203bae91e79fe07bc45eaf66ade5ccea24d883d1094a,30.013333333333332,720320,train,1,J. S. Bach
+train,classical.00046,classical,data/raw/gtzan/genres/classical/classical.00046.wav,771b18b4e3b50529db00a3afb84e9d2461f863297cd928588a3cb6ffbbc57332,30.011791383219954,720282,train,1,
+train,classical.00070,classical,data/raw/gtzan/genres/classical/classical.00070.wav,8376608df88947de8412cd31dcbc3fcda54a4a440e8fd242742ae12c0e86bacf,30.013333333333332,720320,train,1,Haydn
+train,country.00008,country,data/raw/gtzan/genres/country/country.00008.wav,dbfd35f47e913737b62baab8dc75d4e362be1e2b1a63533b1850ff1746652a7d,30.1015873015873,722438,train,1,
+train,country.00014,country,data/raw/gtzan/genres/country/country.00014.wav,fdef5d159860c54165f7b0f5d4a3edacded55a1e38963a679d5fbe77be94138b,30.013333333333332,720320,train,1,
+train,country.00017,country,data/raw/gtzan/genres/country/country.00017.wav,25841ed1a4a8e62ea4003982d54a7a10a18d85ee9c6ba7fd4a4f36ba3af23852,30.013333333333332,720320,train,1,
+train,country.00054,country,data/raw/gtzan/genres/country/country.00054.wav,1e90bc4ea6682f079c09c9bde68ff6ae44f6c414a4fb59992fec33b1801203e7,30.013333333333332,720320,train,1,Vince Gill
+train,disco.00013,disco,data/raw/gtzan/genres/disco/disco.00013.wav,b55fe7522833a30caa2d7d7c22e5edb7878a15f58c803e4e17c92fd6cb4c0e17,30.013333333333332,720320,train,1,
+train,disco.00020,disco,data/raw/gtzan/genres/disco/disco.00020.wav,b30ccad83ed865297676bbae337478586f4f60d67d8c6c4091faea916e88e0ab,30.013333333333332,720320,train,1,
+train,disco.00031,disco,data/raw/gtzan/genres/disco/disco.00031.wav,df3d954bb89249f712214ebea6aa323b94f10afc796946df3418863362e298aa,30.013333333333332,720320,train,1,
+train,disco.00093,disco,data/raw/gtzan/genres/disco/disco.00093.wav,5eab391b680186472a28fa7d3b73edda36fa530f8d53035d096ba51bc8e9ea6c,30.00018140589569,720004,train,1,
+train,hiphop.00006,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00006.wav,cf51b6d776a9e8f05506f0682d5d25cd5b16af0be862ead307e42a5593c94dba,30.00018140589569,720004,train,1,
+train,hiphop.00072,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00072.wav,52cd3c38bdade472155bc82e6a31ea621783193a422949bbc7d6d5a1866b8a36,30.013333333333332,720320,train,1,A Tribe Called Quest
+train,hiphop.00091,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00091.wav,678a9d61eecb55038992e170e30fecffde05cdead6fe46fe8543263e08e149c6,30.013333333333332,720320,train,1,Public Enemy
+train,jazz.00000,jazz,data/raw/gtzan/genres/jazz/jazz.00000.wav,97135f273616d39b11db37a1ec61e0bd729b82c085f7dcdc472b26a37affca8a,30.013333333333332,720320,train,1,
+train,jazz.00005,jazz,data/raw/gtzan/genres/jazz/jazz.00005.wav,85be1d12a6273cc6637142a0e296ff9e8183618dfb5eaf11727543904338c01e,30.013333333333332,720320,train,1,James Carter
+train,jazz.00073,jazz,data/raw/gtzan/genres/jazz/jazz.00073.wav,59629df297f30b4c6503d59198455a568ecf5a2182eef7a062b3d59080f29942,30.013333333333332,720320,train,1,Dexter Gordon
+train,metal.00000,metal,data/raw/gtzan/genres/metal/metal.00000.wav,bae80772bfda387cefb294d07cfbdf12cdb7a93bfa471e275b299ecc029af4f9,30.00018140589569,720004,train,1,
+train,metal.00008,metal,data/raw/gtzan/genres/metal/metal.00008.wav,1cdcdfbb3c9b90116b136c5d37f7e3bddd833f5f1f1afa6a6a42dcd312496a6c,30.00018140589569,720004,train,1,
+train,metal.00095,metal,data/raw/gtzan/genres/metal/metal.00095.wav,2f248d32dd05e134a7f99e943d873f17c935e7e5ccb53bcf591b7cfbea19537e,30.013333333333332,720320,train,1,Rage Against the Machine
+train,pop.00032,pop,data/raw/gtzan/genres/pop/pop.00032.wav,1f092cabf83516b15b2cc96c5e50ce7e08a64569e4ad3525a53fe48f00b7fa3a,30.00018140589569,720004,train,1,Britney Spears
+train,pop.00039,pop,data/raw/gtzan/genres/pop/pop.00039.wav,7638fd15fce671468da113336304c78f9dfb22479d40a0713aecb467d40588b2,30.00018140589569,720004,train,1,Celine Dion
+train,pop.00090,pop,data/raw/gtzan/genres/pop/pop.00090.wav,fb26a0e0f6f578c2d3d57cde1d1068f5a3aeb13dadc7e56c23ba7c074ea4cb15,30.00018140589569,720004,train,1,Mandy Moore
+train,reggae.00025,reggae,data/raw/gtzan/genres/reggae/reggae.00025.wav,c0fe91bcfb61c0a7c43d38c83c27cebb5fc71ebe52e820fb8a0c58862e34639a,30.013333333333332,720320,train,1,Bob Marley
+train,reggae.00056,reggae,data/raw/gtzan/genres/reggae/reggae.00056.wav,4ee60ab848d092055250cf6fcc6174410b65277b0116a9c64701b005af86bfe3,30.00018140589569,720004,train,1,Bob Marley
+train,reggae.00092,reggae,data/raw/gtzan/genres/reggae/reggae.00092.wav,a00b863e6e83e2bea187c33a1921ff760c28b15bc25a812a62c2b79b4ba9673a,30.00018140589569,720004,train,1,
+train,rock.00009,rock,data/raw/gtzan/genres/rock/rock.00009.wav,f70cd966d20669d661b6c0d0ef437ea04ebbf1274d2f8327b0118e9cdc70e207,30.013333333333332,720320,train,1,Morphine
+train,rock.00023,rock,data/raw/gtzan/genres/rock/rock.00023.wav,f65b319fc4fa6e7b57dac0014d965199d7b8cda3ec023511c2a4beb626498f11,30.013333333333332,720320,train,1,Queen
+train,rock.00043,rock,data/raw/gtzan/genres/rock/rock.00043.wav,6d322f1b956c52e136ba635d6bbd944aa6fe5b1901159fbc7d7adfb7b39cb68d,30.013333333333332,720320,train,1,Led Zeppelin
+train,blues.00011,blues,data/raw/gtzan/genres/blues/blues.00011.wav,9cc6a3d8c35531375e0aa7e27d3720d2f16d11c815bdc65aad71182e7854e2bb,30.013333333333332,720320,train,0,John Lee Hooker
+train,blues.00015,blues,data/raw/gtzan/genres/blues/blues.00015.wav,e9b571c44cc36011b4c4c44dd2223e6146bd52462f3128b49eeceb38a704d7cc,30.013333333333332,720320,train,0,Robert Johnson
+train,blues.00040,blues,data/raw/gtzan/genres/blues/blues.00040.wav,82c1e94fad248c9cb8d528bfca7d0a47d61a9086919b8a4c311a79ec34e50247,30.013333333333332,720320,train,0,Stevie Ray Vaughan
+train,blues.00061,blues,data/raw/gtzan/genres/blues/blues.00061.wav,dbb12d5eace894308ab59b5130753f8cf6426f553728b54fc6ad5c5a46727393,30.013333333333332,720320,train,0,Clifton Chenier
+train,blues.00083,blues,data/raw/gtzan/genres/blues/blues.00083.wav,d994c4b9c77971a5dccdc114fc7449ff1b04ccda424f91a4d147c6afa793ba05,30.013333333333332,720320,train,0,Buckwheat Zydeco
+train,blues.00084,blues,data/raw/gtzan/genres/blues/blues.00084.wav,90ad2b0993a4a2556e13435b06d5f81ba79033f57433995ab3873c9e1ec1ac97,30.013333333333332,720320,train,0,Buckwheat Zydeco
+train,blues.00085,blues,data/raw/gtzan/genres/blues/blues.00085.wav,c9f93bb63ee92491c759fd80f08b63cd9154cb2d7337487caa95d94d0b012f9e,30.013333333333332,720320,train,0,Hot Toddy
+train,blues.00086,blues,data/raw/gtzan/genres/blues/blues.00086.wav,89e4a738e5a5f83a6bd9fb8db0696460c80dba2a1f34b4a31bffa44f42f1829f,30.013333333333332,720320,train,0,Hot Toddy
+train,blues.00092,blues,data/raw/gtzan/genres/blues/blues.00092.wav,7475dd33e4fc1184dcc7edd9f386fc85c9fcf6b586f2e7bbce43370128cb6f61,30.013333333333332,720320,train,0,Hot Toddy
+train,blues.00095,blues,data/raw/gtzan/genres/blues/blues.00095.wav,2533b53feeddb25f95f5be99737c462cb4460ced4c63978fef9d06b800bfac40,30.013333333333332,720320,train,0,Hot Toddy
+train,classical.00004,classical,data/raw/gtzan/genres/classical/classical.00004.wav,66029d26a05c5322dcc7b341bc0e2aa20c9756b68d655e6145113d9d1a368c7e,30.013333333333332,720320,train,0,J. S. Bach
+train,classical.00023,classical,data/raw/gtzan/genres/classical/classical.00023.wav,599c64bb16caf62c6bfa4b3bbd893691acc31b058a4a57e9c9168cf7cd91c6f3,30.013333333333332,720320,train,0,Mozart
+train,classical.00025,classical,data/raw/gtzan/genres/classical/classical.00025.wav,882f3c8060c948169185c4da34c40d19eef9de7f95bfe88a9d286e5fe6ef1824,30.013333333333332,720320,train,0,Mozart
+train,classical.00032,classical,data/raw/gtzan/genres/classical/classical.00032.wav,798a74dfcaa54a880c50a6e08841ea1e14f495db0aabed22a2da68230fbd8dc5,30.013333333333332,720320,train,0,Debussy
+train,classical.00033,classical,data/raw/gtzan/genres/classical/classical.00033.wav,4c1290af1bf66e6bc7c98c3e937aaa6e4a09a4392d37f2a5873fc6fa2d24e249,30.013333333333332,720320,train,0,Debussy
+train,classical.00045,classical,data/raw/gtzan/genres/classical/classical.00045.wav,a7a8d6c3b46838690217a9f8921d5a36dfea959e9b24651b173c20fd687aeae5,30.17142857142857,724114,train,0,
+train,classical.00075,classical,data/raw/gtzan/genres/classical/classical.00075.wav,d10982ffb9fe8febad301c9ff8e1c74e9d19a44301d9917c5d9215558c3dc2d9,30.013333333333332,720320,train,0,Haydn
+train,classical.00092,classical,data/raw/gtzan/genres/classical/classical.00092.wav,c7ad1c7447208d28e1e10d0d8d13ac499e7eea4b29dfb82316d0d89ec128790f,30.013333333333332,720320,train,0,Vivaldi
+train,classical.00095,classical,data/raw/gtzan/genres/classical/classical.00095.wav,b986944b9e535ef1c0aa304e05ed9f4b5b477249894cd8510e2ff54aca007a38,30.013333333333332,720320,train,0,Vivaldi
+train,classical.00096,classical,data/raw/gtzan/genres/classical/classical.00096.wav,08ef920b22c6fdee2730c75fb0437c3b0ddffccbd509199335a2764dfd070cd6,30.013333333333332,720320,train,0,Vivaldi
+train,country.00007,country,data/raw/gtzan/genres/country/country.00007.wav,e9afd6b730b8dafaa9f6c764f9b9facc4e419fa38236752670c40855683d76b0,29.98185941043084,719564,train,0,
+train,country.00027,country,data/raw/gtzan/genres/country/country.00027.wav,645e326e709d096ef603e906c730637d39851558db532503df6a33ede955f56f,30.013333333333332,720320,train,0,
+train,country.00048,country,data/raw/gtzan/genres/country/country.00048.wav,cd574e96ccd5c78b3f1908ae98e1cb49fd599e421e08f5978a7bd809a2e85880,30.013333333333332,720320,train,0,
+train,country.00057,country,data/raw/gtzan/genres/country/country.00057.wav,53283f9c4365c693044614700b51532bb11e232d9211387bf9ff3c7b9f33ddf4,30.013333333333332,720320,train,0,Vince Gill
+train,country.00059,country,data/raw/gtzan/genres/country/country.00059.wav,1db2d7fbd26a227901ac1ef6370f210d8f0d6a7b9652cc5539758d18e8fe778e,30.013333333333332,720320,train,0,Vince Gill
+train,country.00062,country,data/raw/gtzan/genres/country/country.00062.wav,3f4ceef7ce032d2b3a7dc759932ba5c78636c2870484fd6fc83206cff2d88fb0,30.013333333333332,720320,train,0,Vince Gill
+train,country.00068,country,data/raw/gtzan/genres/country/country.00068.wav,941983e6ca8b481ef632210ca18e329ff559c5b7eabc52436f5de7810c728ae8,30.013333333333332,720320,train,0,Willie Nelson
+train,country.00087,country,data/raw/gtzan/genres/country/country.00087.wav,31e6c900db6eeccd53b1f2b38093823df22b9c34f4959fc35ce584815cab628c,30.013333333333332,720320,train,0,Brad Paisley
+train,country.00098,country,data/raw/gtzan/genres/country/country.00098.wav,2209911a9c65edc47001e7e2abc80c3f95ee6d9cbbbfcc9ac039af95ba5d6587,30.013333333333332,720320,train,0,George Strait
+train,disco.00009,disco,data/raw/gtzan/genres/disco/disco.00009.wav,fc6101744066a0cd553ce9745187bc3538c64084b1e3f99d3f493192ab6e1ce7,30.013333333333332,720320,train,0,
+train,disco.00043,disco,data/raw/gtzan/genres/disco/disco.00043.wav,8bdd6b8269da2dbe85b11352b39868adea71a112c809b61e0dd4eebc252f1eb6,30.013333333333332,720320,train,0,
+train,disco.00048,disco,data/raw/gtzan/genres/disco/disco.00048.wav,77d3260ddaede842138fd607797c6c4627b2195da9cc5ea3b8d55090d8ef39a3,30.00018140589569,720004,train,0,
+train,disco.00062,disco,data/raw/gtzan/genres/disco/disco.00062.wav,3327e747febd00cb202037b9568d59090b59c87fadac71f6aea114316fb356e0,30.00018140589569,720004,train,0,
+train,disco.00064,disco,data/raw/gtzan/genres/disco/disco.00064.wav,a31fcdacd63c2f744e726276a4bf5ba6e9f8981ba543b9f49a4e746f6347d0e9,30.00018140589569,720004,train,0,
+train,disco.00075,disco,data/raw/gtzan/genres/disco/disco.00075.wav,51d49dfb7258f45afd7ab47845da881505b35588583864b84228a6e8991082b5,30.00018140589569,720004,train,0,
+train,disco.00094,disco,data/raw/gtzan/genres/disco/disco.00094.wav,7ac5b8f68917f43bb48324bdb867afe2306edabaca53d8694811df3038da2943,30.00018140589569,720004,train,0,
+train,disco.00095,disco,data/raw/gtzan/genres/disco/disco.00095.wav,4dbce981583e8c71b7119cdf2fc636faaf4139cb2d58391240398da548e1cc62,30.00018140589569,720004,train,0,
+train,hiphop.00008,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00008.wav,f3aa37a96d6baa66ab7233ca09c6b770c4f0d47f1aee26394581adec6cf39b39,30.013333333333332,720320,train,0,Beastie Boys
+train,hiphop.00014,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00014.wav,6444b6503caffb21b0b456495d45743c12328ab08925c7b943247cdce23ca322,30.013333333333332,720320,train,0,Beastie Boys
+train,hiphop.00018,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00018.wav,48214df3d97b98461fa720d09072934af44145d2b5224865c68ccead1b298444,30.013333333333332,720320,train,0,Beastie Boys
+train,hiphop.00023,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00023.wav,04b39d3fb85a18db188fe49d227e047c0b5711dcf6d8a368eaa2b28a0185050a,30.013333333333332,720320,train,0,Beastie Boys
+train,hiphop.00024,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00024.wav,f5feb805d34053959327c0c6c5ad6f0cb02f309d71bc4428968816d614281f1b,30.013333333333332,720320,train,0,Beastie Boys
+train,hiphop.00074,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00074.wav,cf66143b6bb29f9c7ae3f8b0e3bfc6c64f9a1801ccc0f652e0210e560bf63c64,30.013333333333332,720320,train,0,A Tribe Called Quest
+train,hiphop.00080,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00080.wav,1fbdcc336e446693aae5c3eb8e897cacafcb55e4f27ed11d4b07e5024b39070b,30.00018140589569,720004,train,0,
+train,hiphop.00093,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00093.wav,080943f555c74b30187401b254fd268b72391567946190411dffd588f2b20746,30.013333333333332,720320,train,0,Public Enemy
+train,hiphop.00097,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00097.wav,93791a78d8965d3c9c90ce77c3f10bd58884107ae64b8060c88e3204e80f42aa,30.013333333333332,720320,train,0,Public Enemy
+train,hiphop.00098,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00098.wav,1406af6d5d65ad038c6dbfd7b5f0e002f8113ef0fe9d9f399fb176c7d8587ad7,30.013333333333332,720320,train,0,Public Enemy
+train,jazz.00013,jazz,data/raw/gtzan/genres/jazz/jazz.00013.wav,69c39c896fcc6ab9c758713d482d17a5d88c65d04505ee9786457130ea77a862,30.013333333333332,720320,train,0,Joe Lovano
+train,jazz.00018,jazz,data/raw/gtzan/genres/jazz/jazz.00018.wav,6a508c12ff4c869a6b154a46026b9410b342ae41e78d1bc4e9cd7a5558aebaad,30.013333333333332,720320,train,0,Joe Lovano
+train,jazz.00047,jazz,data/raw/gtzan/genres/jazz/jazz.00047.wav,5033f8caf315fef97975e9aa958bb2ff44b9e899f422f1eee4e8e5d0b1ce2569,30.013333333333332,720320,train,0,
+train,jazz.00059,jazz,data/raw/gtzan/genres/jazz/jazz.00059.wav,2e0d16f20bb2342b6052fac7e106f1038a424ec84ab1d979c1059dbc48fbfef3,30.480725623582767,731537,train,0,
+train,jazz.00063,jazz,data/raw/gtzan/genres/jazz/jazz.00063.wav,7ca0b52fb221734537a7443981fc7ebba357f4f8396e69e2878252d7e76c5f74,30.351020408163265,728424,train,0,
+train,jazz.00074,jazz,data/raw/gtzan/genres/jazz/jazz.00074.wav,c75d98a1e49aa3d7322f915f264ff04285f8964c4d3656dbbdddcd7e0fe777d2,30.013333333333332,720320,train,0,Dexter Gordon
+train,jazz.00082,jazz,data/raw/gtzan/genres/jazz/jazz.00082.wav,a97c10f4f5a85702ddbbc28a32b98cf08a37a058caa371fee578e0a879b0cfd8,30.013333333333332,720320,train,0,
+train,jazz.00096,jazz,data/raw/gtzan/genres/jazz/jazz.00096.wav,af2f2e085e45609278b512d0faeff9aa74348e717aa5a0d75ed6b650318c5722,30.013333333333332,720320,train,0,Joe Henderson
+train,jazz.00099,jazz,data/raw/gtzan/genres/jazz/jazz.00099.wav,e72759b6dea8d8cf62f3ab3f6bdac8f6594243cfc9660443a26e589c91218a12,30.013333333333332,720320,train,0,Joe Henderson
+train,metal.00001,metal,data/raw/gtzan/genres/metal/metal.00001.wav,103847dccc54f6f92cb31f6a2faa8ab2d37f77f8e307b02d8ee80073d9024891,30.00018140589569,720004,train,0,
+train,metal.00003,metal,data/raw/gtzan/genres/metal/metal.00003.wav,e8b6304f866ba1a4182eafdae39ab0e3bee87c447722785ea86bbc9d1f9644e0,30.00018140589569,720004,train,0,
+train,metal.00012,metal,data/raw/gtzan/genres/metal/metal.00012.wav,7e0ff9359290f412c09809d33839f6fca82ad4d8d623803a9bc5d8318221b1c0,30.00018140589569,720004,train,0,Dark Tranquillity
+train,metal.00019,metal,data/raw/gtzan/genres/metal/metal.00019.wav,86bc91d7790b6bdfd3c76baa77c2183acee9bf069756ee1570acc39eb2604915,30.00018140589569,720004,train,0,
+train,metal.00030,metal,data/raw/gtzan/genres/metal/metal.00030.wav,ef6503843d2e16e149b05c8e6aadc72dce7440f203826e4c0344034fbebb1686,30.00018140589569,720004,train,0,
+train,metal.00054,metal,data/raw/gtzan/genres/metal/metal.00054.wav,aaffb19568d6dffbfef2ae534eda8e87212d438987964c7616675ff5314b703b,30.013333333333332,720320,train,0,The New Bomb Turks
+train,metal.00068,metal,data/raw/gtzan/genres/metal/metal.00068.wav,ef29a482cd67e930f41dea481d9950d017aa267119427427e77927385d83cba7,30.00018140589569,720004,train,0,
+train,metal.00072,metal,data/raw/gtzan/genres/metal/metal.00072.wav,a8c60366bf1c2d140e23af6b87bb92746d554867e092460788c725cea8cdff40,30.00018140589569,720004,train,0,
+train,metal.00077,metal,data/raw/gtzan/genres/metal/metal.00077.wav,b932f382e0c9981d8a58fed4c8ce00cc9de9b7e8d52cd5adabd7c87f6c1cf756,30.00018140589569,720004,train,0,
+train,metal.00092,metal,data/raw/gtzan/genres/metal/metal.00092.wav,f9c179b858c6fc1178a859ed5ee814a4baef4f0b098a4dda453a39aa9c352f20,30.00018140589569,720004,train,0,Iron Maiden
+train,pop.00002,pop,data/raw/gtzan/genres/pop/pop.00002.wav,3a1fa599cc99653cbc10c4698fd573c6928f2bdd26681a552a5cc7d4c24bf2c3,30.00018140589569,720004,train,0,Mariah Carey
+train,pop.00012,pop,data/raw/gtzan/genres/pop/pop.00012.wav,19d15aef15b0c22b5feacfb89d09fa4dbf6485a1a8d4355627f1bbe313f7f39d,30.00018140589569,720004,train,0,
+train,pop.00024,pop,data/raw/gtzan/genres/pop/pop.00024.wav,1a202b859c517f5af763479d445edb321c7b049d7e1b1da36719c07c807f9a3d,30.00018140589569,720004,train,0,Britney Spears
+train,pop.00025,pop,data/raw/gtzan/genres/pop/pop.00025.wav,8930637b0036ff47d5f3063b2b8798e4455ab9014746132a46153fe5697360af,30.00018140589569,720004,train,0,Britney Spears
+train,pop.00028,pop,data/raw/gtzan/genres/pop/pop.00028.wav,62ea75234bbe0c2ce4cc52ffc4682bac97b4b5e6baf571eb551240d094039d7d,30.00018140589569,720004,train,0,Britney Spears
+train,pop.00040,pop,data/raw/gtzan/genres/pop/pop.00040.wav,d6a35564f6074ee60b606a2e175f7a0753a337f271ec1952bac1e9266e2b1fe8,30.00018140589569,720004,train,0,Celine Dion
+train,pop.00055,pop,data/raw/gtzan/genres/pop/pop.00055.wav,cc2f1909c605c30e428a2d47232d3178d38dc3b39b9e4bfe15995dcb4324f4b6,30.00018140589569,720004,train,0,Destiny's Child
+train,pop.00063,pop,data/raw/gtzan/genres/pop/pop.00063.wav,41a5ee35b16cb2371822ff7ea3a3f58f8bfdf2a6697d542538b25f09dfc6dde4,30.00018140589569,720004,train,0,
+train,pop.00076,pop,data/raw/gtzan/genres/pop/pop.00076.wav,d71425f4e47330d3cf856e26c27e60d9b9381689a064330cc968e744db0362a9,30.00018140589569,720004,train,0,Jennifer Lopez
+train,pop.00096,pop,data/raw/gtzan/genres/pop/pop.00096.wav,869c1382b41b8e4688fa3816fabb0a4404106e16e43647a952814cee984eb9ad,30.00018140589569,720004,train,0,Mandy Moore
+train,reggae.00002,reggae,data/raw/gtzan/genres/reggae/reggae.00002.wav,0c1e5a2a195dae1533378dcae3e638c1b9969b6833fcaa9d921e869bf7a0504a,30.013333333333332,720320,train,0,Bob Marley
+train,reggae.00016,reggae,data/raw/gtzan/genres/reggae/reggae.00016.wav,ff3a1b8ab25023f5e56195c8ca875ee211fa716c905c0408d92a8ea97b41537e,30.013333333333332,720320,train,0,Bob Marley
+train,reggae.00024,reggae,data/raw/gtzan/genres/reggae/reggae.00024.wav,acc7829691ef0c51cfa7c7da4aec68a90f27339ac44f6f63b0aefd7c093a1746,30.013333333333332,720320,train,0,Bob Marley
+train,reggae.00034,reggae,data/raw/gtzan/genres/reggae/reggae.00034.wav,0543fdf405b63c73ed29bb9f6ddaa631f2451ed1f0d44f42cc037b27a64a160d,30.013333333333332,720320,train,0,
+train,reggae.00045,reggae,data/raw/gtzan/genres/reggae/reggae.00045.wav,6b9a9c06664bcae9cc9d6e2998244bf8ffe1a4b44b62976580b18a7b31f03a68,30.00018140589569,720004,train,0,
+train,reggae.00047,reggae,data/raw/gtzan/genres/reggae/reggae.00047.wav,984b29382c968bf920369232adf07f287025f1f6e485904389d5f30acdbaac35,30.00018140589569,720004,train,0,Dennis Brown
+train,reggae.00052,reggae,data/raw/gtzan/genres/reggae/reggae.00052.wav,9c9786057f54d66f3cecbe218e88656b359f39c8b3b5c9fad2d969bdf07b54a8,30.00018140589569,720004,train,0,
+train,reggae.00064,reggae,data/raw/gtzan/genres/reggae/reggae.00064.wav,4a29e975bcaa91e710b38265a4f851090d382e840852c9b81f52fd3d449d968b,30.00018140589569,720004,train,0,Dennis Brown
+train,reggae.00070,reggae,data/raw/gtzan/genres/reggae/reggae.00070.wav,56f673e8065329c77d713bdc52a4406b5d85b84e74f7d1ed0d510363647ab639,30.00018140589569,720004,train,0,Gregory Isaacs
+train,reggae.00088,reggae,data/raw/gtzan/genres/reggae/reggae.00088.wav,ce75fc574691e687175739930acef8b6c61735e04890191e12a642a6ebc4c2cb,30.00018140589569,720004,train,0,
+train,rock.00005,rock,data/raw/gtzan/genres/rock/rock.00005.wav,2fd7a6352a30192e6401e28bf45a45b20365d485aa30cadd3f72299f7f8b6ffa,30.013333333333332,720320,train,0,Morphine
+train,rock.00007,rock,data/raw/gtzan/genres/rock/rock.00007.wav,f164a6cfbc99f54f6a054c5930d6e5360f08f69cee1ca2f42f3b4b3c48df9d76,30.013333333333332,720320,train,0,Morphine
+train,rock.00011,rock,data/raw/gtzan/genres/rock/rock.00011.wav,6badf9c135bb6295c06df60de3b93f457c5f13bdfe2b46666bd4c879a5f715d9,30.013333333333332,720320,train,0,Ani DiFranco
+train,rock.00033,rock,data/raw/gtzan/genres/rock/rock.00033.wav,8431edb06fe67b20d0edb676b6085525369a9282240d5a62b47b09fcfcd99a51,30.013333333333332,720320,train,0,The Rolling Stones
+train,rock.00040,rock,data/raw/gtzan/genres/rock/rock.00040.wav,c9420466b02c2ea2ed3ef227a60d95b52031ab70589b534665fe92bc84f18928,30.013333333333332,720320,train,0,Led Zeppelin
+train,rock.00046,rock,data/raw/gtzan/genres/rock/rock.00046.wav,6af3a500e3538522ea01a989074bad47adf8193e678eb1a12d90d89a2bd73324,30.013333333333332,720320,train,0,Led Zeppelin
+train,rock.00047,rock,data/raw/gtzan/genres/rock/rock.00047.wav,41d7d127d5ed3a1e99cace8e0ef5cd3eb6b07026dc59a99b7f8aa6e72a2bdc6f,30.013333333333332,720320,train,0,Led Zeppelin
+train,rock.00069,rock,data/raw/gtzan/genres/rock/rock.00069.wav,040c1de63233fd34f851185f9b71daa49f84ec2438ead81cd914f94c59d79b7d,30.013333333333332,720320,train,0,Jethro Tull
+train,rock.00075,rock,data/raw/gtzan/genres/rock/rock.00075.wav,bd9b30868f4c2d74aae8f1c97ef1b2a4e5b2f19526fa97681b3abd0b947369b9,30.013333333333332,720320,train,0,Simply Red
+train,rock.00080,rock,data/raw/gtzan/genres/rock/rock.00080.wav,d938ced59af16286a447a6e0351385372b9f57fc092beb2b4ed62ddab004a956,30.013333333333332,720320,train,0,Survivor
+val,blues.00029,blues,data/raw/gtzan/genres/blues/blues.00029.wav,a181cdc4b6852cddb0ec18b218f04ca7d6aae2294eef245733b847fce58c810f,30.013333333333332,720320,primary,1,Kelly Joe Phelps
+val,classical.00063,classical,data/raw/gtzan/genres/classical/classical.00063.wav,f7914a3233436f10976b6e665007154e66dbdc665e671b00c96aa2fa9f0aae61,30.013333333333332,720320,primary,1,Schubert
+val,country.00031,country,data/raw/gtzan/genres/country/country.00031.wav,fb99205cc54237a0462c593bb472af9ad977806495671d5aa1e231aca9885ccc,30.013333333333332,720320,primary,1,
+val,hiphop.00099,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00099.wav,afc3a54e6eb3ec36d8a755a285111ed427c61aed4ea0c3244ade5db1fe7742e4,30.00018140589569,720004,primary,1,
+val,jazz.00056,jazz,data/raw/gtzan/genres/jazz/jazz.00056.wav,5daf90d10239d383e3e5cc3567c154a7be48d3b8ce528bd4ea1d4b93b182e28e,30.17142857142857,724114,primary,1,
+val,metal.00053,metal,data/raw/gtzan/genres/metal/metal.00053.wav,5d533ae6b2f084e4c971981fe7031e011adfa7518ac9222b9be1f349e328ac43,30.013333333333332,720320,primary,1,The New Bomb Turks
+val,pop.00093,pop,data/raw/gtzan/genres/pop/pop.00093.wav,c889772841e52a988c1aea1d55b9f8d21969b7d5b3d2168203ef148c54ec6e64,30.00018140589569,720004,primary,1,Mandy Moore
+val,reggae.00027,reggae,data/raw/gtzan/genres/reggae/reggae.00027.wav,25432c617aa9765d95c6d5f74cbb0e44aa67464f809f8269368486e3fbcf97e4,30.013333333333332,720320,primary,1,Bob Marley
+val,blues.00091,blues,data/raw/gtzan/genres/blues/blues.00091.wav,004213ca72eb1105912f62bfb1a55fabd67499c07563b93659c6c7e9a882bc3f,30.013333333333332,720320,secondary,0,Hot Toddy
+val,blues.00099,blues,data/raw/gtzan/genres/blues/blues.00099.wav,84741a850273728e9759c4385277c1eb30957cbe071bd2a0d5be90c6885a05df,30.013333333333332,720320,secondary,0,Albert Collins
+val,classical.00088,classical,data/raw/gtzan/genres/classical/classical.00088.wav,c1530a439a63d0e8c84838e60c2c38a9b4661d883cdc80c303fab1e1e078d974,30.013333333333332,720320,secondary,0,Grainger
+val,classical.00099,classical,data/raw/gtzan/genres/classical/classical.00099.wav,6c97ee2262082a5e21233d66693bfba12d22cce077b20e2f0026767195bee787,30.013333333333332,720320,secondary,0,Vivaldi
+val,country.00015,country,data/raw/gtzan/genres/country/country.00015.wav,ab5f47e29af9f1857b0ad1008cc0653314868f3fd2874cd5f8e655c16ccd2647,30.013333333333332,720320,secondary,0,
+val,country.00018,country,data/raw/gtzan/genres/country/country.00018.wav,fd81380bc999638ab3bd205f6baf39032d7638144024c0b7a332a42e5c35cf0d,30.013333333333332,720320,secondary,0,
+val,disco.00006,disco,data/raw/gtzan/genres/disco/disco.00006.wav,006da221c19fb07d99e22306f0e03be0bd3e1bdcd31eb8e7db83db3931c2cf8b,30.00798185941043,720191,secondary,0,
+val,disco.00052,disco,data/raw/gtzan/genres/disco/disco.00052.wav,35b56f21e4d798925e0130749f56e7eecc8e63318c73e66e90d6ebb98fa7cf6c,30.00018140589569,720004,secondary,0,
+val,disco.00096,disco,data/raw/gtzan/genres/disco/disco.00096.wav,28b2071d2e6c388e87c3909ee0ed8231157fd9798d556f02738aa8d239e1ce0d,30.00018140589569,720004,secondary,0,
+val,hiphop.00016,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00016.wav,65d08556ad334c6d9348eb7699e7242a23731618e4823158cba92a752b6a95c0,30.013333333333332,720320,secondary,0,Beastie Boys
+val,hiphop.00077,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00077.wav,af4da2052b9924a61c2e1722034814291fcf923167b0de0ef6ec8dd7cd2cb8da,30.00018140589569,720004,secondary,0,
+val,jazz.00003,jazz,data/raw/gtzan/genres/jazz/jazz.00003.wav,9a2a90279fce5d7d82c5c02b56aefed2aa143449f41178af2dff4bc98884c21e,30.013333333333332,720320,secondary,0,James Carter
+val,jazz.00007,jazz,data/raw/gtzan/genres/jazz/jazz.00007.wav,c5c6c20eb67af3d762f4578894116dba904fdf52f8eef632f80330ee8ef83cf5,30.013333333333332,720320,secondary,0,James Carter
+val,metal.00015,metal,data/raw/gtzan/genres/metal/metal.00015.wav,fc3e6be246717ff84a553349f7f91540590002cc1f8c9012c72bba8ca4cd497c,30.00018140589569,720004,secondary,0,Dark Tranquillity
+val,metal.00087,metal,data/raw/gtzan/genres/metal/metal.00087.wav,e6e1a145fec9db887c2c62f450488e6dc06c739dc0a90d5ec595984355500ffc,30.00018140589569,720004,secondary,0,Metallica
+val,pop.00004,pop,data/raw/gtzan/genres/pop/pop.00004.wav,25c4d6b576269fb94307da6dca93664dca4c7d9aaabbfd9e8269ac8696c4a595,30.00018140589569,720004,secondary,0,Alanis Morissette
+val,pop.00084,pop,data/raw/gtzan/genres/pop/pop.00084.wav,3a039d41e537a6b79573f074fd9c997bc8a4c82676e26959131038b0f4f25df8,30.00018140589569,720004,secondary,0,Madonna
+val,reggae.00012,reggae,data/raw/gtzan/genres/reggae/reggae.00012.wav,c24a16d025c8c7dca7fc249d7a2eb68c485135c7c0e0e1b9d5de175b65f5fd4d,30.013333333333332,720320,secondary,0,Bob Marley
+val,reggae.00020,reggae,data/raw/gtzan/genres/reggae/reggae.00020.wav,ed444704c5312302260460baaf4431cab5c7585e7e2b23b5fc1b2dc9400f7804,30.013333333333332,720320,secondary,0,Bob Marley
+val,reggae.00099,reggae,data/raw/gtzan/genres/reggae/reggae.00099.wav,6d20c9c04c7a8c524754d5ff998cd9bc660b96ed6ff0e56471bc1b59750c7c1e,30.00018140589569,720004,secondary,0,Prince Buster
+val,rock.00030,rock,data/raw/gtzan/genres/rock/rock.00030.wav,428af159d2a4ffe22d6490c1d018dff8d7b50f58582a0670b6a847bd7406266b,30.013333333333332,720320,secondary,0,The Rolling Stones
+val,rock.00071,rock,data/raw/gtzan/genres/rock/rock.00071.wav,733fde4ee52da7d40107eaef5fa7741f5eaac6071c426136a3eefab612f40730,30.013333333333332,720320,secondary,0,Simply Red
+val,rock.00072,rock,data/raw/gtzan/genres/rock/rock.00072.wav,3f4f303c57bfe246b0cc6a7ab9e3dd73415c176d7e229de63dcfdd96592eabfa,30.013333333333332,720320,secondary,0,Simply Red
+val,rock.00077,rock,data/raw/gtzan/genres/rock/rock.00077.wav,c4b7bc57f8545e1daa43c6ed5fb82943870d74326a6cc9b0cd1c182387e535a3,30.013333333333332,720320,secondary,0,Simply Red
+test,blues.00073,blues,data/raw/gtzan/genres/blues/blues.00073.wav,e255378262c1df869c4a652930788b58d86842150fbc374e31a44afba42695b4,30.013333333333332,720320,primary,1,Buckwheat Zydeco
+test,classical.00031,classical,data/raw/gtzan/genres/classical/classical.00031.wav,b2309be97a19e2973109b642abb7764b4205d9643710edd10fee098ca4cdd6d1,30.013333333333332,720320,primary,1,Debussy
+test,country.00056,country,data/raw/gtzan/genres/country/country.00056.wav,752a526937057cd2d6871213367aa6cbd502c4b73cc6508eb82dc799c62835a0,30.013333333333332,720320,primary,1,Vince Gill
+test,disco.00071,disco,data/raw/gtzan/genres/disco/disco.00071.wav,30ec9231493f15753f913a22c62e45cf8efc5d527a32a6f733bbdd658a3e57dd,30.00018140589569,720004,primary,1,KC and The Sunshine Band
+test,jazz.00095,jazz,data/raw/gtzan/genres/jazz/jazz.00095.wav,9784b3b20f738092712b8bca229c876a42460785e2545cf547aa439d4688190f,30.013333333333332,720320,primary,1,Joe Henderson
+test,pop.00098,pop,data/raw/gtzan/genres/pop/pop.00098.wav,2a9d6014201dec85f0948ca7b763dbaa26e092f7c23901716ed3913622acc944,30.00018140589569,720004,primary,1,Mariah Carey
+test,reggae.00061,reggae,data/raw/gtzan/genres/reggae/reggae.00061.wav,4113ae2387314793259822c67ec81ebfb4d4e654b635573790118fec3404021b,30.00018140589569,720004,primary,1,
+test,rock.00018,rock,data/raw/gtzan/genres/rock/rock.00018.wav,a5b7c06361aa158fb1e6d05b39a02828895b55e8e53c33a2f39fe7afff4f4b2e,30.013333333333332,720320,primary,1,Queen
+test,blues.00027,blues,data/raw/gtzan/genres/blues/blues.00027.wav,fc743e4ec7c073ecc895b19a33e1418d8d0882a513fe2d06eb5f98c16b7fa649,30.013333333333332,720320,secondary,0,Robert Johnson
+test,blues.00036,blues,data/raw/gtzan/genres/blues/blues.00036.wav,e1a1c38a604a65593abca70ae487698886d948f3ed9538b9889e8075538f1ddf,30.013333333333332,720320,secondary,0,Kelly Joe Phelps
+test,classical.00017,classical,data/raw/gtzan/genres/classical/classical.00017.wav,420ea96f58531514140e4fa927ca9274d30c8bdd11f5f84507bb481c96e3136e,30.013333333333332,720320,secondary,0,Mozart
+test,classical.00058,classical,data/raw/gtzan/genres/classical/classical.00058.wav,0f9352676cbf481257746afd999b13a8a8bb6116b6b9d5a2a7599bbb427714c9,30.013333333333332,720320,secondary,0,
+test,country.00005,country,data/raw/gtzan/genres/country/country.00005.wav,cdf7594207680509928176b61e82e04f16290903c4147fc30211e7ccc2e34733,30.24126984126984,725790,secondary,0,
+test,country.00045,country,data/raw/gtzan/genres/country/country.00045.wav,3a7c1fc7e4fec1f19be9cfe3b045f9e4e0fbb9cb369c1f16664faa552adf7346,30.013333333333332,720320,secondary,0,
+test,disco.00053,disco,data/raw/gtzan/genres/disco/disco.00053.wav,7a960b72b053aad2b4600db0edeae10e7d2bd26dc999c5d6f381d7eca0230748,30.00018140589569,720004,secondary,0,
+test,disco.00097,disco,data/raw/gtzan/genres/disco/disco.00097.wav,1e0026caf79a4d16cab8be1346ff7bed5611e9af6e465c2c4fcfcb4095ad62d8,30.00018140589569,720004,secondary,0,
+test,hiphop.00060,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00060.wav,9b3df429ac8b99275f7ee9b408de96ee04f15b5d5f57de16dec983ec1e311cdb,30.013333333333332,720320,secondary,0,Cypress Hill
+test,hiphop.00073,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00073.wav,7ab861ef1ffc3f528fe2e26022bb396e059047f67d4a89abe3861524d1446f1d,30.013333333333332,720320,secondary,0,A Tribe Called Quest
+test,hiphop.00082,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00082.wav,60b84f219965df0018358ceb6818c93a5cf87a546a1929673b7743e8934babbd,30.013333333333332,720320,secondary,0,Public Enemy
+test,hiphop.00085,hiphop,data/raw/gtzan/genres/hiphop/hiphop.00085.wav,43c3506b5b6c1835dde6cea9bbea897d87ebd3397fa80fb9991ca1b29cf19dcf,30.013333333333332,720320,secondary,0,Public Enemy
+test,jazz.00006,jazz,data/raw/gtzan/genres/jazz/jazz.00006.wav,5cf9bbaf0292e930f74759936cef990eb447f71109d9075f8a2c010eea0eaa89,30.013333333333332,720320,secondary,0,James Carter
+test,jazz.00088,jazz,data/raw/gtzan/genres/jazz/jazz.00088.wav,7b6ad878c186c28d8a43d0b13f59c822215696a4950a7b90d9fcc3d1d5a977e0,30.013333333333332,720320,secondary,0,Miles Davis
+test,metal.00020,metal,data/raw/gtzan/genres/metal/metal.00020.wav,ee27c74b914841b4aaea6b3153bcb8c9da665f70b4b5f585cf88904e7f54e5fe,30.00018140589569,720004,secondary,0,
+test,metal.00021,metal,data/raw/gtzan/genres/metal/metal.00021.wav,1f7b703a8717e9f0418fcdc67d27447647c14c9b79b9fa55a3740e956321976e,30.00018140589569,720004,secondary,0,
+test,metal.00056,metal,data/raw/gtzan/genres/metal/metal.00056.wav,62ebcb04cf26279041a57db482221397f78c4204870872b06d6a1698d6033c07,30.013333333333332,720320,secondary,0,The New Bomb Turks
+test,metal.00080,metal,data/raw/gtzan/genres/metal/metal.00080.wav,6dad9b7410b8e56f0811d7acbb1071b25316545174df28b13ccc635a56371e60,30.00018140589569,720004,secondary,0,
+test,pop.00034,pop,data/raw/gtzan/genres/pop/pop.00034.wav,ebb7a9d85ee3f504e69e73b50f440212968ecad5781fe8b2654a93822ca4d16f,30.00018140589569,720004,secondary,0,Britney Spears
+test,pop.00035,pop,data/raw/gtzan/genres/pop/pop.00035.wav,fff3d605e8167438df88487bf8d904f964241cbc3e266a08ea43dfd7a61ecb59,30.00018140589569,720004,secondary,0,Britney Spears
+test,reggae.00001,reggae,data/raw/gtzan/genres/reggae/reggae.00001.wav,8f756ee23b553baf28f317cc8a1ad11041b5fb029ba738fbf3f23958f7e8d4a7,30.013333333333332,720320,secondary,0,Bob Marley
+test,reggae.00093,reggae,data/raw/gtzan/genres/reggae/reggae.00093.wav,e08c608cbc0489f163e0b5aa3d76d0a4e411433c90f4dda707b87a5401a07a06,30.00018140589569,720004,secondary,0,
+test,rock.00050,rock,data/raw/gtzan/genres/rock/rock.00050.wav,dbc9b3f2b76fc51ded973bd765baaa6f60d640047604c292c9e0ff027eaabc3e,30.013333333333332,720320,secondary,0,Simple Minds
+test,rock.00052,rock,data/raw/gtzan/genres/rock/rock.00052.wav,2d41eebabd61bf2424c36247014e305e565e2b158b422744ec4e0a29d33d249b,30.013333333333332,720320,secondary,0,Simple Minds

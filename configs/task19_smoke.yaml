@@ -1,0 +1,24 @@
+# TASK-19 bounded smoke test: every arm's code path on a tiny subset of the TASK-19 manifests
+# (2 core + 2 new training tracks, 2 tracks per held-out tier). Not a result.
+#   --arm A32 evaluates existing checkpoints (pass --evaluate-checkpoints for a local/smoke checkpoint).
+base_config: configs/task19.yaml
+smoke_limits:
+  train_tracks: 4
+  heldout_tracks_per_split: 2
+  pool_crops_per_track: 4
+steps: 40
+eval_every: 10
+checkpoint_every: 20
+log_every: 5
+batch_size: 8
+bootstrap_samples: 200
+arms:
+  A32:   {train_tracks: core, lr_schedule: {type: constant},
+          evaluate_checkpoints: runs/task18_heldout/task18_heldout_v1/checkpoints}
+  A128:  {train_tracks: all,  lr_schedule: {type: constant}}
+  B32:   {train_tracks: core, lr_schedule: {type: warmup_cosine, warmup_steps: 10, min_lr_ratio: 0.01}}
+  B128:  {train_tracks: all,  lr_schedule: {type: warmup_cosine, warmup_steps: 10, min_lr_ratio: 0.01}}
+run_name_prefix: task19_smoke
+run_root: runs/task19_smoke
+artifact_root: artifacts/task19_smoke
+wandb_group: task19-smoke

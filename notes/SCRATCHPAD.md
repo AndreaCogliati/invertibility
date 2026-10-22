@@ -1822,3 +1822,16 @@ results md):
 - The TASK-14 comparison was marked uncontrolled.
 - The user's note said "batch size 1"; TASK-18 actually uses minibatches of 64. Recorded as
   "constant LR 1e-3 on minibatches of 64".
+
+## 2026-10-22 TASK-19 build
+
+- Sturm 2013 Table 2 transcribed from the arXiv v2 PDF (pdftotext, isolated dir). TASK-18 is not
+  affected; 7 tracks have unused partners. Artist overlap: 6/16 for TASK-18 held-out, 33/64 for
+  TASK-19 held-out.
+- Generalized train_task18_heldout.py; with a TASK-18 config it is bit-identical to HEAD
+  (CPU, 1 thread, 40 steps).
+- All 4 smoke arms ran on MPS. A32 smoke re-eval: correct-conditioning max diff 0.0 vs TASK-18
+  smoke.
+- Recipe B resume is bit-exact on CPU, 1 thread.
+- Timing probe (full eval sets, MPS): abandoned after ~25 min wall. The Mac was throttling or sleeping (elapsed time advanced
+  ~25 s in minutes). SU estimate scaled from TASK-18's ACES timing instead: ~17 billing-hours for 4 arms (+/-50%).

@@ -1,5 +1,25 @@
 # NEXT
 
+## Latest: TASK-19 data x recipe, prepared for ACES (2026-10-22)
+
+TASK-19 (2x2: 32 vs 128 tracks x recipe A vs B) is built, pre-registered in `configs/task19.yaml`,
+and smoke-tested locally. Nothing has been submitted. Protocol:
+[[DECISIONS.md#task19-data-x-recipe-protocol]]. Instructions and the SU estimate:
+`aces/TASK19_ACES.md`. Fault list: no TASK-18 track is affected (7 have repetition partners,
+none used).
+
+```bash
+uv run python scripts/build_task19_manifests.py --verify-audio      # 3x unchanged, 192 WAVs verified
+uv run pytest -q; uv run ruff check .                                # 327 passed, clean
+```
+
+**Next (user):**
+1. Commit and push (TASK-19 files are uncommitted).
+2. On ACES: login-node prep, then `bash aces/task19_smoke.sh` on a PVC node.
+3. Only when instructed: `sbatch aces/run_task19_{A32,A128,B32,B128}_v1.slurm`.
+4. Afterwards: `scripts/task19_analyze.py`, `scripts/task19_listening_package.py`, then blinded
+   listening.
+
 ## Latest: TASK-18 result (2026-10-22)
 
 **Held-out track generalization at a recognizable level; pre-registered code `UNDERFIT`.** Job

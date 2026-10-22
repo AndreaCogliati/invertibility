@@ -1,0 +1,122 @@
+# TASK-19: N=128 data x recipe experiment (2 x 2 arms) on the TASK-18 pipeline.
+# Pre-registered: every value below is fixed before any TASK-19 run and is not tuned on held-out
+# results. Run one arm per job: scripts/train_task18_heldout.py --config configs/task19.yaml --arm <ARM>.
+#
+# Fixed across arms (identical to configs/task18_heldout.yaml):
+#   MuQ last_hidden_state, frame-center alignment, MuQToMelTranslator (1,271,908 params),
+#   BigVGAN-v2 100-band log-mel target, L1, Adam (betas 0.9/0.999), decode-time floor clamp,
+#   frozen BigVGAN-v2, crop geometry (47,872 samples), seed 0, 20,000 steps of batch 64,
+#   evaluation code, controls, and metrics.
+
+task: TASK-19
+seed: 0
+device_request: auto
+allow_cpu_fallback: false
+
+muq_model_id: OpenMuQ/MuQ-large-msd-iter
+bigvgan_repo_id: nvidia/bigvgan_v2_24khz_100band_256x
+bigvgan_revision: c329ede9e9bbc100ddf5c91e2330a61921262370
+hidden_channels: 256
+temporal_alignment: frame_centers
+decode_clamp_to_mel_floor: true
+
+# --- data (scripts/build_task19_manifests.py) ----------------------------------------------
+source_manifest: data/manifests/gtzan_manifest_smoke.csv
+task18_track_manifest: data/manifests/task18_tracks.csv
+task18_crop_manifest: data/manifests/task18_crops.csv
+fault_list: data/manifests/gtzan_sturm2013_faults.yaml
+# Totals per split (TASK-18 tracks + new). New tracks: genre-balanced; never in a Sturm (2013)
+# repetition group (exact, recording, version, incl. cross-genre), never distorted, never a
+# checksum duplicate, never a TASK-18 track.
+track_targets: {train: 128, val: 32, test: 32}
+track_manifest: data/manifests/task19_tracks.csv
+crop_manifest: data/manifests/task19_crops.csv
+fault_report: data/manifests/task19_fault_report.json
+# Crop geometry and per-track crop layout: identical to TASK-18 (the 32 TASK-18 training tracks keep
+# byte-identical crop rows; primary val/test crops are the TASK-18 crops).
+num_mel_hops: 187
+hop_size: 256
+end_margin_samples: 2400
+heldout_eval_offsets_seconds: [2.0, 9.0, 16.0, 23.0]
+train_unseen_offsets_seconds: [9.0, 23.0]
+train_pool_crops_per_track: 24
+memorized_pool_indices: [6, 18]
+listening_crop_index: 1
+listening_train_tracks: 4
+
+# Evaluation sets. The first four are TASK-18's regimes on the 32 TASK-18 ("core") training tracks
+# and the TASK-18 primary val/test crops (same control seeds as TASK-18).
+#   memorized, train_unseen    32 core training tracks (trained on by every arm)
+#   val, test                  primary held-out: the TASK-18 8 + 8 tracks, 32 + 32 crops
+#   memorized_new, train_unseen_new   the 96 new training tracks (trained on by A128/B128 only;
+#                              unseen tracks for A32/B32)
+#   val2, test2                secondary held-out: 24 + 24 new tracks, 96 + 96 crops
+eval_sets: [memorized, train_unseen, val, test, memorized_new, train_unseen_new, val2, test2]
+quick_eval_sets: [memorized, train_unseen, val, memorized_new, val2]   # curves; selection uses `val` only
+
+# --- training (shared) ----------------------------------------------------------------------
+loss: l1_log_mel
+learning_rate: 0.001
+adam_betas: [0.9, 0.999]
+batch_size: 64
+steps: 20000
+eval_every: 500
+checkpoint_every: 2000
+log_every: 50
+bootstrap_samples: 2000
+onset_smoothing_ms: [0, 50, 200, 500]
+decode_batch_size: 8
+outcome_rule:                     # TASK-18's per-arm rule, unchanged (reported per arm)
+  min_track_fraction_positive: 0.75
+  memorized_fit_ratio_max: 2.0
+  near_oracle_ratio_max: 1.25
+
+# --- arms -----------------------------------------------------------------------------------
+# Recipe A = TASK-18: constant LR 1e-3, batch 64 (already > 1).
+# Recipe B (improved) = recipe A + learning-rate warmup and decay, nothing else:
+#   linear warmup over the first 1,000 steps (5% of the budget) from 1e-6 to 1e-3, then cosine
+#   decay to 1e-5 (min_lr_ratio 0.01) at step 20,000. Same peak LR, batch size (64), optimizer,
+#   step budget, and seed as A. Batch size is not changed: the code already uses minibatches of
+#   64, and changing it as well would confound the schedule effect. No gradient clipping.
+arms:
+  A32:   {train_tracks: core, lr_schedule: {type: constant},
+          evaluate_checkpoints: runs/task18_heldout/task18_heldout_v1/checkpoints}   # TASK-18 checkpoints, not retrained
+  A128:  {train_tracks: all,  lr_schedule: {type: constant}}
+  B32:   {train_tracks: core, lr_schedule: {type: warmup_cosine, warmup_steps: 1000, min_lr_ratio: 0.01}}
+  B128:  {train_tracks: all,  lr_schedule: {type: warmup_cosine, warmup_steps: 1000, min_lr_ratio: 0.01}}
+
+# --- pre-registered interpretation (scripts/task19_analyze.py, src/muq_inversion/task19.py) ---
+# Primary endpoint: mel L1 (correct conditioning, best checkpoint) on the primary held-out crops
+# (val + test, 64 crops, 16 tracks), paired by crop against A32 with a track-clustered bootstrap.
+# "much better" than A32 = all of:
+#   relative improvement in mean mel L1 >= 10%,
+#   95% CI of the paired improvement entirely > 0,
+#   improvement on >= 75% of tracks (12 of 16).
+# "better" = CI > 0 but not much better; "worse" = CI < 0; otherwise "similar".
+#   A128 much better, B32 not                    -> DATA_LIMITED
+#   B32 much better, A128 not much better        -> OPTIMIZATION_LIMITED
+#   A128 and B32 both much better                -> BOTH_MATTER
+#   neither, but B128 much better                -> BOTH_NEEDED_JOINTLY
+#   none of A128, B32, B128 much better          -> NEITHER_CAPACITY_OR_OBJECTIVE_LIMIT
+# Generalization-gap flag (per arm): memorized-core mel L1 much better than A32 while primary
+# held-out is "similar" or "worse".
+# Secondary analyses (reported, not used for the code): the same comparisons on val2+test2 and on
+# train_unseen; best vs final checkpoints; held-out results split by whether the track's artist
+# (Sturm 2013 artist list) appears in the arm's training tracks.
+arm_comparison:
+  much_better_rel: 0.10
+  min_track_fraction: 0.75
+
+# --- listening (scripts/task19_listening_package.py) ----------------------------------------
+# The 16 TASK-18 listening crops (crop 1, 9.0 s, of every primary val/test track), identical for
+# all arms. Per example: the original as a labeled reference, plus 8 blinded clips in random order:
+# BigVGAN oracle, the correct prediction of each arm (4), and A32's shuffled_across, shuffled_time,
+# and constant_zero controls. The key goes to a separate file the listener does not open.
+
+run_name_prefix: task19
+run_root: runs/task19
+artifact_root: artifacts/task19
+results_name: TASK-19_RESULTS.md
+feature_cache_dir: data/cache/task18
+wandb_group: task19-data-x-recipe
+wandb_tags: [task19, bigvgan-v2, mel, heldout, muq, muq-to-bigvgan-mel-temporal-conv, frame-center-alignment, decode-mel-floor-clamp]

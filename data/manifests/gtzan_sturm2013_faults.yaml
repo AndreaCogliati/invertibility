@@ -1,0 +1,74 @@
+# GTZAN repetitions, distortions, and artists, transcribed from Table 2 of
+#   B. L. Sturm, "The GTZAN dataset: Its contents, its faults, their effects on evaluation, and its
+#   future use", arXiv:1306.1461v2 (2013), https://arxiv.org/abs/1306.1461
+# Transcribed by hand on 2026-10-22 (TASK-19) from `pdftotext -layout` of the arXiv v2 PDF.
+# Excerpt numbers refer to <genre>.000NN. Each group below is one set of excerpts that are the same
+# recording (exact or recording repetition) or the same song (version repetition). Cross-genre groups
+# use "genre.NN" entries. The "artists" table lists the artist ranges Sturm identified (incomplete:
+# "and others" in the paper), used for artist-overlap reporting only.
+
+source: "Sturm 2013, arXiv:1306.1461v2, Table 2"
+
+exact:
+  disco: [[50, 51, 70], [55, 60, 89], [71, 74], [98, 99]]
+  hiphop: [[39, 45], [76, 78]]
+  jazz: [[33, 51], [34, 53], [35, 55], [36, 58], [37, 60], [38, 62], [39, 65], [40, 67], [42, 68], [43, 69],
+         [44, 70], [45, 71], [46, 72]]
+  metal: [[4, 13], [34, 94], [40, 61], [41, 62], [42, 63], [43, 64], [44, 65], [45, 66]]
+  pop: [[15, 22], [30, 31], [45, 46], [47, 80], [52, 57], [54, 60], [56, 59], [67, 71], [87, 90]]
+  reggae: [[3, 54], [5, 56], [8, 57], [10, 60], [13, 58], [41, 69], [73, 74], [80, 81, 82], [75, 91, 92]]
+recording:
+  classical: [[42, 53], [51, 80]]
+  country: [[8, 51], [52, 60]]
+  disco: [[38, 78]]
+  hiphop: [[1, 42], [46, 65], [47, 67], [48, 68], [49, 69], [50, 72]]
+  pop: [[68, 73], [15, 21, 22], [47, 48, 51], [52, 54], [57, 60], [15, 21, 22, 37]]  # 37: Distortions column, "is from same recording as (15,21,22) but with sound effects"
+  reggae: [[7, 59], [33, 44], [85, 96]]
+version:
+  classical: [[44, 48]]
+  country: [[46, 47]]
+  disco: [[66, 69]]
+  hiphop: [[2, 32]]
+  metal: [[33, 74]]
+  pop: [[10, 14], [16, 17], [74, 77], [75, 82], [88, 89], [93, 94]]
+  reggae: [[23, 55]]
+cross_genre:
+  - ["metal.58", "rock.16"]   # exact: "Metal (58) is Rock (16)"
+  - ["metal.85", "disco.14"]  # version: "Metallica (85) is Ozzy Osbourne covering Disco (14)"
+
+distortions:
+  classical: {49: static}
+  country: {39: static distortion}
+  disco: {63: clipping distortion}
+  hiphop: {3: clipping distortion, 5: clipping distortion, 38: skip at start}
+  jazz: {52: clipping distortion, 54: clipping distortion, 66: clipping distortion}
+  metal: {33: clipping distortion, 73: clipping distortion, 84: clipping distortion}
+  reggae: {86: last 25 s useless}
+  rock: {27: jitter}
+
+artists:
+  blues: {"John Lee Hooker": "0-11", "Robert Johnson": "12-28", "Kelly Joe Phelps": "29-39",
+          "Stevie Ray Vaughan": "40-49", "Magic Slim": "50-60", "Clifton Chenier": "61-72",
+          "Buckwheat Zydeco": "73-84", "Hot Toddy": "85-97", "Albert Collins": "98,99"}
+  classical: {"J. S. Bach": "0-10", "Mozart": "11-29", "Debussy": "30-33", "Ravel": "34-37",
+              "Dutilleux": "38-41", "Schubert": "63-67", "Haydn": "68-76", "Grainger": "82-88",
+              "Vivaldi": "89-99"}
+  country: {"Willie Nelson": "19,26,65-80", "Vince Gill": "50-64", "Brad Paisley": "81-93",
+            "George Strait": "94-99"}
+  disco: {"Gloria Gaynor": "1,21,38,78", "Ottawan": "17,24,44,45", "The Gibson Brothers": "22,28,30,35,37",
+          "KC and The Sunshine Band": "49-51,70,71,73,74", "ABBA": "67,68,72"}
+  hiphop: {"Wu-Tang Clan": "1,7,41,42", "Beastie Boys": "8-25", "A Tribe Called Quest": "46-51,62-75",
+           "Cypress Hill": "55-61", "Public Enemy": "81-98"}
+  jazz: {"James Carter": "2-10", "Joe Lovano": "11-24", "Branford Marsalis Trio": "25-32",
+         "Coleman Hawkins": "33-46,51,53,55,57,58,60,62,65,67-72", "Dexter Gordon": "73-77",
+         "Miles Davis": "87-92", "Joe Henderson": "94-99"}
+  metal: {"Dark Tranquillity": "12-15", "Dio": "40-45,61-66", "The New Bomb Turks": "46-57", "Queen": "58-60",
+          "Metallica": "33,38,73,75,78,83,87", "Iron Maiden": "2,5,34,92-94", "Rage Against the Machine": "95-99"}
+  pop: {"Mandy Moore": "0,87-96", "Mariah Carey": "2,97-99", "Alanis Morissette": "3-9", "Celine Dion": "11,39,40",
+        "Britney Spears": "15-38", "Christina Aguilera": "44-51,80", "Destiny's Child": "52-62",
+        "Janet Jackson": "67-73", "Jennifer Lopez": "74-78,82", "Madonna": "84-86"}
+  reggae: {"Bob Marley": "0-27,54-60", "Dennis Brown": "46-48,64-68,71", "Prince Buster": "85,94-99",
+           "Burning Spear": "33,42,44,50,63", "Gregory Isaacs": "70,76-78"}
+  rock: {"Morphine": "0-9", "Ani DiFranco": "10-15", "Queen": "16-26", "The Rolling Stones": "28-31,33,35,37",
+         "Led Zeppelin": "32,39-48", "Simple Minds": "49-56", "Sting": "57-63", "Jethro Tull": "64-70",
+         "Simply Red": "71-78", "Survivor": "79-85", "The Stone Roses": "91-99"}
