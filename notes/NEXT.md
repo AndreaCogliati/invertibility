@@ -1,6 +1,31 @@
 # NEXT
 
-## Latest: TASK-19 data x recipe, prepared for ACES (2026-10-22)
+## Latest: TASK-19 result (2026-10-22)
+
+**Pre-registered codes (labels only): primary `NEITHER_CAPACITY_OR_OBJECTIVE_LIMIT`, secondary `DATA_LIMITED`.**
+The data effect is +8.9% on primary held-out (every track improves), just under the 10% bar,
+and +10.2% on secondary. Recipe B has no effect. Every arm's val optimum is at 1-2.5k steps,
+then it overfits. The gap to the oracle stays ~4.5x the round trip. See
+[[DECISIONS.md#task19-data-x-recipe-result]] and `artifacts/task19/analysis_v1/`.
+
+**Blinded listening done (2026-10-22).** All arms are recognizable (mean 2.69-2.75/4) and
+indistinguishable from each other; they are far above the controls and below the oracle (4.00).
+The mel gain from 4x data is not audible. Examples 05/06 were corrected by the user after
+re-listening; they are no longer blind, and nothing depends on them.
+
+**Interpretation (revised at the user's direction).**
+- Recognizable reconstruction now has stronger (blinded) listening support.
+- Data scaling is promising but modest, on both held-out sets.
+- Schedule B is not the solution.
+- Training overfits after ~1-2k steps, alongside poor absolute training fit.
+- The remaining bottleneck is unresolved. The pre-registered code NEITHER_CAPACITY_OR_OBJECTIVE_LIMIT
+  is a label, not a conclusion.
+
+**Next (user is preparing the task):** one larger-data run with the current translator and
+validation-based early stopping, same fixed held-out sets, test reported separately from
+validation. No capacity or loss changes yet.
+
+## Previous: TASK-19 data x recipe, prepared for ACES (2026-10-22)
 
 TASK-19 (2x2: 32 vs 128 tracks x recipe A vs B) is built, pre-registered in `configs/task19.yaml`,
 and smoke-tested locally. Nothing has been submitted. Protocol:

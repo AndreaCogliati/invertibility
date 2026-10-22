@@ -136,8 +136,8 @@ def main() -> int:
     for ax, (k, title) in zip(axes, keys, strict=True):
         for arm in ARMS:
             h = [e for e in reports[arm]["history"] if k in e]
-            if h:
-                ax.plot([e["step"] for e in h], [e[k] for e in h], label=arm)
+            if h:  # fixed color per arm: A32 has no val2 curve, so the default cycle would shift
+                ax.plot([e["step"] for e in h], [e[k] for e in h], label=arm, color=f"C{ARMS.index(arm)}")
         ax.set_title(title)
         ax.set_xlabel("step")
     axes[0].set_ylabel("mel L1 (correct conditioning)")

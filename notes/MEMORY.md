@@ -97,6 +97,14 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
 
 ## Benchmark / gate results that passed sanity checks
 
+- TASK-19 (2026-10-22, ACES 2244922-5): held-out mel L1, primary/secondary:
+  A32 0.550/0.572, A128 0.501/0.514, B32 0.554/0.576, B128 0.508/0.513.
+  4x data gives a modest, consistent ~9-10% on both held-out sets (codes NEITHER/DATA_LIMITED
+  are threshold labels, not conclusions). A warmup+cosine LR schedule has no effect. The val
+  optimum is always at 1-2.5k steps, then it overfits; this coexists with poor absolute training
+  fit (UNDERFIT label). The bottleneck is unresolved. Blinded listening: every arm recognizable
+  (~2.75/4) and arms indistinguishable. On ACES each arm takes ~21-23 min (~3 billing-hours). See [[task19-data-x-recipe-result]].
+
 - TASK-18 (2026-10-22, ACES job 2240151): MuQ -> BigVGAN mel, 32/8/8 tracks. Held-out mel L1 is
   val 0.576 / test 0.525, against shuffled_time ~0.87 and a round trip of ~0.11. Every control is
   beaten, and held-out audio is recognizable by the user's (unblinded) listening. Pre-registered

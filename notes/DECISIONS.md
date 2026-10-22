@@ -3769,3 +3769,75 @@ Evaluation dominates (768 evaluation crops per arm).
 
 **Rollback.** New files plus config-gated additions to the TASK-18 script. TASK-18 configs are
 unaffected (verified).
+
+## task19-data-x-recipe-result: data helps (modest, both held-out sets); schedule B does not; overfitting after ~1-2k steps; bottleneck unresolved (pre-registered code NEITHER)
+
+(Interpretation revised on 2026-10-22 at the user's direction: the outcome code is kept but kept
+separate from the interpretation; UNDERFIT labels vs late overfitting; next step.)
+
+**Runs.** ACES jobs 2244922-2244925, commit 2b4ef13, clean; ~11.8 billing-hours in total. A32's
+re-evaluation reproduces TASK-18 within 7e-7. Details:
+`artifacts/task19/analysis_v1/TASK-19_RESULTS.md` (git-ignored).
+
+**Results** (best checkpoint, chosen on primary val):
+
+| Held-out mel L1 | A32 | A128 | B32 | B128 |
+| --- | --- | --- | --- | --- |
+| Primary | 0.550 | 0.501 | 0.554 | 0.508 |
+| Secondary | 0.572 | 0.514 | 0.576 | 0.513 |
+
+BigVGAN round trip ~0.11.
+- **A128 vs A32:** +8.9% primary (CI > 0, 16/16 tracks), so "better"; +10.2% secondary, so
+  "much better".
+- **Recipe B:** no effect (B32 -0.7%; B128 vs A128 -1.3% / +0.2%).
+- **Validation optimum:** steps 1,000-2,500 in every arm. Afterwards training error keeps
+  falling while held-out error rises (B32 final: memorized 0.253, val 0.650).
+
+**Pre-registered outcome codes (kept as registered; they are labels, not the interpretation).**
+- Primary held-out: `NEITHER_CAPACITY_OR_OBJECTIVE_LIMIT`.
+- Secondary held-out: `DATA_LIMITED`.
+- The two differ only because the data effect is 8.9% on one set and 10.2% on the other, around
+  a 10% threshold. Crossing it should not change the causal story. The primary code's name
+  ("capacity or objective limit") is **not** adopted as a conclusion.
+- The per-arm TASK-18 rule labels every arm `UNDERFIT`. That label is correct on its own terms
+  (memorized mel L1 > 2x the round trip) but misses the late-training overfitting below. Poor
+  absolute training fit and a growing generalization gap coexist here.
+
+**Interpretation.**
+- **Data helps on both held-out sets.** The benefit is modest (~9-10% for 4x tracks) and
+  consistent: 16/16 primary and 47/48 secondary tracks improve. Neither set shows that further
+  scaling has stopped helping. This is the most promising lever found so far.
+- **Schedule B is not the solution.** Warmup plus cosine decay has no effect at the selected
+  checkpoint.
+- **Overfitting.** In every arm, held-out error reaches its minimum at steps 1,000-2,500 and then
+  rises while training error keeps falling (clearest in B32: memorized 0.253 at the final step,
+  val 0.579 -> 0.650). The TASK-18 idea that the early val best was mainly a constant-LR artifact
+  is not supported.
+- **The remaining bottleneck is unresolved.** Held-out error stays ~4.5x BigVGAN's round trip.
+  TASK-19 cannot separate "needs (much) more data" from a capacity, objective, or MuQ-information
+  limit. None of these is established; a MuQ-imposed limit is still not measurable.
+- **Artist overlap** (Sturm list) shows no consistent advantage, so it does not appear to
+  inflate held-out results.
+- **Recognizable reconstruction now has stronger listening support.** Blinded ratings (below)
+  favor all arms over every control and rate them consistently as recognizable, though well
+  below the oracle.
+
+**Recommended next step (user, 2026-10-22).**
+- One larger-data run with the current translator and validation-based early stopping, before
+  any change to capacity or the loss.
+- Keep the held-out sets fixed (TASK-18/19 primary and secondary).
+- Report test results separately from validation.
+
+**Blinded listening (user, 2026-10-22).** 16 examples x 8 clips, rated 0-4.
+- Corrected means: oracle 4.00; A32 2.75, A128 2.69, B32 2.75, B128 2.75; shuffled_time 1.12;
+  shuffled_across 0.00; constant_zero 0.00.
+- All arms are recognizable (rated 3 on 11-13 of 16) and indistinguishable from each other
+  (sign tests p = 1.0).
+- Every arm beats shuffled_time on 15-16 of 16 (p <= 0.0001) and is below the oracle.
+- The 9-10% mel gain from 4x data is not audible.
+- In the first pass, examples 05/06 had obvious entry errors: constant-zero was rated 4 and 3,
+  and the notes were swapped. The user re-listened and corrected 7 cells. Those two examples
+  were re-rated after the conditions had been described, so they are not blind. Conclusions are
+  identical with or without them.
+
+Data: `artifacts/task19/analysis_v1/listening_unblinded.json`.

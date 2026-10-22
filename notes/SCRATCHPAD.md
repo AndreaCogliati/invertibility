@@ -1835,3 +1835,16 @@ results md):
 - Recipe B resume is bit-exact on CPU, 1 thread.
 - Timing probe (full eval sets, MPS): abandoned after ~25 min wall. The Mac was throttling or sleeping (elapsed time advanced
   ~25 s in minutes). SU estimate scaled from TASK-18's ACES timing instead: ~17 billing-hours for 4 arms (+/-50%).
+
+2026-10-22 TASK-19 results copied back; analysis done.
+- A32 re-eval max diff vs TASK-18: 7e-7.
+- Primary NEITHER (A128 +8.9%), secondary DATA_LIMITED (+10.2%). Recipe B null.
+- Best steps: A32 1000, A128 1500, B32 1000, B128 2500.
+- Fixed a curves.png color shift (A32 has no val2 curve). Blinded package built; the key is not
+  opened by the user.
+
+2026-10-22 TASK-19 blinded ratings unblinded. Arms are indistinguishable (mode 3), oracle 3.94,
+controls ~0-1. Ex05/06: constant_zero rated 4/3 (identical audio everywhere), probable swapped
+rows; reported, not fixed.
+2026-10-22: user corrected ex05/06 (7 cells). Corrected means: A32 2.75, A128 2.69, B32 2.75, B128 2.75, oracle 4.00; controls 0-1.12.
+2026-10-22: TASK-19 interpretation revised per user (codes kept as labels; UNDERFIT + overfitting coexist; next = larger-data run, early stopping, fixed held-out, test separate).
