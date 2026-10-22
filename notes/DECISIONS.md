@@ -3604,4 +3604,92 @@ numbers. No other value was changed.
 **Execution.** `aces/task18_smoke.sh` runs interactively; then `aces/run_task18_v1.slurm`, only
 when the user instructs it. Instructions: `aces/TASK18_ACES.md`.
 
+**ACES smoke (2026-10-21, job 2240126, node ac010, Intel Data Center GPU Max 1100, commit
+c6658b2, dirty tree): PASSED, all 4 steps.**
+- Backend smoke passed in 69.7 s.
+- Manifests rebuilt unchanged; the 48 WAVs verified.
+- The 40-step code path matches MPS to about 3 decimals (val mel L1 1.361 on XPU vs 1.364 on MPS).
+- Resume equivalence: resumed vs uninterrupted 6.6e-5, noise floor 2.6e-5, tolerance 2.6e-4.
+  PASS. The resumed difference is 2.5x a single-pair noise estimate: within tolerance, but not
+  bit-exact.
+
 **Rollback.** Everything is new files plus two helper modules; nothing in TASK-15/16 changed.
+
+## task18-heldout-result: held-out track generalization at a recognizable level; pre-registered code UNDERFIT
+
+(Wording corrected on 2026-10-22 at the user's direction: MuQ limit, underfit vs optimization, uncontrolled TASK-14 comparison.)
+
+**Run.** ACES job 2240151, 1 PVC (Intel Data Center GPU Max 1100), W&B `274iituu`. COMPLETED in
+10:27 elapsed, 167 s of it training. `sacct` AllocTRES: billing=8, cpu=8, gres/gpu:pvc=1, mem=32G, node=1.
+That is 8 x 0.174 h = **~1.4 billing-hours**, an estimate; the SUs ACES actually charged were not separately reported. Results: `artifacts/task18_heldout/task18_heldout_v1/` (git-ignored).
+
+**Results** (best checkpoint = step 1,000, chosen on val mel L1 only):
+- **Mel L1 by regime:** memorized 0.354, train_unseen 0.451, val 0.576, test 0.525. BigVGAN round
+  trip ~0.11.
+- **Controls:** every regime beats every control.
+  - val/test shuffled_time ~0.89/0.85 (the closest control);
+  - shuffled_across ~1.4;
+  - average mel ~1.1-1.2;
+  - zero ~3.3.
+- **Held-out contours (test):** onset r (50 ms) 0.94, RMS 0.77, centroid 0.84, chroma 0.85.
+  Under shuffled_time these are ~0.04, ~0, ~0.05 and 0.70.
+- **Pre-registered code:** `UNDERFIT`, at both best and final. Memorized mel L1 / round trip is
+  3.19, against a 2.0 limit; the minimum during training was ~2.4.
+- **Listening (user, 2026-10-22, unblinded):** all held-out `correct` examples are recognizable,
+  though worse than memorized, which is also not good.
+
+**Conclusion.** TASK-18's criterion for held-out track generalization is **met**: val and test
+beat every control, and the audio is recognizably source-related. This is the project's first
+positive held-out result. The pre-registered `UNDERFIT` code is kept, not revised after the fact.
+
+**Current quality is limited mainly by translator fit and optimization. Any limit imposed by MuQ
+is not yet measurable.** The translator does not fit even its training crops (memorized mel L1 is
+3.2x the round trip). So no MuQ-imposed ceiling has been reached yet. That does not mean MuQ has
+none.
+
+**The error is not pure underfitting.** Training curves from `report.json` history (same data as
+W&B 274iituu); a W&B comparison should confirm:
+
+| step | memorized | train_unseen | val | val - memorized |
+| --- | --- | --- | --- | --- |
+| 500 | 0.393 | 0.476 | 0.596 | 0.20 |
+| 1,000 (best) | 0.354 | 0.451 | 0.576 | 0.22 |
+| 4,000 | 0.296 | 0.456 | 0.599 | 0.30 |
+| 12,000 | 0.269 | 0.477 | 0.624 | 0.36 |
+| 14,000 (spike) | 0.520 | 0.580 | 0.669 | 0.15 |
+| 20,000 | 0.405 | 0.487 | 0.590 | 0.19 |
+
+After step 1,000, training-crop error keeps falling while val and train_unseen error stay flat or
+rise. The train/held-out gap widens from 0.20 to 0.36: overfitting to the training crops, not
+underfitting. Together, these look most like an optimization problem, and should be diagnosed as
+one before the error is attributed to underfitting:
+- the early val best;
+- the Adam/L1 spike at step 14k (also seen in TASK-15's N=2 run);
+- training crops still far from the round trip;
+- a constant learning rate of 1e-3 with no schedule, on minibatches of 64.
+
+**Comparison with TASK-14 (not controlled).** The BigVGAN-mel line gives recognizable held-out
+audio where the EnCodec line (TASK-14) did not. The two experiments differ in:
+- target (BigVGAN log-mel vs EnCodec continuous latent);
+- decoder (BigVGAN-v2 vs EnCodec);
+- translator size (1.27M vs ~377k parameters);
+- MuQ-to-target alignment (frame-center interpolation vs 3x repeat);
+- training data (32 tracks vs the full 793-track split);
+- metrics and controls.
+
+The difference cannot be attributed to the mel target alone.
+
+**Caveats.**
+- Listening was unblinded and by one listener.
+- The split is not artist-aware (GTZAN has repeated artists and recordings), so generalization may
+  be inflated.
+- 8 + 8 held-out tracks, 1.995 s crops, one seed.
+- Val error is lowest early (step 1,000), and the train/held-out gap widens afterwards (see above).
+
+**Next (not authorized).**
+1. Diagnose the optimization first, on the same 32/8/8 manifests: compare train/val curves in W&B;
+   try a learning-rate schedule or warmup with a lower peak, and gradient clipping. Only then
+   consider translator capacity.
+2. Run a blinded listening test.
+3. Use an artist-aware or fault-filtered held-out set.
+4. Scale the number of training tracks.

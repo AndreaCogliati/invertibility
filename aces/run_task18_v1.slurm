@@ -33,9 +33,10 @@ cd "$SLURM_SUBMIT_DIR"
 RUN_NAME=task18_heldout_v1
 export UV_PROJECT="$SLURM_SUBMIT_DIR/envs/xpu"
 export HF_HOME="${HF_HOME:-/scratch/group/p.ele260080.000/hf_cache}"
-export HF_HUB_OFFLINE=1          # MuQ weights come from the login-node cache
+# export HF_HUB_OFFLINE=1          # MuQ weights come from the login-node cache
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
+module load WebProxy
 module load uv
 uv sync --frozen
 

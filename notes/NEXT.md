@@ -1,6 +1,30 @@
 # NEXT
 
-## Latest: TASK-18 held-out generalization, prepared for ACES (2026-10-21)
+## Latest: TASK-18 result (2026-10-22)
+
+**Held-out track generalization at a recognizable level; pre-registered code `UNDERFIT`.** Job
+2240151 (W&B 274iituu). Val and test beat every control. The user heard all held-out `correct`
+examples as recognizable, though worse than memorized. This is the first positive held-out
+result.
+- Current quality is limited mainly by translator fit and optimization (memorized mel L1 is
+  3.2x the round trip). Any MuQ-imposed limit is not yet measurable.
+- It is not pure underfitting: val is best at step 1,000 while training error keeps falling,
+  with the train/val gap widening from 0.20 to 0.36, then an Adam spike at 14k. Diagnose the
+  optimization before attributing anything to underfitting.
+- The TASK-14 comparison is uncontrolled: target, decoder, translator size, alignment, data and
+  metrics all differ.
+- Caveats: unblinded listening; split not artist-aware. Details: [[DECISIONS.md#task18-heldout-result]] and
+`artifacts/task18_heldout/task18_heldout_v1/TASK-18_RESULTS.md`.
+
+**Next (user's call; nothing authorized):**
+- diagnose optimization on the same manifests (W&B train/val curves, LR schedule or warmup, clipping), then capacity;
+- blinded listening;
+- an artist-aware held-out set;
+- more training tracks.
+
+Resources: job 2240151 COMPLETED in 10:27, billing=8 (cpu=8, 1 PVC, 32G), so ~1.4 billing-hours.
+
+## Previous: TASK-18 held-out generalization, prepared for ACES (2026-10-21)
 
 TASK-18 (32/8/8 held-out generalization of the corrected MuQ -> BigVGAN-mel pipeline) is built
 and smoke-tested locally. It has **not** been run at full scale; the full job waits for the
@@ -15,8 +39,8 @@ uv run pytest -q; uv run ruff check .                                # 309 passe
 
 **Next (user):**
 1. On ACES, do the login-node prep from `aces/TASK18_ACES.md`, step 0.
-2. On a PVC node, run `bash aces/task18_smoke.sh` and send back `ACES_SMOKE_REPORT.md`.
-3. Only when instructed: `sbatch aces/run_task18_v1.slurm`. Record the job ID, `sacct`, and SUs.
+2. ~~ACES smoke~~ **PASSED 2026-10-21 (job 2240126)**. Clean the git tree on ACES before submitting; the smoke ran on a dirty tree.
+3. **Submitted by the user 2026-10-21: job 2240151** (`aces/run_task18_v1.slurm`, run `task18_heldout_v1`). Record the job ID, `sacct`, and SUs.
 4. Copy back `artifacts/task18_heldout/task18_heldout_v1/`, `run_manifest.json`, and the logs.
 5. Listen to `listening/val` and `listening/test`. I then write up the outcome.
 

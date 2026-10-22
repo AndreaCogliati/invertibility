@@ -1789,3 +1789,36 @@ Max 1100, torch 2.14.0+xpu, 46.6 s. ACES copy of the smoke test predates the loa
 - W&B offline resume works: same run id in both offline segments.
 - Timing probe on the full config (MPS): features 12 s, 500 steps ~20 s, RSS 3.7 GB.
 - Added the >= 75%-of-tracks condition to "beats": the 2-track bootstrap CIs were too narrow.
+
+2026-10-21 ACES smoke job 2240126 (ac010, PVC Max 1100): PASSED 4/4. Backend 69.7 s; MuQ 48
+crops 2.2 s. XPU matches MPS to ~3 decimals. Resume 6.56e-5 vs noise 2.61e-5 (tol 2.61e-4).
+Repo at /home/u.ac370321/project/invertibility, commit c6658b2, dirty=yes. SLURM_CPUS_PER_TASK
+was unset in the interactive shell ("cpus ?").
+
+2026-10-21: user submitted the TASK-18 full run, job 2240151 (run task18_heldout_v1).
+
+2026-10-21 TASK-18 job 2240151 finished (~11 min wall, training 167 s; W&B 274iituu). Artifacts copied
+to artifacts/task18_heldout/task18_heldout_v1/.
+- Pre-registered outcome: UNDERFIT, at both best (step 1000) and final. Memorized mel L1 is 3.19x
+  the round trip at best; even the training minimum (~0.27, step ~10.5k) is ~2.4x, so the rule
+  gives UNDERFIT at every checkpoint.
+- Every regime beats every control by a wide margin. Mel L1 at best:
+  memorized 0.354, train_unseen 0.451, val 0.576, test 0.525.
+  Controls: shuffled_across ~1.4, shuffled_time ~0.85-0.89, zero ~3.2-3.4, avg-mel ~1.1-1.2.
+  Round trip ~0.11.
+- Held-out contours (test): onset50 r 0.94, rms 0.77, centroid 0.84, chroma 0.85.
+  Under shuffled_time these are ~0.04 / ~0 / ~0.05 / 0.70.
+- Generalization gap is small next to the gap to the oracle: most error is fit, not transfer.
+- Val bottoms at step 1000 and drifts up to 0.63 by step 12.5k. Loss spikes around step 14k
+  (memorized 0.27 -> 0.48), the Adam constant-LR instability seen before.
+- Listening verdict pending.
+
+2026-10-22 user review of the TASK-18 interpretation (recorded in DECISIONS, NEXT, MEMORY and the
+results md):
+- "can't be blamed on MuQ" became "limited mainly by translator fit; a MuQ limit is not yet
+  measurable".
+- "most error is underfitting" was withdrawn. The history shows the val/memorized gap growing
+  0.20 -> 0.36 (steps 500-12k) while val is flat at ~0.6, so this looks like optimization.
+- The TASK-14 comparison was marked uncontrolled.
+- The user's note said "batch size 1"; TASK-18 actually uses minibatches of 64. Recorded as
+  "constant LR 1e-3 on minibatches of 64".

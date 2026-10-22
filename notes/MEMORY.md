@@ -97,6 +97,13 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
 
 ## Benchmark / gate results that passed sanity checks
 
+- TASK-18 (2026-10-22, ACES job 2240151): MuQ -> BigVGAN mel, 32/8/8 tracks. Held-out mel L1 is
+  val 0.576 / test 0.525, against shuffled_time ~0.87 and a round trip of ~0.11. Every control is
+  beaten, and held-out audio is recognizable by the user's (unblinded) listening. Pre-registered
+  code `UNDERFIT`: memorized mel L1 is 3.2x the round trip. Quality is limited mainly by
+  translator fit and optimization (val best at step 1k, widening train/val gap, Adam spike at
+  14k); a MuQ limit is not yet measurable. See [[task18-heldout-result]].
+
 - Gate 0 (environment doctor): PASSED on 2026-09-04, device=mps, see run output above.
 - Gate 1 (data integrity): PASSED on 2026-09-04 -- 1000/1000 GTZAN files indexed, 1 known-corrupted
   file (`jazz.00054.wav`) flagged and excluded, 14 duplicate-checksum pairs detected and kept
