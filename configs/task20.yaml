@@ -1,0 +1,48 @@
+# TASK-20: one N=512 data-scaling run, TASK-19 recipe A + validation-based early stopping.
+# Everything not listed here is inherited unchanged from configs/task19.yaml (and so from A128):
+# MuQ last_hidden_state, frame-center alignment, MuQToMelTranslator (1,271,908 params), BigVGAN-v2
+# 100-band log-mel target, L1, Adam 1e-3 (betas 0.9/0.999), constant LR (recipe A), batch 64, FP32,
+# seed 0, decode-time floor clamp, frozen BigVGAN-v2, crop geometry, evaluation code, controls, metrics.
+#   uv run python scripts/train_task18_heldout.py --config configs/task20.yaml --arm N512 --device xpu
+base_config: configs/task19.yaml
+task: TASK-20
+
+# --- data (scripts/build_task20_manifests.py) ----------------------------------------------
+# 512 training tracks = the 128 TASK-19 tracks + 384 new from the committed train split, genre-
+# balanced under per-genre availability (pop has only 51 eligible tracks), same eligibility as TASK-19
+# (no Sturm 2013 repetition member, no distortion, no checksum duplicate, >= 29 s). All TASK-19
+# val/test and val2/test2 tracks and crops are kept exactly; held-out tracks are never candidates.
+task19_track_manifest: data/manifests/task19_tracks.csv
+task19_crop_manifest: data/manifests/task19_crops.csv
+train_target: 512
+track_manifest: data/manifests/task20_tracks.csv
+crop_manifest: data/manifests/task20_crops.csv
+fault_report: data/manifests/task20_fault_report.json
+# Evaluation sets are TASK-19's, on identical crops. The 384 new tracks get training-pool crops only
+# (their reserved windows are kept out of the pool, as for every training track, but not evaluated).
+# For N512, train_unseen (32 core) and train_unseen_new (96) are unseen crops of TRAINING tracks;
+# val/test (primary) and val2/test2 (secondary) are held-out tracks.
+
+# --- training: recipe A, early stopping on primary val only ---------------------------------
+eval_every: 250
+early_stopping:
+  patience: 8          # validation checks (2,000 steps) without improvement
+  min_delta: 0.0       # any decrease in primary-val correct-conditioning mel L1 counts
+steps: 20000           # maximum
+checkpoint_every: 2000
+arms:
+  N512: {train_tracks: all, lr_schedule: {type: constant}}
+
+run_name_prefix: task20
+run_root: runs/task20
+artifact_root: artifacts/task20
+results_name: TASK-20_RESULTS.md
+wandb_group: task20-n512-scaling
+wandb_tags: [task20, bigvgan-v2, mel, heldout, muq, muq-to-bigvgan-mel-temporal-conv, frame-center-alignment, decode-mel-floor-clamp, n512, early-stopping]
+
+# --- comparison (scripts/task20_analyze.py) --------------------------------------------------
+# Reference arms (TASK-19, same crops): A32 (artifacts/task19/task19_A32_v1), A128 (task19_A128_v1).
+# Reported per eval set separately (val, test, val2, test2; train_unseen, train_unseen_new;
+# memorized, memorized_new); combined val+test and val2+test2 only for comparison with TASK-19.
+# Paired by crop, track-clustered bootstrap 95% CI (task19.paired_arm_delta). Descriptive; no new
+# outcome code. Single seed: a scaling data point, not a measurement of MuQ's information ceiling.

@@ -88,6 +88,7 @@ from muq_inversion.task18 import (
 )
 from muq_inversion.task18_report import render_results
 from muq_inversion.task19 import lr_multiplier
+from muq_inversion.task20 import early_stopping_update
 from muq_inversion.time_alignment import (
     bigvgan_mel_frame_centers,
     muq_token_centers,
@@ -102,10 +103,11 @@ HIGHER_IS_BETTER = ("mel_cosine", "mel_pearson", "rms_corr", "centroid_corr", "c
 
 
 def load_config(path: Path) -> dict:
-    cfg = yaml.safe_load(path.read_text())
+    """YAML config; `base_config` (relative to the repo root) is loaded first, recursively, and
+    overridden key by key (top level only)."""
+    cfg = yaml.safe_load(Path(path).read_text())
     if "base_config" in cfg:
-        base = yaml.safe_load((REPO_ROOT / cfg.pop("base_config")).read_text())
-        cfg = {**base, **cfg}
+        cfg = {**load_config(REPO_ROOT / cfg.pop("base_config")), **cfg}
     return cfg
 
 
@@ -119,8 +121,8 @@ def apply_smoke_limits(rows: list[dict], limits: dict | None, memorized: list[in
         return rows
     keep: set[str] = set()
     groups: dict[tuple, set] = {}
-    for r in rows:  # TASK-18 rows: one group per split; TASK-19 rows: also by core/tier
-        groups.setdefault((r["split"], r.get("core", ""), r.get("tier", "")), set()).add(r["track_id"])
+    for r in rows:  # TASK-18 rows: one group per split; TASK-19/20 rows: also by core/tier/cohort
+        groups.setdefault((r["split"], r.get("core", ""), r.get("tier", ""), r.get("cohort", "")), set()).add(r["track_id"])
     for (split, *_), ids in groups.items():
         n = limits["train_tracks"] if split == "train" else limits["heldout_tracks_per_split"]
         if split == "train" and len([g for g in groups if g[0] == "train"]) > 1:
@@ -268,6 +270,9 @@ def main() -> int:
 
     track_path, crop_path = REPO_ROOT / cfg["track_manifest"], REPO_ROOT / cfg["crop_manifest"]
     rows = apply_smoke_limits(read_csv(crop_path), cfg.get("smoke_limits"), cfg["memorized_pool_indices"])
+    # Only crops this run uses (training pool + configured eval sets) get features. A no-op for the
+    # TASK-18/19 manifests, which contain nothing else.
+    rows = [r for r in rows if r["role"] == "train_pool" or r["eval_set"] in eval_sets]
     hashes = {"track_manifest_sha256": file_sha256(track_path), "crop_manifest_sha256": file_sha256(crop_path),
               "uv_lock_sha256": file_sha256(REPO_ROOT / "uv.lock"),
               "bigvgan_generator_sha256": file_sha256(BIGVGAN_DIR / "bigvgan_generator.pt")}
@@ -328,12 +333,13 @@ def main() -> int:
     opt = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"], betas=tuple(cfg["adam_betas"]))
     sampler = TrackBalancedSampler(pool_by_track, cfg["batch_size"], random.Random(f"task18-{cfg['seed']}-sampler"))
     resolved = {**cfg, "run_name": run_name, **hashes, "feature_cache": str(cache_path.relative_to(REPO_ROOT)),
-                "num_pool_crops": len(pool_all), "eval_crops": {s: len(eval_rows[s]) for s in eval_sets},
+                "num_pool_crops": len(pool_all), "n_train_tracks": len(pool_by_track), "eval_crops": {s: len(eval_rows[s]) for s in eval_sets},
                 "translator_parameters": sum(p.numel() for p in model.parameters()),
                 "receptive_field_mel_frames": model.receptive_field_mel_frames, "device_metadata": device_info,
                 "seeding": seeding, "slurm": slurm_resources()}
 
     state = {"step": 0, "best": {"val_mel_l1": float("inf"), "step": 0}, "history": [], "wandb_run_id": None, "lineage": []}
+    early_stopping = cfg.get("early_stopping")  # TASK-20: {patience, min_delta}; absent -> fixed step budget
     if resuming:
         ck = load_portable(latest)
         model.load_state_dict(ck["model_state_dict"])
@@ -343,7 +349,10 @@ def main() -> int:
         random.setstate(ck["python_rng"])
         np.random.set_state(ck["numpy_rng"])
         state = ck["train_state"]
+        state.setdefault("early_stopping", None)
         print(f"resumed from {latest.relative_to(REPO_ROOT)} at step {state['step']}")
+    if early_stopping and not state.get("early_stopping"):
+        state["early_stopping"] = {"checks_since_improvement": 0, "stopped": False, "reason": None, "stopped_at_step": None}
     state["lineage"].append({"started_at_step": state["step"], "utc": datetime.now(UTC).isoformat(),
                              "slurm_job_id": os.environ.get("SLURM_JOB_ID")})
 
@@ -414,7 +423,7 @@ def main() -> int:
                     | {"train/l1_log_mel": entry["train_l1"]}, step=entry["step"])
         ckpt_dir = src_ckpt
         state["step"] = cfg["steps"]
-    while state["step"] < cfg["steps"]:
+    while state["step"] < cfg["steps"] and not (state.get("early_stopping") or {}).get("stopped"):
         step = state["step"] + 1
         batch = torch.tensor(sampler.next_batch(), device=device)
         with backend_stage(f"train step {step}", device):
@@ -437,6 +446,12 @@ def main() -> int:
             ev = quick_eval()
             exposure = sampler.exposure_summary()
             improved = ev["val/correct/mel_l1"] < state["best"]["val_mel_l1"]
+            if early_stopping:  # primary val, correct conditioning only -- the same metric as best.pt
+                es = early_stopping_update(state["early_stopping"], ev["val/correct/mel_l1"], state["best"]["val_mel_l1"], early_stopping)
+                if es["stopped"]:
+                    es["stopped_at_step"] = step
+                state["early_stopping"] = es
+                log |= {"early_stopping/checks_since_improvement": es["checks_since_improvement"]}
             if improved:
                 state["best"] = {"val_mel_l1": ev["val/correct/mel_l1"], "step": step}
                 atomic_torch_save(ckpt_dir / "best.pt", {"model_state_dict": model.state_dict(), "step": step,
@@ -454,6 +469,9 @@ def main() -> int:
                 checkpoint(ckpt_dir / f"step_{step:07d}.pt")
         if log:
             run.log(log, step=step)
+        if (state.get("early_stopping") or {}).get("stopped"):
+            print(f"early stopping at step {step}: {state['early_stopping']['reason']} (best step {state['best']['step']})")
+            break
         if stop["flag"] or step == args.stop_after_step:
             checkpoint(latest)
             run_manifest["starts"][-1]["interrupted_at_step"] = step
@@ -462,6 +480,9 @@ def main() -> int:
             print(f"interrupted at step {step}; resume with the same --run-name")
             return 3
     train_seconds = time.perf_counter() - t0
+    if state.get("early_stopping") and not state["early_stopping"]["stopped"] and not evaluate_only:
+        state["early_stopping"]["reason"] = f"max_steps: reached {cfg['steps']} steps"
+        state["early_stopping"]["stopped_at_step"] = state["step"]
     if not evaluate_only and not (ckpt_dir / "final.pt").exists():
         checkpoint(ckpt_dir / "final.pt")
 
@@ -584,7 +605,8 @@ def main() -> int:
     report = {
         "task": cfg["task"], "arm": cfg.get("arm"), "run_name": run_name, "wandb_run_id": run.id, "train_seconds_this_start": train_seconds,
         "best_checkpoint": {"step": best_ck["step"], "val_mel_l1": best_ck["val_mel_l1"], "selection": "lowest val mel L1 (correct conditioning); test never used"},
-        "final_step": cfg["steps"], "outcome_best": outcome, "outcome_final": final_outcome,
+        "final_step": state["step"], "max_steps": cfg["steps"], "early_stopping": state.get("early_stopping"),
+        "n_train_tracks": len(pool_by_track), "outcome_best": outcome, "outcome_final": final_outcome,
         "best": best_agg, "final": final_agg, "exposure": sampler.exposure_summary(),
         "track_exposure": sampler.track_exposure, "history": state["history"], "listening": listening,
         "lineage": state["lineage"], "resolved_config": resolved, "device_memory": memory_stats(device),
@@ -593,7 +615,9 @@ def main() -> int:
     }
     atomic_write_text(out_dir / "report.json", json.dumps(report, indent=2, default=_json_default))
     atomic_write_text(out_dir / cfg.get("results_name", "TASK-18_RESULTS.md"), render_results(report))
-    run.summary.update({"outcome": outcome["code"], "best_step": best_ck["step"],
+    run.summary.update({"outcome": outcome["code"], "best_step": best_ck["step"], "final_step": state["step"],
+                        "n_train_tracks": len(pool_by_track),
+                        "stopping_reason": (state.get("early_stopping") or {}).get("reason") or f"fixed budget {cfg['steps']} steps",
                         **{f"best/{s}/mel_l1_correct": best_agg[s]["conditions"]["correct"]["mel_l1"]["mean"] for s in eval_sets}})
     log_artifact_file(run, out_dir / "report.json", f"{cfg['task'].lower()}-report-{run_name}", "report")
     run.finish()

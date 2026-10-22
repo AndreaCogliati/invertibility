@@ -1,0 +1,18 @@
+# TASK-20 bounded smoke test: the N512 code path (512-track manifest, early stopping, resume) on a
+# tiny subset. Not a result. Early stopping is set to trigger quickly (patience 2 checks of 10 steps).
+base_config: configs/task20.yaml
+smoke_limits:
+  train_tracks: 4
+  heldout_tracks_per_split: 2
+  pool_crops_per_track: 4
+steps: 200
+eval_every: 10
+checkpoint_every: 50
+log_every: 5
+batch_size: 8
+bootstrap_samples: 200
+early_stopping: {patience: 2, min_delta: 0.0}
+run_name_prefix: task20_smoke
+run_root: runs/task20_smoke
+artifact_root: artifacts/task20_smoke
+wandb_group: task20-smoke

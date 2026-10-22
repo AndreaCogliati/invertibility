@@ -3841,3 +3841,40 @@ BigVGAN round trip ~0.11.
   identical with or without them.
 
 Data: `artifacts/task19/analysis_v1/listening_unblinded.json`.
+
+## task20-n512-protocol: one N=512 scaling run, recipe A + validation-based early stopping
+
+**Context (`tasks/TASK-20.md`).** TASK-19 showed a modest, consistent data benefit (~9-10% for
+4x tracks), no benefit from schedule B, and overfitting after ~1-2k steps. Next step agreed with
+the user: one larger-data run, current translator, early stopping, fixed held-out sets, test
+reported separately.
+
+**Decision (`configs/task20.yaml`, inheriting `configs/task19.yaml`).**
+- **Data.** 512 training tracks = the TASK-19 128 + 384 new from the committed train split, with
+  TASK-19 eligibility. 532 were eligible, so N = 512 exactly.
+  - Capped genre balance: 51 per genre, metal and reggae 52; pop is capped at 51 by availability.
+  - All 64 held-out tracks and every TASK-19 crop row are kept byte-for-byte (asserted).
+  - No repetition group spans splits.
+  - The new tracks get pool crops only.
+  - Manifests: `task20_tracks.csv` (9446f461...), `task20_crops.csv` (a08f1511...),
+    `task20_fault_report.json` (d3a982b3...).
+  - 43 of 64 held-out tracks have a Sturm-listed artist present in the 512 training tracks
+    (33/64 at N=128).
+- **Recipe.** Recipe A unchanged from A128 (asserted by test): constant LR 1e-3, batch 64, Adam,
+  FP32, seed 0, same translator, target and decoder.
+- **Early stopping.** Primary val every 250 steps, patience 8 checks, min_delta 0, max 20,000.
+  It uses only the primary-val correct-conditioning mel L1, the same metric that selects
+  `best.pt`. Its state is stored in checkpoints and preserved across resumes.
+- **Code.** Config-gated changes to the shared script:
+  - `early_stopping`;
+  - features only for crops in use (identity for TASK-18/19 manifests);
+  - recursive `base_config`;
+  - smoke grouping by cohort;
+  - N, stop step and stop reason in the report and W&B.
+- **Reporting.**
+  - Each set separately (val, test, val2, test2; unseen crops of training tracks;
+    memorized), with combined sets only for comparison with TASK-19.
+  - Paired track-clustered CIs vs A128 and A32 on identical crops.
+  - Descriptive, with no new outcome code.
+  - Single seed: not a measurement of MuQ's information ceiling.
+- **Listening.** Blinded A128 vs N512 vs oracle on the 16 fixed crops, key in a separate folder.

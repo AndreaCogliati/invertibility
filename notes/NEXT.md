@@ -1,5 +1,17 @@
 # NEXT
 
+## Latest: TASK-20 N=512 scaling run, prepared for ACES (2026-10-22)
+
+Built and smoke-tested locally; not submitted. Spec and instructions: `aces/TASK20_ACES.md`;
+protocol: [[DECISIONS.md#task20-n512-protocol]]. N = 512 (all 128 TASK-19 training tracks
+included); held-out sets and crops unchanged.
+
+**Next (user):**
+1. Commit and push.
+2. On ACES: `bash aces/task20_smoke.sh` on a PVC node.
+3. Only when instructed: `sbatch aces/run_task20_N512_v1.slurm`.
+4. Afterwards: `scripts/task20_analyze.py`, then `scripts/task20_listening_package.py`.
+
 ## Latest: TASK-19 result (2026-10-22)
 
 **Pre-registered codes (labels only): primary `NEITHER_CAPACITY_OR_OBJECTIVE_LIMIT`, secondary `DATA_LIMITED`.**
