@@ -1,9 +1,10 @@
-# TASK-21: extended N512 continuation -- 48 h of additional training-job runtime, no early stopping.
+# TASK-21: extended N512 continuation -- one 48 h ACES job (~47 h of training), no early stopping.
 # A duration experiment only. Inherits configs/task20.yaml (and so TASK-19/A128): same 512 training
 # tracks, splits, crops, translator, MuQ representation, preprocessing, L1, Adam (betas 0.9/0.999),
 # constant LR 1e-3 (no decay), batch 64, FP32, no gradient clipping, track-balanced sampler.
-#   train:    scripts/train_task18_heldout.py --config configs/task21.yaml --arm N512ext --run-name task21_N512ext_v1
-#   evaluate: same, plus --evaluate-checkpoints runs/task21/task21_N512ext_v1/checkpoints --run-name task21_N512ext_v1_eval
+#   scripts/train_task18_heldout.py --config configs/task21.yaml --arm N512ext --run-name task21_N512ext_v1
+# trains until the runtime budget, then evaluates best.pt and final.pt in the same job. Fallback if the
+# evaluation must be rerun: add --evaluate-checkpoints runs/task21/task21_N512ext_v1/checkpoints --run-name task21_N512ext_v1_eval
 base_config: configs/task20.yaml
 task: TASK-21
 
@@ -19,12 +20,15 @@ init_from_checkpoint:
   best: runs/task20/task20_N512_v1/checkpoints/best.pt
   check_tolerance: 0.001
 
-# Stopping: runtime budget only (cumulative wall time of all job segments, start-up included).
-# No patience, no step ceiling. Genuine failures (non-finite loss or gradient) still stop the run.
+# Stopping: runtime budget only, measured from Python start (cumulative if the job is ever resumed).
+# One ACES job: the pvc walltime limit is 48 h (verified with sinfo, 2026-10-23). 47.0 h of training
+# plus ~3 min of job start-up before Python and ~20 min of in-job evaluation ends at ~47.4 h, inside
+# the walltime and before the 10-min pre-walltime TERM. The user accepted ~47 h instead of 48 h
+# (2026-10-23). No patience, no step ceiling. Genuine failures (non-finite loss or gradient) still stop it.
 early_stopping: null
 steps: null
-runtime_budget_hours: 48
-train_only: true                 # final evaluation is a separate job (evaluate_checkpoints)
+runtime_budget_hours: 47.0
+train_only: false                # evaluate in the same job once the budget is reached
 
 # Validation: primary val, correct-conditioning mel L1, same crops and metric; selects best.pt.
 # Every 250 steps through step 20,000, then every 1,000. Test/test2/val2 are not evaluated in training.

@@ -35,7 +35,7 @@ def test_continuation_from_task20_last_not_best_and_no_early_stopping():
     init = T21["init_from_checkpoint"]
     assert init["latest"].endswith("task20_N512_v1/checkpoints/latest.pt")
     assert init["best"].endswith("task20_N512_v1/checkpoints/best.pt")
-    assert T21["early_stopping"] is None and T21["steps"] is None and T21["runtime_budget_hours"] == 48
+    assert T21["early_stopping"] is None and T21["steps"] is None and T21["runtime_budget_hours"] == 47.0 and T21["train_only"] is False
     assert not {"test", "test2", "val2"} & set(T21["quick_eval_sets"]) and "val" in T21["quick_eval_sets"]
 
 

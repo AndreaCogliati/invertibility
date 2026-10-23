@@ -8,6 +8,7 @@ smoke_limits:
   pool_crops_per_track: 4
 batch_size: 8
 runtime_budget_hours: 0.03
+train_only: true                 # the smoke tests the evaluation-only path separately (step 4)
 eval_schedule: [{until: 120, every: 10}, {every: 40}]
 log_schedule: [{until: 120, every: 5}, {every: 40}]
 checkpoint_policy: {latest_every_minutes: 0.05, recovery_every_minutes: 0.1, keep_recovery: 2, milestones: [100, 200]}

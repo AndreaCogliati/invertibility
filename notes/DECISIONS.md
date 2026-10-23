@@ -3950,3 +3950,12 @@ duration, stopping, logging, checkpointing, continuation and naming keys differ)
 - 48 h × 8 = 384 billing-hours, plus ~10-15 for overhead, evaluation and smoke: ~395-400.
 - SU equivalence not verified.
 - Scale: ~16-19M optimizer steps, ~80-90k pool passes, ~4,000x TASK-20's training.
+
+**Amendment (user, 2026-10-23): one job.**
+- The pvc walltime limit is 2-00:00:00 (verified with `sinfo`).
+- At the user's request, TASK-21 runs as a single 48 h job: `aces/run_task21_v1.slurm`.
+- The runtime budget is 47.0 h (from Python start), not 48 h. The user accepted the shortfall.
+- Evaluation runs in the same job after training (`train_only: false`); expected end ~47.4 h.
+- The chain script and segment file were dropped. `run_task21_eval.slurm` remains as a fallback.
+- Budget: ~379 billing-hours (at most 384).
+- The in-job evaluation path was verified locally: budget reached, then evaluation, report, exit 0.

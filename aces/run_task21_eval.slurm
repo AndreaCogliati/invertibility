@@ -10,7 +10,7 @@
 #SBATCH --mem=64G
 #SBATCH --mail-type=FAIL,END
 #SBATCH --mail-user=andrea.cogliati@rochester.edu
-# TASK-21 final evaluation: the overall val-selected best.pt and final.pt of task21_N512ext_v1, with the
+# TASK-21 evaluation fallback (normally evaluation runs inside run_task21_v1.slurm): the overall val-selected best.pt and final.pt of task21_N512ext_v1, with the
 # TASK-20 metrics and controls on identical crops. Submit after the last training segment finished
 # with the budget reached (aces/TASK21_ACES.md).
 set -euo pipefail
