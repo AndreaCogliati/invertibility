@@ -1,5 +1,18 @@
 # NEXT
 
+## Latest: TASK-21 extended N512 continuation, prepared for ACES (2026-10-23)
+
+48 h of runtime-budgeted training continuing TASK-20's last checkpoint, with no early stopping.
+Spec, budget (~395-400 billing-hours at the verified billing=8) and runbook: `aces/TASK21_ACES.md`.
+Protocol: [[DECISIONS.md#task21-n512-extended-protocol]]. Not submitted.
+
+**Next (user):**
+1. Commit and push.
+2. On ACES, check the PVC walltime limit (`sinfo -p pvc -o "%P %l"`).
+3. Run `bash aces/task21_smoke.sh` on a PVC node.
+4. Only when instructed: `bash aces/submit_task21_chain.sh <N> <WALLTIME>`.
+5. Afterwards: `sbatch aces/run_task21_eval.slurm`, then `scripts/task21_analyze.py`.
+
 ## Latest: TASK-20 N=512 run finished (2026-10-23)
 
 Job 2246233: COMPLETED in 22:33 at billing=8 (~3.0 billing-hours); commit dacda13, clean. Best step

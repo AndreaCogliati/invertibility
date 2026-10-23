@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import signal
 import sys
 import tempfile
@@ -89,6 +90,9 @@ from muq_inversion.task18 import (
 from muq_inversion.task18_report import render_results
 from muq_inversion.task19 import lr_multiplier
 from muq_inversion.task20 import early_stopping_update
+from muq_inversion.task21 import RuntimeBudget, due, recovery_to_delete
+
+PROCESS_START = time.time()  # TASK-21 runtime budget counts the whole job segment, start-up included
 from muq_inversion.time_alignment import (
     bigvgan_mel_frame_centers,
     muq_token_centers,
@@ -229,6 +233,8 @@ def main() -> int:
     parser.add_argument("--arm", default=None, help="TASK-19: arm name from the config's `arms`")
     parser.add_argument("--evaluate-checkpoints", default=None,
                         help="override the arm's evaluate_checkpoints dir (evaluation-only; e.g. smoke tests)")
+    parser.add_argument("--init-from", default=None,
+                        help="TASK-21: override init_from_checkpoint with this checkpoints dir (smoke tests)")
     parser.add_argument("--stop-after-step", type=int, default=None,
                         help="simulate an interruption: save latest.pt after this step and exit 3 (resume test)")
     args = parser.parse_args()
@@ -243,6 +249,10 @@ def main() -> int:
         raise SystemExit(f"eval_sets must start with {EVAL_SETS} (TASK-18 regimes, same control seeds)")
     if args.evaluate_checkpoints:
         cfg["evaluate_checkpoints"] = args.evaluate_checkpoints
+    if args.init_from:
+        d = Path(args.init_from)
+        cfg["init_from_checkpoint"] = {**(cfg.get("init_from_checkpoint") or {}), "source_run": d.parent.name,
+                                       "latest": str(d / "latest.pt"), "best": str(d / "best.pt")}
     evaluate_only = cfg.get("evaluate_checkpoints")
     if cfg.get("temporal_alignment") != "frame_centers" or not cfg.get("decode_clamp_to_mel_floor"):
         raise SystemExit("TASK-18 uses the corrected pipeline: frame_centers alignment + decode clamp")
@@ -351,15 +361,61 @@ def main() -> int:
         state = ck["train_state"]
         state.setdefault("early_stopping", None)
         print(f"resumed from {latest.relative_to(REPO_ROOT)} at step {state['step']}")
+    init_from = cfg.get("init_from_checkpoint")  # TASK-21: continue another run's LAST checkpoint
+    if init_from and not resuming and not evaluate_only:
+        src_latest, src_best = REPO_ROOT / init_from["latest"], REPO_ROOT / init_from["best"]
+        ck = load_portable(src_latest)
+        model.load_state_dict(ck["model_state_dict"])
+        opt.load_state_dict(ck["optimizer_state_dict"])  # Adam moments and step count, not reset
+        sampler.load_state_dict(ck["sampler_state"])
+        torch.set_rng_state(ck["torch_cpu_rng"])
+        random.setstate(ck["python_rng"])
+        np.random.set_state(ck["numpy_rng"])
+        parent = ck["train_state"]
+        state = {"step": parent["step"], "best": dict(parent["best"]), "history": list(parent["history"]),
+                 "wandb_run_id": None, "lineage": [{**e, "run": init_from["source_run"]} for e in parent["lineage"]],
+                 "early_stopping": None, "runtime_seconds": 0.0, "events": [],
+                 "parent": {"run": init_from["source_run"], "wandb_run_id": parent["wandb_run_id"],
+                            "latest": {"path": init_from["latest"], "sha256": file_sha256(src_latest), "step": parent["step"]},
+                            "best": {"path": init_from["best"], "sha256": file_sha256(src_best), "step": parent["best"]["step"]},
+                            "parent_early_stopping": parent.get("early_stopping"),
+                            "not_saved_by_parent": [("device (XPU) RNG state: not needed (no dropout; MuQ features cached; "
+                                                    "batches drawn by the sampler's Python RNG)"),
+                                                    "LR scheduler: none (constant LR)", "grad scaler: none (FP32)"]}}
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src_best, ckpt_dir / "best.pt")  # incumbent best, kept until beaten
+        state["events"].append({"step": parent["step"], "event": "continuation_start", "from": init_from["source_run"]})
+        print(f"continuing {init_from['source_run']} from its last checkpoint at step {parent['step']} "
+              f"(incumbent best step {parent['best']['step']}, val mel L1 {parent['best']['val_mel_l1']:.4f})")
     if early_stopping and not state.get("early_stopping"):
         state["early_stopping"] = {"checks_since_improvement": 0, "stopped": False, "reason": None, "stopped_at_step": None}
     state["lineage"].append({"started_at_step": state["step"], "utc": datetime.now(UTC).isoformat(),
                              "slurm_job_id": os.environ.get("SLURM_JOB_ID")})
+    if resuming and "events" in state:
+        state["events"].append({"step": state["step"], "event": "resume", "slurm_job_id": os.environ.get("SLURM_JOB_ID")})
+    budget = RuntimeBudget(cfg.get("runtime_budget_hours"), state.get("runtime_seconds", 0.0), PROCESS_START)
 
     from muq_inversion.wandb_logging import init_run, log_artifact_file
 
-    run = init_run(config=resolved, environment=environment, run_name=run_name, mode=args.wandb_mode,
-                   group=cfg["wandb_group"], job_type="heldout", tags=cfg["wandb_tags"], resume_id=state["wandb_run_id"])
+    wb_config = resolved | ({"parent": state["parent"]} if state.get("parent") else {})
+    try:
+        run = init_run(config=wb_config, environment=environment, run_name=run_name, mode=args.wandb_mode,
+                       group=cfg["wandb_group"], job_type="heldout", tags=cfg["wandb_tags"], resume_id=state["wandb_run_id"])
+    except Exception as exc:
+        if args.wandb_mode != "online":
+            raise
+        print(f"W&B online init failed ({type(exc).__name__}: {exc}); continuing offline")
+        run = init_run(config=wb_config, environment=environment, run_name=run_name, mode="offline",
+                       group=cfg["wandb_group"], job_type="heldout", tags=cfg["wandb_tags"], resume_id=state["wandb_run_id"])
+    metrics_log = run_dir / "metrics.jsonl"  # local mirror of every W&B log call
+
+    def wb_log(data: dict, step: int) -> None:
+        with open(metrics_log, "a") as f:
+            f.write(json.dumps({"step": step, **data}, default=_json_default) + "\n")
+        try:
+            run.log(data, step=step)
+        except Exception as exc:  # noqa: BLE001 -- keep training; the JSONL mirror has the data
+            print(f"W&B log failed at step {step}: {type(exc).__name__}: {exc}")
     state["wandb_run_id"] = run.id
     run_manifest["wandb_run_id"] = run.id
     atomic_write_text(manifest_path, json.dumps(run_manifest, indent=2, default=str))
@@ -422,8 +478,31 @@ def main() -> int:
             run.log({f"eval/{k}": v for k, v in entry.items() if "/" in k and not k.startswith("exposure")}
                     | {"train/l1_log_mel": entry["train_l1"]}, step=entry["step"])
         ckpt_dir = src_ckpt
-        state["step"] = cfg["steps"]
-    while state["step"] < cfg["steps"] and not (state.get("early_stopping") or {}).get("stopped"):
+        state["step"] = src_final["train_state"]["step"]
+        for k in ("parent", "events", "runtime_seconds", "lineage", "best"):
+            if k in src_final["train_state"]:
+                state[f"source_{k}"] = src_final["train_state"][k]
+    if init_from and not resuming and not evaluate_only:  # the loaded step must reproduce the parent's own last validation
+        v0 = quick_eval()["val/correct/mel_l1"]
+        v_parent = state["history"][-1]["val/correct/mel_l1"]
+        state["events"].append({"step": state["step"], "event": "continuation_check", "val_mel_l1": v0, "parent_val_mel_l1": v_parent})
+        print(f"continuation check at step {state['step']}: val mel L1 {v0:.6f} vs parent {v_parent:.6f}")
+        if abs(v0 - v_parent) > init_from.get("check_tolerance", 1e-3):
+            raise SystemExit(f"STOP: continuation does not reproduce the parent's validation ({v0} vs {v_parent}): "
+                             "features, crops, or weights differ")
+    eval_schedule = cfg.get("eval_schedule") or [{"every": cfg["eval_every"]}]
+    log_schedule = cfg.get("log_schedule") or [{"every": cfg["log_every"]}]
+    max_steps = cfg["steps"] if cfg["steps"] is not None else float("inf")
+    policy = cfg.get("checkpoint_policy")
+    window = {"n": 0, "loss_sum": 0.0, "loss_max": 0.0, "grad_max": 0.0, "t": time.time(), "step0": state["step"]}
+    last_recovery = last_latest = time.time()
+    first_eval_this_segment = True
+    budget_reached = False
+    while not evaluate_only and state["step"] < max_steps and not (state.get("early_stopping") or {}).get("stopped"):
+        if not evaluate_only and budget.exhausted():
+            budget_reached = True
+            print(f"runtime budget reached ({budget.used() / 3600:.2f} h) at step {state['step']}")
+            break
         step = state["step"] + 1
         batch = torch.tensor(sampler.next_batch(), device=device)
         with backend_stage(f"train step {step}", device):
@@ -434,16 +513,33 @@ def main() -> int:
             opt.zero_grad()
             loss.backward()
             grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf")))  # measure only
-            lr_now = cfg["learning_rate"] * lr_multiplier(step, lr_schedule, cfg["steps"])
+            lr_now = cfg["learning_rate"] * lr_multiplier(step, lr_schedule, cfg["steps"] or 0)
             for group in opt.param_groups:  # a pure function of the step, so resuming needs no extra state
                 group["lr"] = lr_now
+            if not np.isfinite(grad_norm):
+                raise SystemExit(f"STOP CONDITION: non-finite gradient norm at step {step}")
             opt.step()
         state["step"] = step
+        window["n"] += 1
+        window["loss_sum"] += (lv := loss.item())
+        window["loss_max"], window["grad_max"] = max(window["loss_max"], lv), max(window["grad_max"], grad_norm)
         log = {}
-        if step % cfg["log_every"] == 0:
+        if due(step, log_schedule):
             log |= {"train/l1_log_mel": loss.item(), "train/grad_norm": grad_norm, "train/lr": lr_now}
-        if step % cfg["eval_every"] == 0 or step == cfg["steps"]:
+        if due(step, eval_schedule) or step == cfg["steps"]:
             ev = quick_eval()
+            now = time.time()
+            state["runtime_seconds"] = budget.used(now)
+            diag = {"diag/train_l1_window_mean": window["loss_sum"] / max(1, window["n"]),
+                    "diag/train_l1_window_max": window["loss_max"], "diag/grad_norm_window_max": window["grad_max"],
+                    "diag/steps_per_second": (step - window["step0"]) / max(1e-9, now - window["t"]),
+                    "diag/runtime_hours_cumulative": state["runtime_seconds"] / 3600,
+                    "diag/first_eval_after_segment_start": float(first_eval_this_segment),
+                    "diag/track_cycles": sampler.num_batches * cfg["batch_size"] / len(pool_by_track),
+                    "diag/pool_passes": sampler.num_batches * cfg["batch_size"] / len(pool_all),
+                    "diag/best_step": state["best"]["step"]}
+            window.update(n=0, loss_sum=0.0, loss_max=0.0, grad_max=0.0, t=now, step0=step)
+            first_eval_this_segment = False
             exposure = sampler.exposure_summary()
             improved = ev["val/correct/mel_l1"] < state["best"]["val_mel_l1"]
             if early_stopping:  # primary val, correct conditioning only -- the same metric as best.pt
@@ -457,22 +553,35 @@ def main() -> int:
                 atomic_torch_save(ckpt_dir / "best.pt", {"model_state_dict": model.state_dict(), "step": step,
                                                          "val_mel_l1": ev["val/correct/mel_l1"], "resolved_config": resolved,
                                                          "device_metadata": device_info})
-            state["history"].append({"step": step, "train_l1": loss.item(), **ev, **{f"exposure/{k}": v for k, v in exposure.items()}})
-            log |= {f"eval/{k}": v for k, v in ev.items()} | {f"exposure/{k}": v for k, v in exposure.items()}
+            state["history"].append({"step": step, "train_l1": loss.item(), **ev, **{f"exposure/{k}": v for k, v in exposure.items()}, **diag})
+            log |= {f"eval/{k}": v for k, v in ev.items()} | {f"exposure/{k}": v for k, v in exposure.items()} | diag
             log["eval/best_val_mel_l1"] = state["best"]["val_mel_l1"]
             print(f"step {step}: loss {loss.item():.4f} | mel L1 memorized {ev['memorized/correct/mel_l1']:.3f} "
                   f"train_unseen {ev['train_unseen/correct/mel_l1']:.3f} val {ev['val/correct/mel_l1']:.3f} "
                   f"(across {ev['val/shuffled_across/mel_l1']:.3f}, avg-mel {ev['val/average_mel/mel_l1']:.3f})"
                   f"{' *best*' if improved else ''} | tracks visited {exposure['tracks_visited']}/{exposure['tracks_total']}")
-            checkpoint(latest)
-            if step % cfg["checkpoint_every"] == 0:
+            if not policy or now - last_latest >= policy.get("latest_every_minutes", 0) * 60 or improved:
+                checkpoint(latest)
+                last_latest = now
+            if policy:  # TASK-21: bounded storage -- rolling recovery set + sparse milestones
+                if now - last_recovery >= policy["recovery_every_minutes"] * 60:
+                    checkpoint(ckpt_dir / f"recovery_{step:09d}.pt")
+                    for old in recovery_to_delete(list(ckpt_dir.glob("recovery_*.pt")), policy["keep_recovery"]):
+                        old.unlink()
+                    last_recovery = now
+                if step in policy["milestones"]:
+                    checkpoint(ckpt_dir / f"milestone_{step:09d}.pt")
+            elif step % cfg["checkpoint_every"] == 0:
                 checkpoint(ckpt_dir / f"step_{step:07d}.pt")
         if log:
-            run.log(log, step=step)
+            wb_log(log, step)
         if (state.get("early_stopping") or {}).get("stopped"):
             print(f"early stopping at step {step}: {state['early_stopping']['reason']} (best step {state['best']['step']})")
             break
         if stop["flag"] or step == args.stop_after_step:
+            state["runtime_seconds"] = budget.used()
+            if "events" in state:
+                state["events"].append({"step": step, "event": "graceful_stop", "signal": stop["flag"]})
             checkpoint(latest)
             run_manifest["starts"][-1]["interrupted_at_step"] = step
             atomic_write_text(manifest_path, json.dumps(run_manifest, indent=2, default=str))
@@ -480,11 +589,24 @@ def main() -> int:
             print(f"interrupted at step {step}; resume with the same --run-name")
             return 3
     train_seconds = time.perf_counter() - t0
+    if budget_reached:
+        state["runtime_seconds"] = budget.used()
+        state["events"].append({"step": state["step"], "event": "runtime_budget_reached", "hours": state["runtime_seconds"] / 3600})
+        state["budget_reached"] = True
+        checkpoint(latest)
     if state.get("early_stopping") and not state["early_stopping"]["stopped"] and not evaluate_only:
         state["early_stopping"]["reason"] = f"max_steps: reached {cfg['steps']} steps"
         state["early_stopping"]["stopped_at_step"] = state["step"]
     if not evaluate_only and not (ckpt_dir / "final.pt").exists():
         checkpoint(ckpt_dir / "final.pt")
+    if cfg.get("train_only") and not evaluate_only:
+        # TASK-21: evaluation is a separate job (evaluate_checkpoints on this run's checkpoint dir).
+        run_manifest["finished_training_utc"] = datetime.now(UTC).isoformat()
+        atomic_write_text(manifest_path, json.dumps(run_manifest, indent=2, default=str))
+        run.finish()
+        print(f"training finished at step {state['step']} (best step {state['best']['step']}); "
+              f"evaluate with --evaluate-checkpoints {ckpt_dir.relative_to(REPO_ROOT)}")
+        return 0
 
     # --- phase 3: evaluation ---
     stft = MultiResolutionSTFTLoss(*STFT)
@@ -606,7 +728,8 @@ def main() -> int:
         "task": cfg["task"], "arm": cfg.get("arm"), "run_name": run_name, "wandb_run_id": run.id, "train_seconds_this_start": train_seconds,
         "best_checkpoint": {"step": best_ck["step"], "val_mel_l1": best_ck["val_mel_l1"], "selection": "lowest val mel L1 (correct conditioning); test never used"},
         "final_step": state["step"], "max_steps": cfg["steps"], "early_stopping": state.get("early_stopping"),
-        "n_train_tracks": len(pool_by_track), "outcome_best": outcome, "outcome_final": final_outcome,
+        "n_train_tracks": len(pool_by_track), "outcome_best": outcome,
+        "continuation": {k: state.get(k, state.get(f"source_{k}")) for k in ("parent", "events", "runtime_seconds", "lineage")}, "outcome_final": final_outcome,
         "best": best_agg, "final": final_agg, "exposure": sampler.exposure_summary(),
         "track_exposure": sampler.track_exposure, "history": state["history"], "listening": listening,
         "lineage": state["lineage"], "resolved_config": resolved, "device_memory": memory_stats(device),

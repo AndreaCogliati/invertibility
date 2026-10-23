@@ -1,0 +1,19 @@
+# TASK-21 bounded smoke test: continuation from a TASK-20 *smoke* run (pass --init-from its
+# checkpoints dir), ~2 minutes of runtime budget, compressed schedules, tiny retention windows.
+# Same smoke subset as configs/task20_smoke.yaml, so the parent's sampler indices line up. Not a result.
+base_config: configs/task21.yaml
+smoke_limits:
+  train_tracks: 4
+  heldout_tracks_per_split: 2
+  pool_crops_per_track: 4
+batch_size: 8
+runtime_budget_hours: 0.03
+eval_schedule: [{until: 120, every: 10}, {every: 40}]
+log_schedule: [{until: 120, every: 5}, {every: 40}]
+checkpoint_policy: {latest_every_minutes: 0.05, recovery_every_minutes: 0.1, keep_recovery: 2, milestones: [100, 200]}
+bootstrap_samples: 200
+init_from_checkpoint: {source_run: set-by-cli, latest: set-by-cli, best: set-by-cli, check_tolerance: 0.001}
+run_name_prefix: task21_smoke
+run_root: runs/task21_smoke
+artifact_root: artifacts/task21_smoke
+wandb_group: task21-smoke

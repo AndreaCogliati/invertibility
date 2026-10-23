@@ -1,0 +1,51 @@
+# TASK-21: extended N512 continuation -- 48 h of additional training-job runtime, no early stopping.
+# A duration experiment only. Inherits configs/task20.yaml (and so TASK-19/A128): same 512 training
+# tracks, splits, crops, translator, MuQ representation, preprocessing, L1, Adam (betas 0.9/0.999),
+# constant LR 1e-3 (no decay), batch 64, FP32, no gradient clipping, track-balanced sampler.
+#   train:    scripts/train_task18_heldout.py --config configs/task21.yaml --arm N512ext --run-name task21_N512ext_v1
+#   evaluate: same, plus --evaluate-checkpoints runs/task21/task21_N512ext_v1/checkpoints --run-name task21_N512ext_v1_eval
+base_config: configs/task20.yaml
+task: TASK-21
+
+# Continue TASK-20's LAST checkpoint (step 4,250), not its best. Restored: model, Adam state (moments
+# and step count), sampler state (RNG, queue, exposure counts), Python/NumPy/torch-CPU RNG states,
+# global step, best-so-far, validation history. Not saved by TASK-20 and not needed: device (XPU) RNG
+# (no dropout; batches come from the sampler's Python RNG), LR scheduler (none), grad scaler (none).
+# TASK-20's best.pt (step 2,250) is copied in as the incumbent best. On start, the loaded model must
+# reproduce TASK-20's logged step-4,250 primary-val mel L1 within check_tolerance, or the run stops.
+init_from_checkpoint:
+  source_run: task20_N512_v1
+  latest: runs/task20/task20_N512_v1/checkpoints/latest.pt
+  best: runs/task20/task20_N512_v1/checkpoints/best.pt
+  check_tolerance: 0.001
+
+# Stopping: runtime budget only (cumulative wall time of all job segments, start-up included).
+# No patience, no step ceiling. Genuine failures (non-finite loss or gradient) still stop the run.
+early_stopping: null
+steps: null
+runtime_budget_hours: 48
+train_only: true                 # final evaluation is a separate job (evaluate_checkpoints)
+
+# Validation: primary val, correct-conditioning mel L1, same crops and metric; selects best.pt.
+# Every 250 steps through step 20,000, then every 1,000. Test/test2/val2 are not evaluated in training.
+eval_schedule: [{until: 20000, every: 250}, {every: 1000}]
+log_schedule: [{until: 20000, every: 50}, {every: 1000}]
+quick_eval_sets: [memorized, train_unseen, val]
+
+# Bounded storage: best.pt, latest.pt (each validation), final.pt, 3 rolling recovery checkpoints
+# (every 30 min), and sparse milestones. Each checkpoint is ~15 MB plus the validation history.
+checkpoint_policy:
+  latest_every_minutes: 5        # also always on graceful stop, budget, and new best
+  recovery_every_minutes: 30
+  keep_recovery: 3
+  milestones: [10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000]
+
+arms:
+  N512ext: {train_tracks: all, lr_schedule: {type: constant}}
+
+run_name_prefix: task21
+run_root: runs/task21
+artifact_root: artifacts/task21
+results_name: TASK-21_RESULTS.md
+wandb_group: task21-n512-extended
+wandb_tags: [task21, task20-continuation, n512, extended-training, bigvgan-v2, mel, heldout, muq]

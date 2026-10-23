@@ -3904,3 +3904,49 @@ best step 2,250; early-stopped at 4,250 (patience 8). Details:
   information), but this single-seed run cannot attribute it.
 - Caveat: an Adam/L1 spike at ~3.5k steps fell inside the patience window, and val was still
   recovering at the stop, so N512 may be conservative. Not a measurement of MuQ's ceiling.
+
+## task21-n512-extended-protocol: continue TASK-20's last checkpoint for 48 h of job runtime, no early stopping
+
+**Context (`tasks/TASK-21.md`).**
+- TASK-20 early-stopped at step 4,250 (best 2,250) after an Adam/L1 spike inside its patience
+  window.
+- TASK-21 asks whether that was a recoverable transient, and whether much longer training improves
+  the unchanged recipe. It is a duration experiment only.
+
+**Decision (`configs/task21.yaml`, inheriting `configs/task20.yaml`; a test asserts that only
+duration, stopping, logging, checkpointing, continuation and naming keys differ).**
+- **Restart point.** Continue from TASK-20 `latest.pt` (step 4,250). Restore model, Adam (moments
+  and step count = 4,250), sampler, the Python/NumPy/torch-CPU RNGs, history and best.
+- **Not saved and not needed:** XPU RNG, scheduler, scaler.
+- **Incumbent and startup check.** TASK-20 `best.pt` (step 2,250) is the incumbent. At startup the
+  loaded model must reproduce the parent's step-4,250 val mel L1 within 1e-3.
+- **Stopping.** No early stopping and no step ceiling. 48 h cumulative job runtime (start-up
+  included) across sequential segments. Stops otherwise only on non-finite loss or gradient.
+- **Validation.** Primary val every 250 steps to 20k, then every 1k. Selection on primary val
+  only. No test, test2 or val2 in training.
+- **Bounded checkpoints.** best; latest (5 min, plus graceful stop, budget, new best); final;
+  3 rolling recovery checkpoints (30 min); sparse milestones.
+- **Logging.**
+  - New W&B run with parent lineage.
+  - Window diagnostics (train-loss mean and max, grad-norm max, steps/s, runtime, track cycles,
+    pool passes, first-validation-after-resume flag).
+  - Events: continuation, resume, graceful stop, budget.
+  - JSONL mirror of every log.
+  - W&B failures fall back to offline or are skipped.
+- **Evaluation.** A separate job evaluates `best.pt` and `final.pt` on the TASK-20 sets.
+  `scripts/task21_analyze.py` compares TASK-21 best and final, TASK-20 best, A128 and A32 per set,
+  with paired track-clustered CIs (not seed variability), curves, spike/event coincidence, steps,
+  passes and runtime.
+
+**ACES.**
+- The PVC walltime limit is not documented online. The user must check it with `sinfo`/`scontrol`
+  before choosing segments.
+- `aces/submit_task21_chain.sh N WALLTIME` chains segments with afterany: never concurrent, and
+  a segment that starts after the budget is spent exits at once.
+- Graceful checkpoint 10 min before the walltime.
+
+**Budget.**
+- Verified billing=8 per job-hour (TASK-19/20 `sacct`, 32 and 64 GB).
+- 48 h × 8 = 384 billing-hours, plus ~10-15 for overhead, evaluation and smoke: ~395-400.
+- SU equivalence not verified.
+- Scale: ~16-19M optimizer steps, ~80-90k pool passes, ~4,000x TASK-20's training.
