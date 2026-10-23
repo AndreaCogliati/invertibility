@@ -1,6 +1,20 @@
 # NEXT
 
-## Latest: TASK-20 N=512 scaling run, prepared for ACES (2026-10-22)
+## Latest: TASK-20 N=512 run finished (2026-10-23)
+
+Job 2246233: COMPLETED in 22:33 at billing=8 (~3.0 billing-hours); commit dacda13, clean. Best step
+2,250; early-stopped at 4,250. Results are local in `artifacts/task20/task20_N512_v1/`.
+
+**Result.** Held-out mel L1 improves over A128 on every set separately: val +7.3%, test +5.1%,
+val2 +5.7%, test2 +4.4%, all with CIs > 0. Returns per 4x are diminishing. The train/held-out gap
+is nearly closed (memorized 0.44, held-out 0.47-0.49), on a floor ~4.3x the oracle round trip.
+Blinded listening: A128 = N512 (2.25 each), oracle 3.88. Caveat: an Adam spike at ~3.5k steps
+inside the patience window may have stopped training early. See
+[[DECISIONS.md#task20-n512-result]] and `artifacts/task20/analysis_v1/`.
+
+**Next:** user's call. Not committed.
+
+## Previous: TASK-20 N=512 scaling run, prepared for ACES (2026-10-22)
 
 Built and smoke-tested locally; not submitted. Spec and instructions: `aces/TASK20_ACES.md`;
 protocol: [[DECISIONS.md#task20-n512-protocol]]. N = 512 (all 128 TASK-19 training tracks

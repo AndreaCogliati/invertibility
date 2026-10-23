@@ -97,6 +97,11 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
 
 ## Benchmark / gate results that passed sanity checks
 
+- TASK-20 (2026-10-23, ACES 2246233): N=512, recipe A + early stopping (best 2,250, stop 4,250).
+  Held-out mel L1 val/test/val2/test2 = 0.475/0.465/0.481/0.494; vs A128 +4-7% on each set (CI > 0).
+  Memorized 0.44: the train/held-out gap is nearly closed. Not audible (blinded A128 = N512).
+  Data returns diminish per 4x. See [[task20-n512-result]].
+
 - TASK-19 (2026-10-22, ACES 2244922-5): held-out mel L1, primary/secondary:
   A32 0.550/0.572, A128 0.501/0.514, B32 0.554/0.576, B128 0.508/0.513.
   4x data gives a modest, consistent ~9-10% on both held-out sets (codes NEITHER/DATA_LIMITED

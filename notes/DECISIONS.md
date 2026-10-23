@@ -3878,3 +3878,29 @@ reported separately.
   - Descriptive, with no new outcome code.
   - Single seed: not a measurement of MuQ's information ceiling.
 - **Listening.** Blinded A128 vs N512 vs oracle on the 16 fixed crops, key in a separate folder.
+
+## task20-n512-result: data still helps held-out tracks (+4-7% vs A128, all four sets), diminishing; gap nearly closed; not audible
+
+**Run.** ACES 2246233, 22:33, ~3.0 billing-hours, commit dacda13 clean, W&B 524aw8gs. N=512;
+best step 2,250; early-stopped at 4,250 (patience 8). Details:
+`artifacts/task20/analysis_v1/TASK-20_RESULTS.md`.
+
+**Results.**
+- **Held-out mel L1** (best checkpoint), A128 -> N512, with paired track-clustered CIs > 0:
+  - val 0.513 -> 0.475 (+7.3%, 8/8 tracks);
+  - **test 0.490 -> 0.465 (+5.1%, 8/8)**;
+  - val2 0.510 -> 0.481 (+5.7%, 20/24);
+  - **test2 0.517 -> 0.494 (+4.4%, 19/24)**.
+- **Training-track crops got worse:** unseen crops -3.5/-4.3%, memorized -11/-13%. N512 sits at
+  memorized 0.44, unseen crops 0.46, held-out 0.47-0.49: the train/held-out gap is nearly closed,
+  on a common floor ~4.3x the oracle round trip.
+- **Listening (blinded):** A128 and N512 are indistinguishable (both 2.25, 12/16 ties), oracle
+  3.88. The "closest" question selected the oracle every time, a package design flaw.
+
+**Interpretation.**
+- Data scaling keeps helping held-out tracks, including both never-used test sets, with
+  diminishing returns per 4x (~9-10% -> ~5-6%).
+- The bottleneck is shifting from generalization toward fit (capacity, objective, or MuQ
+  information), but this single-seed run cannot attribute it.
+- Caveat: an Adam/L1 spike at ~3.5k steps fell inside the patience window, and val was still
+  recovering at the stop, so N512 may be conservative. Not a measurement of MuQ's ceiling.

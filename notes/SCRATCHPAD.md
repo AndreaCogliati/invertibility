@@ -1848,3 +1848,11 @@ controls ~0-1. Ex05/06: constant_zero rated 4/3 (identical audio everywhere), pr
 rows; reported, not fixed.
 2026-10-22: user corrected ex05/06 (7 cells). Corrected means: A32 2.75, A128 2.69, B32 2.75, B128 2.75, oracle 4.00; controls 0-1.12.
 2026-10-22: TASK-19 interpretation revised per user (codes kept as labels; UNDERFIT + overfitting coexist; next = larger-data run, early stopping, fixed held-out, test separate).
+
+2026-10-23 TASK-20 run copied back: job 2246233 COMPLETED, 22:33, billing=8 (mem=64G did not change billing),
+~3.0 billing-hours. Commit dacda13 clean; manifests unchanged. N=512; best step 2250; early stop at 4250
+(patience 8). W&B 524aw8gs. Blinded package built: artifacts/task20/listening_blind_v1 (key separate).
+
+2026-10-23 TASK-20 analysis + unblinding. N512 vs A128: val +7.3, test +5.1, val2 +5.7, test2 +4.4 (%).
+Training-track crops worse (-3.5..-13%). Listening ties (2.25 vs 2.25). The 'closest' question always
+picked the oracle (should have been A128 vs N512 only). Spike at ~3.5k steps inside the patience window.
