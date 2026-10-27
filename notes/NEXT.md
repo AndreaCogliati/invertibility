@@ -1,6 +1,32 @@
 # NEXT
 
-## Latest: TASK-21 extended N512 continuation, prepared for ACES (2026-10-23)
+## Latest: TASK-22 first-block representation, prepared for ACES (2026-10-27)
+
+The translator is trained from scratch on MuQ conformer block 1 output (`hidden_states[1]`,
+hook-verified) for 200k steps, then compared with TASK-21 (`last_hidden_state`) at matched steps and
+window best. Spec, config diff, resources (~14 billing-hours), runbook and report template:
+`aces/TASK22_ACES.md`. Protocol: [[DECISIONS.md#task22-first-block-protocol]]. Not submitted.
+
+**Next (user):**
+1. Commit and push.
+2. On a PVC node: `bash aces/task22_smoke.sh`.
+3. Only when instructed: `mkdir -p aces/logs && sbatch aces/run_task22_L1_v1.slurm && sbatch aces/run_task22_T21eval_v1.slurm`.
+4. Copy back `artifacts/task22/`, `runs/task22/task22_L1_v1/` and `aces/logs/`.
+5. Run `scripts/task22_analyze.py`, then `scripts/task22_listening_package.py --l1 artifacts/task22/task22_L1_v1`.
+
+## Previous: TASK-21 result (2026-10-26)
+
+ACES 2248110: 47 h, 22.2 M steps, ~378.5 billing-hours, clean.
+- TASK-20's stop was a recoverable transient: new best at step 60,000 (val 0.455 vs 0.475).
+- On non-selection held-out sets the gain is only ~2-3% (test +2.2%, val2 +1.8%, test2 +2.9%;
+  two CIs at or including 0).
+- After ~100k steps held-out error slowly rises while memorized keeps falling; the final
+  checkpoint is no better than TASK-20 best.
+- See [[DECISIONS.md#task21-n512-extended-result]] and `artifacts/task21/analysis_v1/`.
+
+**Next:** user's call. Not committed. Optional: copy back `runs/task21/task21_N512ext_v1/{run_manifest.json,metrics.jsonl}`.
+
+## Previous: TASK-21 extended N512 continuation, prepared for ACES (2026-10-23)
 
 One 48 h ACES job: 47.0 h of training continuing TASK-20's last checkpoint (no early stopping),
 then in-job evaluation. Spec, budget (~379 billing-hours at the verified billing=8) and runbook:

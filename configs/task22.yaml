@@ -1,0 +1,51 @@
+# TASK-22: first-conformer-block MuQ features -> BigVGAN mel, trained FROM SCRATCH for 200,000 steps.
+# A representation experiment only. Inherits configs/task21.yaml (and so TASK-20/19/A128): same 512
+# training tracks, finite 12,288-crop pool, track-balanced sampler (same seed), held-out splits,
+# evaluation crops, BigVGAN-v2 mel targets, frozen BigVGAN, MuQToMelTranslator (1,271,908 params,
+# same init seed), L1, Adam 1e-3 (betas 0.9/0.999), constant LR, batch 64, FP32, no gradient
+# clipping, no feature normalization (raw features into the input Linear, as in every earlier task),
+# frame-center alignment, validation/logging schedule, checkpoint policy.
+#   arm L1      train on hidden_states[1] = output of conformer block 1 (model.model.conformer.layers.0)
+#   arm T21eval evaluation only: TASK-21's last_hidden_state checkpoints at the matched steps
+# Every change from TASK-21 is listed by scripts/task22_config_diff.py (and in aces/TASK22_ACES.md).
+base_config: configs/task21.yaml
+task: TASK-22
+
+# From scratch: no continuation, a fixed step budget instead of the runtime budget, no patience.
+# TASK-21's baseline trajectory is itself from scratch (TASK-20 steps 0-4,250 + its exact continuation),
+# with the same seed, sampler, and validation schedule, so the two are compared at matched steps.
+init_from_checkpoint: null
+early_stopping: null
+steps: 200000
+runtime_budget_hours: null
+train_only: false
+# eval_schedule [{until: 20000, every: 250}, {every: 1000}], log_schedule, and
+# quick_eval_sets [memorized, train_unseen, val] are TASK-21's (inherited). Test/test2/val2 never in training.
+checkpoint_policy:
+  latest_every_minutes: 5
+  recovery_every_minutes: 30
+  keep_recovery: 3
+  milestones: [10000, 20000, 50000, 60000, 100000, 200000]   # 60k = TASK-21's window-best step; 200k = end
+
+muq_layer: null                  # default = last_hidden_state (every earlier task)
+arms:
+  L1:
+    train_tracks: all
+    lr_schedule: {type: constant}
+    muq_layer: {block: 1}        # hidden_states[1], hook-verified on every extraction batch
+    feature_cache_dir: data/cache/task22      # separate, layer-keyed; never the last_hidden_state cache
+    extra_checkpoints: [10000, 20000, 50000, 60000, 100000]   # + best and final (= 200,000)
+  T21eval:                       # baseline, evaluation only, same features/cache as TASK-20/21
+    train_tracks: all
+    lr_schedule: {type: constant}
+    muq_layer: null
+    feature_cache_dir: data/cache/task18
+    evaluate_checkpoints: runs/task21/task21_N512ext_v1/checkpoints
+    extra_checkpoints: [10000, 20000, 50000, 100000, 200000]  # 60,000 = TASK-21 best.pt (verified window best)
+
+run_name_prefix: task22
+run_root: runs/task22
+artifact_root: artifacts/task22
+results_name: TASK-22_RESULTS.md
+wandb_group: task22-first-layer
+wandb_tags: [task22, muq-first-block, conformer-block-1, n512, from-scratch, bigvgan-v2, mel, heldout, muq]

@@ -18,6 +18,14 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   well inside the 0.5 Hz tolerance), `mean_samples_per_frame = 960.0013`. Frame counts matched
   `round(num_samples / mean_samples_per_frame)` within 1 frame for every probe -- i.e. MuQ's
   frame rate is stable across duration and content, not just on synthetic noise.
+- MuQ `hidden_states` indexing (muq 0.1.0, transformers 4.55.0; hook-verified on real crops,
+  2026-10-27, `scripts/task22_verify_layer.py`):
+  - 13 entries;
+  - [0] = input of conformer block 1 (frontend output);
+  - [k] = output of block k, for k = 1..11;
+  - [12] = encoder LayerNorm(block 12 output) = `last_hidden_state`.
+  - All are (B, 50, 1024) per 47,872-sample crop, with the same token centers.
+  - Block-1 output is ~2x the scale of `last_hidden_state`. See [[task22-first-block-protocol]].
 
 ## Working dependency versions (Apple Silicon, macOS 26.6.2, M4 Max, 2026-09-04)
 
@@ -96,6 +104,11 @@ For the current MRF design (`upsample_rates=(8,6,5,4)`, `resblock_kernel_sizes=(
   steps of batch 64 in ~20 s.
 
 ## Benchmark / gate results that passed sanity checks
+
+- TASK-21 (2026-10-26, ACES 2248110): N512 continued 47 h / 22.2 M steps, constant LR, no early stop.
+  Best at step 60k: val 0.455 / test 0.454 / val2 0.473 / test2 0.480 (vs TASK-20 best +2-3% on
+  non-selection sets). Held-out slowly worsens after ~100k steps; ~134 steps/s on PVC late in the
+  run. See [[task21-n512-extended-result]].
 
 - TASK-20 (2026-10-23, ACES 2246233): N=512, recipe A + early stopping (best 2,250, stop 4,250).
   Held-out mel L1 val/test/val2/test2 = 0.475/0.465/0.481/0.494; vs A128 +4-7% on each set (CI > 0).

@@ -1856,3 +1856,19 @@ rows; reported, not fixed.
 2026-10-23 TASK-20 analysis + unblinding. N512 vs A128: val +7.3, test +5.1, val2 +5.7, test2 +4.4 (%).
 Training-track crops worse (-3.5..-13%). Listening ties (2.25 vs 2.25). The 'closest' question always
 picked the oracle (should have been A128 vs N512 only). Spike at ~3.5k steps inside the patience window.
+
+2026-10-26 TASK-21 analyzed. First val below TASK-20 best at step 9,250; best at 60k. Val phase means:
+4k-20k 0.481, 20k-100k 0.466, 100k-1M 0.471, 1M-10M 0.476, 10M+ 0.479. Late-run val check-to-check
+SD 0.0038. Spike at 22.077M coincides with train L1 max 2.4 and grad-norm max 10.3.
+
+2026-10-27 TASK-22 prep.
+- Read the muq/transformers source: the hidden_states tuple is appended before each block, plus the
+  encoder LayerNorm at the end.
+- `scripts/task22_verify_layer.py` on MPS: index 0 = input of block 1 only; index k = output of
+  block k (= input of block k+1); index 12 = LN(block 12) = last_hidden_state.
+- Block 1 vs last: std 1.72 vs 0.85; frame norm 55 vs 27; cosine 0.11.
+- TASK-21 history <= 200k: 260 checks, window best = step 60,000 (0.45540) = best.pt. Milestones at
+  10k, 20k, 50k, 100k and 200k are present locally.
+- Timing basis:
+  - TASK-20 MuQ extraction: 12,800 crops in 92 s;
+  - TASK-21: ~132 steps/s, 0.42 h to 200k.

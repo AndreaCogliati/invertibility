@@ -66,6 +66,16 @@ class FrozenMuQEncoder:
         return output.hidden_states
 
     @torch.inference_mode()
+    def encode_block_output(self, waveform_24khz: torch.Tensor, block: int) -> tuple[torch.Tensor, dict]:
+        """waveform_24khz: (batch, num_samples) at 24 kHz -> (batch, T, C) output of conformer block
+        `block` (1-based; TASK-22), plus the hook-based index check of `task22.hidden_state_with_check`
+        (raises if hidden_states[block] is not exactly that block's output)."""
+        from muq_inversion.task22 import hidden_state_with_check
+
+        return hidden_state_with_check(lambda x: self.model(x, output_hidden_states=True).hidden_states,
+                                       self.model.model.conformer.layers, waveform_24khz.to(self.device), block)
+
+    @torch.inference_mode()
     def probe(self, waveform_24khz: torch.Tensor, sample_rate: int) -> MuQProbeResult:
         """Run one forward pass and measure the feature geometry (CLAUDE.md MuQ Feature Contract)."""
         assert waveform_24khz.ndim == 2, "expected (batch, num_samples)"

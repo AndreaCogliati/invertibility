@@ -3959,3 +3959,104 @@ duration, stopping, logging, checkpointing, continuation and naming keys differ)
 - The chain script and segment file were dropped. `run_task21_eval.slurm` remains as a fallback.
 - Budget: ~379 billing-hours (at most 384).
 - The in-job evaluation path was verified locally: budget reached, then evaluation, report, exit 0.
+
+## task21-n512-extended-result: transient recovered; small gain (~2-3% on non-selection held-out sets) reached by ~60k steps; 22M more steps did not help held-out
+
+**Run.** ACES 2248110, commit 8a59c27 clean, one job, 47:19:03, ~378.5 billing-hours, W&B fxh15zi1.
+- Continued TASK-20 latest (step 4,250); the startup check reproduced 0.505893 exactly.
+- Budget reached at step 22,237,502: ~2.78 M draws per track, ~116k pool passes.
+
+**Results** (mel L1; TASK-20 best -> TASK-21 best at step 60,000):
+- **val** 0.475 -> 0.455 (+4.2%; inflated by selection over 22,297 checks: the 20k-100k mean is
+  0.466).
+- **test** 0.465 -> 0.454 (+2.2%, CI touches 0).
+- **val2** 0.481 -> 0.473 (+1.8%, CI includes 0).
+- **test2** 0.494 -> 0.480 (+2.9%, CI > 0).
+- Vs A128: +7% on test/val2/test2.
+- **Final checkpoint** is equal to or slightly worse than TASK-20 best on held-out tracks.
+- **Trajectory.** Held-out val is lowest at 20k-100k steps, then rises slowly. Memorized keeps
+  falling (0.367 final). Unseen crops of training tracks drift up. The gap re-opens.
+- **Spikes.** Step 3,500 recovered by step 9,250. At step 22.08 M, val 0.478 -> 0.515 coincided
+  with a train-loss (max 2.4) and grad-norm (max 10.3) excursion, with no other event; it recovered.
+
+**Conclusion.**
+- TASK-20 stopped during a recoverable transient.
+- Extended training with the unchanged recipe gives only a small improvement in the selected
+  result, reached by ~60k steps. Further training slowly overfits.
+- Not a statement about MuQ's information ceiling or translator capacity. Single seed.
+- Details: `artifacts/task21/analysis_v1/`.
+
+## task22-first-block-protocol: train the unchanged translator from scratch on MuQ conformer block 1 output, 200k steps, compare with TASK-21 at matched steps
+
+**Context (`tasks/TASK-22.md`).** Does the output of MuQ's first encoder block support better
+reconstruction than `last_hidden_state` with the current translator and recipe? A representation
+experiment only.
+
+**Layer identity (read from the installed code, then hook-verified on real crops;
+`scripts/task22_verify_layer.py`, PASS on MPS 2026-10-27).**
+- muq 0.1.0 uses transformers 4.55.0 `Wav2Vec2ConformerEncoder`. It appends `hidden_states`
+  *before* each block, then applies an encoder `LayerNorm` and appends that.
+- So `hidden_states[0]` = the input of block 1 (frontend output, not a block output).
+- `hidden_states[k]` = the output of block k, for k = 1..11.
+- `hidden_states[12]` = LayerNorm(output of block 12) = `last_hidden_state`.
+- First block = `hidden_states[1]` = the output of `model.model.conformer.layers[0]`.
+- `FrozenMuQEncoder.encode_block_output` re-checks this with hooks on every extraction batch and
+  stops otherwise.
+
+**Geometry and alignment.**
+- (50, 1024) per crop at 25.07 frames/s, identical to `last_hidden_state`. The translator is
+  unchanged (1,271,908 parameters).
+- Conformer blocks preserve the sequence, so the token centers and frame-center positions are
+  TASK-21's.
+- No padding or mask; all tokens are valid. Two passes are bit-exact; values are finite.
+
+**Normalization.** None, as before. Block-1 features have ~2x the scale of `last_hidden_state`
+(std 1.72 vs 0.85) and mean per-frame cosine 0.11 to it. The scale difference is part of the
+comparison under the unchanged recipe.
+
+**Decision (`configs/task22.yaml` inherits `configs/task21.yaml`).**
+- **Arm L1:** `muq_layer: {block: 1}`; a separate layer-keyed cache in `data/cache/task22` (stem
+  `task18_v1_L1_`, digest includes the layer, key parts must match).
+- **From scratch:** `init_from_checkpoint: null`, `steps: 200000`, no runtime budget, no patience.
+- **Retention:** milestones at 10k, 20k, 50k, 60k, 100k and 200k; `extra_checkpoints` gives them
+  mel-level evaluation after best and final.
+- **Everything else is TASK-21's:** manifests, pool, sampler, seed, init, eval crops,
+  schedule, loss, Adam, LR, batch, FP32, no clipping. A test asserts the changed-key set; the full
+  diff is printed by `scripts/task22_config_diff.py`.
+- **Arm T21eval** (evaluation only) evaluates TASK-21's milestones (10k, 20k, 50k, 100k, 200k) and
+  re-evaluates `best.pt`/`final.pt` on the existing `last_hidden_state` cache.
+- **Missing milestones** are reported unavailable, never substituted.
+
+**Baseline validity.**
+- TASK-21's trajectory is from scratch: TASK-20 steps 0-4,250, then an exact continuation
+  (startup check reproduced 0.505893). Same seed, sampler and 250/1,000 validation schedule.
+- Its best within 200k steps, from its own history (260 checks): step 60,000 (0.45540) = its
+  `best.pt`.
+
+**Evaluation (`scripts/task22_analyze.py`).**
+- Matched steps and window best vs window best.
+- Each held-out set separately, plus unseen crops of training tracks and memorized crops.
+- Paired by crop with track-clustered CIs, per-track differences, controls and curves.
+- Baseline re-evaluation reproducibility, and a comparability check of hashes, crops, parameters
+  and seed.
+- **Listening:** `scripts/task22_listening_package.py`, blinded: oracle, L1 window best, L12 window
+  best, on the 16 primary val/test crops. Pending until rated.
+
+**Interpretation limits.** Single seed; reused evaluation sets. An L1 advantage shows greater
+recoverability with this translator and recipe, not that deeper layers discarded information. A
+null result does not establish equal information content.
+
+**Resources.** About 1 h (L1) + 35 min (T21eval) at billing 8, so ~14 billing-hours (`aces/TASK22_ACES.md`).
+
+**Rollback.** Config-gated: `muq_layer` absent/null and no `extra_checkpoints` reproduce TASK-18..21
+behavior, and cache names for `last_hidden_state` are unchanged.
+
+**Local smoke** (`DEVICE=cpu LOCAL=1 OMP_NUM_THREADS=1 bash aces/task22_smoke.sh`, 2026-10-27, 45 min): PASS.
+- Layer verification passed.
+- Resume equivalence: stop at 90 + resume to 150 vs uninterrupted, bit-exact (max |Δw| 0), same
+  best step, identical sampler exposure.
+- Cache separation: same crops, mels and waves, different features; the L1 cache is in
+  `data/cache/task22_smoke` with the layer in its key parts. Per-batch index check on all 5 batches.
+- Milestone evaluation worked, and a missing milestone was reported unavailable.
+- The baseline evaluation-only job reproduced the stand-in run's own evaluation (max |Δ| 0).
+- Analysis and the blinded listening package were built. Smoke numbers are not results.

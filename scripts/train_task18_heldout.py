@@ -24,6 +24,11 @@ TASK-19 reuses this script; TASK-18 configs behave exactly as before. TASK-19 co
 learning-rate schedule (`lr_schedule`), extra evaluation sets (`eval_sets`), and an
 evaluation-only mode for existing checkpoints (`evaluate_checkpoints`). Every default reproduces
 TASK-18.
+
+TASK-22 adds `muq_layer: {block: k}` (features = output of MuQ conformer block k, hidden_states[k],
+hook-checked on every extraction batch, in a separate layer-tagged cache; null = last_hidden_state)
+and `extra_checkpoints` (milestone steps evaluated at the mel level after best/final; a missing
+milestone is reported as unavailable).
 """
 
 from __future__ import annotations
@@ -91,6 +96,7 @@ from muq_inversion.task18_report import render_results
 from muq_inversion.task19 import lr_multiplier
 from muq_inversion.task20 import early_stopping_update
 from muq_inversion.task21 import RuntimeBudget, due, recovery_to_delete
+from muq_inversion.task22 import feature_cache_stem, resolve_muq_layer
 
 PROCESS_START = time.time()  # TASK-21 runtime budget counts the whole job segment, start-up included
 from muq_inversion.time_alignment import (
@@ -174,18 +180,27 @@ def slurm_resources() -> dict:
 
 # --- phase 1: features -------------------------------------------------------------------
 
-def build_features(rows: list[dict], cfg: dict, h, muq: FrozenMuQEncoder | None, device: torch.device,
-                   cache_key_parts: dict) -> tuple[list[tuple[str, int]], dict[str, torch.Tensor], Path]:
-    """Unique (path, start) crops -> MuQ last_hidden_state (CPU float32), official target mel,
-    and the peak-normalized waveform, cached atomically under a content-addressed name."""
-    keys = sorted({(r["path"], int(r["crop_start_sample"])) for r in rows})
+def feature_cache_path(cfg: dict, cache_key_parts: dict, keys: list, layer: dict | None = None) -> Path:
+    """Content-addressed cache file. For last_hidden_state (layer None) the name is unchanged from
+    TASK-18..21; a TASK-22 layer adds its tag to the name, and its identity is in `cache_key_parts`."""
     digest = hashlib.sha256(json.dumps({**cache_key_parts, "keys": keys}, sort_keys=True).encode()).hexdigest()[:20]
-    cache = REPO_ROOT / cfg["feature_cache_dir"] / f"task18_v{FEATURE_CACHE_VERSION}_{digest}.pt"
+    return REPO_ROOT / cfg["feature_cache_dir"] / f"{feature_cache_stem(layer)}_{digest}.pt"
+
+
+def build_features(rows: list[dict], cfg: dict, h, muq: FrozenMuQEncoder | None, device: torch.device,
+                   cache_key_parts: dict, layer: dict | None = None
+                   ) -> tuple[list[tuple[str, int]], dict[str, torch.Tensor], Path, dict | None]:
+    """Unique (path, start) crops -> MuQ last_hidden_state (CPU float32), official target mel,
+    and the peak-normalized waveform, cached atomically under a content-addressed name.
+    TASK-22 (`layer` set): the output of that conformer block instead, index-checked by hooks on
+    every batch; the cache must carry the same layer identity, or it is not used."""
+    keys = sorted({(r["path"], int(r["crop_start_sample"])) for r in rows})
+    cache = feature_cache_path(cfg, cache_key_parts, keys, layer)
     if cache.exists():
         data = torch.load(cache, map_location="cpu", weights_only=False)
-        if data["keys"] == keys:
+        if data["keys"] == keys and (layer is None or data.get("key_parts") == cache_key_parts):
             print(f"feature cache hit: {cache.relative_to(REPO_ROOT)}")
-            return keys, data["tensors"], cache
+            return keys, data["tensors"], cache, data.get("layer_check")
     if muq is None:
         raise SystemExit("feature cache missing and MuQ not loaded")
     n = cfg["num_mel_hops"] * cfg["hop_size"]
@@ -206,19 +221,28 @@ def build_features(rows: list[dict], cfg: dict, h, muq: FrozenMuQEncoder | None,
     if mels.shape[-1] != cfg["num_mel_hops"]:
         raise SystemExit(f"STOP: target mel has {mels.shape[-1]} frames")
     feats = []
+    layer_check = None
     t0 = time.perf_counter()
     with backend_stage("MuQ feature extraction", device):
         for i in range(0, len(keys), 16):
-            feats.append(muq.encode(waves[i:i + 16].to(device)).float().cpu().clone())
+            if layer is None:
+                feats.append(muq.encode(waves[i:i + 16].to(device)).float().cpu().clone())
+            else:
+                f, chk = muq.encode_block_output(waves[i:i + 16].to(device), layer["block"])
+                feats.append(f.float().cpu().clone())
+                layer_check = {**chk, "batches_checked": (layer_check or {}).get("batches_checked", 0) + 1, **layer}
     feats = torch.cat(feats)
-    print(f"MuQ features for {len(keys)} crops in {time.perf_counter() - t0:.1f}s: {tuple(feats.shape)}")
+    print(f"MuQ features for {len(keys)} crops in {time.perf_counter() - t0:.1f}s: {tuple(feats.shape)}"
+          + (f" | {layer['name']} = hidden_states[{layer['hidden_state_index']}], hook-checked on "
+             f"{layer_check['batches_checked']} batches" if layer else ""))
     if not (torch.isfinite(feats).all() and torch.isfinite(mels).all()):
         raise SystemExit("STOP CONDITION: non-finite MuQ features or target mel")
     tensors = {"muq": feats, "mel": mels, "wave": waves}
-    atomic_torch_save(cache, {"keys": keys, "tensors": tensors, "key_parts": cache_key_parts})
+    atomic_torch_save(cache, {"keys": keys, "tensors": tensors, "key_parts": cache_key_parts}
+                      | ({"layer_check": layer_check} if layer else {}))
     check = torch.load(cache, map_location="cpu", weights_only=False)
     assert check["keys"] == keys and torch.equal(check["tensors"]["muq"], feats), "cache round-trip failed"
-    return keys, tensors, cache
+    return keys, tensors, cache, layer_check
 
 
 # --- main --------------------------------------------------------------------------------
@@ -311,7 +335,13 @@ def main() -> int:
         muq = FrozenMuQEncoder(cfg["muq_model_id"], device)
     cache_parts = {"version": FEATURE_CACHE_VERSION, "muq": cfg["muq_model_id"], "bigvgan": cfg["bigvgan_revision"],
                    "num_hops": cfg["num_mel_hops"], "backend": device.type, "torch": torch.__version__}
-    keys, tensors, cache_path = build_features(rows, cfg, h, muq, device, cache_parts)
+    # TASK-22: another MuQ representation (absent/null = last_hidden_state, every earlier task).
+    layer = resolve_muq_layer(cfg.get("muq_layer"), len(muq.model.model.conformer.layers))
+    if layer is not None:
+        if Path(cfg["feature_cache_dir"]) == Path("data/cache/task18"):
+            raise SystemExit("STOP: a non-default MuQ layer needs its own feature_cache_dir, not the last_hidden_state cache")
+        cache_parts |= {"muq_layer": layer["name"], "hidden_state_index": layer["hidden_state_index"]}
+    keys, tensors, cache_path, layer_check = build_features(rows, cfg, h, muq, device, cache_parts, layer)
     t_muq, t_mel = tensors["muq"].shape[1], cfg["num_mel_hops"]
     positions = source_positions(bigvgan_mel_frame_centers(h, t_mel), muq_token_centers(muq.model.model, t_muq)).to(device)
     del muq
@@ -347,6 +377,10 @@ def main() -> int:
                 "translator_parameters": sum(p.numel() for p in model.parameters()),
                 "receptive_field_mel_frames": model.receptive_field_mel_frames, "device_metadata": device_info,
                 "seeding": seeding, "slurm": slurm_resources()}
+    if layer is not None:  # TASK-22: layer identity + the extraction-time index check, in the manifest and W&B config
+        resolved |= {"muq_feature": {**layer, "feature_shape_per_crop": list(tensors["muq"].shape[1:]),
+                                     "frames_per_second": t_muq / (cfg["num_mel_hops"] * cfg["hop_size"] / h.sampling_rate),
+                                     "index_check": layer_check}}
 
     state = {"step": 0, "best": {"val_mel_l1": float("inf"), "step": 0}, "history": [], "wandb_run_id": None, "lineage": []}
     early_stopping = cfg.get("early_stopping")  # TASK-20: {patience, min_delta}; absent -> fixed step budget
@@ -688,6 +722,22 @@ def main() -> int:
     final_agg, final_examples, _ = evaluate(load_portable(ckpt_dir / "final.pt")["model_state_dict"], "final", with_audio=False)
     outcome = classify_outcome(best_agg, cfg["outcome_rule"])
     final_outcome = classify_outcome(final_agg, cfg["outcome_rule"])
+    # TASK-22: matched-step comparisons -- mel-level evaluation of milestone checkpoints. A missing
+    # milestone is recorded as unavailable, never replaced by another step.
+    extra, extra_examples = {}, []
+    for s_extra in cfg.get("extra_checkpoints") or []:
+        p, label = ckpt_dir / f"milestone_{s_extra:09d}.pt", f"step_{s_extra}"
+        if not p.exists():
+            extra[label] = {"step": s_extra, "available": False, "path": str(p.relative_to(REPO_ROOT))}
+            print(f"[{label}] milestone checkpoint {p.relative_to(REPO_ROOT)} not found: reported as unavailable")
+            continue
+        ck_extra = load_portable(p)
+        if ck_extra["train_state"]["step"] != s_extra:
+            raise SystemExit(f"STOP: {p} holds step {ck_extra['train_state']['step']}, not {s_extra}")
+        agg_extra, ex_extra, _ = evaluate(ck_extra["model_state_dict"], label, with_audio=False)
+        extra[label] = {"step": s_extra, "available": True, "path": str(p.relative_to(REPO_ROOT)), "sha256": file_sha256(p),
+                        "aggregates": agg_extra}
+        extra_examples += ex_extra
 
     # --- listening package (best checkpoint; crops fixed in the manifest) ---
     listen_dir = out_dir / "listening"
@@ -719,7 +769,7 @@ def main() -> int:
                               "oracle_round_trip_mel_l1": ex["oracle_round_trip_mel_l1"]})
 
     # --- report ---
-    examples = best_examples + final_examples
+    examples = best_examples + final_examples + extra_examples
     with open(out_dir / "per_example.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=sorted({k for e in examples for k in e}))
         w.writeheader()
@@ -736,6 +786,8 @@ def main() -> int:
         "paths": {"run_dir": str(run_dir.relative_to(REPO_ROOT)), "artifacts": str(out_dir.relative_to(REPO_ROOT)),
                   "per_example_csv": "per_example.csv", "listening": "listening/"},
     }
+    if cfg.get("extra_checkpoints"):
+        report["extra_checkpoints"] = extra
     atomic_write_text(out_dir / "report.json", json.dumps(report, indent=2, default=_json_default))
     atomic_write_text(out_dir / cfg.get("results_name", "TASK-18_RESULTS.md"), render_results(report))
     run.summary.update({"outcome": outcome["code"], "best_step": best_ck["step"], "final_step": state["step"],

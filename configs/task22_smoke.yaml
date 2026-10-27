@@ -1,0 +1,27 @@
+# TASK-22 bounded smoke test: the first-block code path (layer-keyed cache, hook-checked extraction,
+# from-scratch training, resume, milestone evaluation) and the baseline evaluation-only path, on the
+# TASK-20 smoke subset. Not a result. Separate caches, runs and artifacts.
+#   arm L1   first conformer block;  arm L12  last_hidden_state (stands in for TASK-21);
+#   arm T21eval  evaluation only, of an L12 smoke run (pass --evaluate-checkpoints)
+base_config: configs/task22.yaml
+smoke_limits:
+  train_tracks: 4
+  heldout_tracks_per_split: 2
+  pool_crops_per_track: 4
+batch_size: 8
+steps: 200
+eval_schedule: [{until: 100, every: 10}, {every: 20}]
+log_schedule: [{until: 100, every: 5}, {every: 20}]
+checkpoint_policy: {latest_every_minutes: 0, recovery_every_minutes: 0.1, keep_recovery: 2, milestones: [60, 100, 200]}
+bootstrap_samples: 200
+arms:
+  L1: {train_tracks: all, lr_schedule: {type: constant}, muq_layer: {block: 1}, feature_cache_dir: data/cache/task22_smoke,
+       extra_checkpoints: [60, 100]}
+  L12: {train_tracks: all, lr_schedule: {type: constant}, muq_layer: null, feature_cache_dir: data/cache/task18,
+        extra_checkpoints: [60, 100]}
+  T21eval: {train_tracks: all, lr_schedule: {type: constant}, muq_layer: null, feature_cache_dir: data/cache/task18,
+            evaluate_checkpoints: set-by-cli, extra_checkpoints: [60, 100, 150]}   # 150 does not exist: tests "unavailable"
+run_name_prefix: task22_smoke
+run_root: runs/task22_smoke
+artifact_root: artifacts/task22_smoke
+wandb_group: task22-smoke
