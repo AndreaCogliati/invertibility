@@ -1,6 +1,12 @@
 # NEXT
 
-## Latest: TASK-24 fitting ladder, prepared for ACES (2026-11-05)
+## Latest: TASK-24 result (2026-11-05)
+
+ACES 2296889 finished cleanly; files downloaded and verified. Training error rises monotonically with N (0.0002 -> 0.243 at N=256, about TASK-22's own training-crop level); errors are broad-based; N=256 is limited mainly by training fit, small N by transfer. See [[DECISIONS.md#task24-fitting-ladder-result]] and `artifacts/task24/task24_v1/ANALYSIS.md`.
+
+**Next (user):** listen (WAVs in `artifacts/task24/task24_v1/N*/` and `audio/`); choose follow-up ablations (capacity/architecture vs optimization). Uncommitted: notes and the CLAUDE.md W&B rule.
+
+## Previous: TASK-24 fitting ladder, prepared for ACES (2026-11-05)
 
 Spec, runbook, resources: `aces/TASK24_ACES.md`; protocol [[DECISIONS.md#task24-fitting-ladder-protocol]].
 Last successful command: `DEVICE=mps LOCAL=1 bash aces/task24_smoke.sh` (PASS). Not submitted, not committed.

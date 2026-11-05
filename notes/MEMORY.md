@@ -39,6 +39,7 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   `torch.use_deterministic_algorithms(True)`) and on multithreaded CPU (bit-exact with deterministic
   algorithms or 1 thread). At batch 1, two identical runs diverge visibly within about 50 updates. See
   [[task23-one-crop-overfit-protocol]].
+- TASK-24 result (2026-11-05, ACES 2296889): fitting ladder, 200k batch-1 updates. Final whole-fitting-set mel L1 for N = 1/4/16/64/256 is 0.0002/0.041/0.095/0.174/0.243; monitoring 1.34/1.13/0.66/0.44/0.31. Errors are broad-based. At N=256 the decoder fits its training crops only to TASK-22's level. See [[task24-fitting-ladder-result]].
 - Cross-platform/backend tolerances (2026-11-05, TASK-24):
   - soxr resampling (`audio.resample`) differs between ACES (x86) and the Mac (arm64) by up to 8.9e-8 per sample;
   - first-block MuQ features, MPS vs CPU: relative RMS 7e-4..8.5e-3 but max |diff| up to 0.23, so compare features by relative RMS (a wrong layer gives about 1.07).

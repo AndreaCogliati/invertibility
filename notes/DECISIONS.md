@@ -4191,3 +4191,27 @@ The full run was deliberately not done locally: the user asked for ACES executio
 **Verification (local).** 11 tests; `DEVICE=mps LOCAL=1 bash aces/task24_smoke.sh` PASS (bit-exact CPU resume, MPS ladder, lock).
 
 **Rollback.** Additive only (`task24.py`, `task24_ladder.py`, configs, tests, manifests, `aces/*task24*`).
+
+## task24-fitting-ladder-result: training error rises with N; N=256 fits only to TASK-22's level (2026-11-05)
+
+**Run.** ACES 2296889 (ac083, commit 766defc6, clean tree), 50 min, exit 0, 365-376 updates/s.
+- All arms: 200k updates from TASK-23 B's init, no non-finite values, exact presentation counts.
+- Anchor equal to TASK-23's pair bit for bit; cross-check relative RMS <= 0.0024.
+
+**Observations** (final whole-fitting-set mel L1; per crop: median / p90 / max).
+
+| N | fit L1 | per crop | anchor | monitoring |
+| --- | --- | --- | --- | --- |
+| 1 | 0.0002 | - | 0.0002 | 1.342 |
+| 4 | 0.041 | 0.042 / 0.044 / 0.044 | 0.038 | 1.128 |
+| 16 | 0.095 | 0.095 / 0.108 / 0.109 | 0.083 | 0.656 |
+| 64 | 0.174 | 0.174 / 0.189 / 0.205 | 0.157 | 0.437 |
+| 256 | 0.243 | 0.240 / 0.270 / 0.321 | 0.221 | 0.309 |
+
+- Errors are broad-based (p90/median 1.04-1.12).
+- LR phases (median of the last 10k updates): the first drop helps every arm (ratios 0.10-0.62); the second helps N <= 4 and gives only 3-13% for N >= 16, so the curves are near-flat.
+- At LR 1e-3 every N > 1 arm spikes (up to 95.6 whole-set L1) and recovers; no spikes after the first drop. The generated report's LR-effect line uses the single values at 50k/150k, which for N=16/256 sit on a spike, so `ANALYSIS.md` has the robust version.
+- Matched-exposure points are uninformative here (mostly in the unstable phase).
+- Transfer: monitoring improves with N; for N <= 16 it worsens during training (overfitting). At N=256 the fit/monitor gap is small (0.243 vs 0.309), so training fit dominates.
+
+**Interpretation (cautious).** The decoder cannot fit 256 fixed training pairs below about 0.24, which is TASK-22's own training-crop level (0.255; this anchor 0.238). That is consistent with TASK-22's error being mostly a fitting limitation, though the recipes differ. Increasing training error with N motivates capacity/architecture and optimization ablations; this run does not say which is responsible, does not rule out representation ambiguity, and does not show information loss. One sequence, one init. Listening pending. Full analysis: `artifacts/task24/task24_v1/ANALYSIS.md`.
