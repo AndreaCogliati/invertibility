@@ -47,6 +47,13 @@ Do not broaden the project to layer-wise inversion, multi-model comparisons, Big
 8. Never overwrite checkpoints, run manifests, metrics, or generated samples from a previous run.
 9. All long-running stages must be resumable and idempotent.
 10. Do not silently fall back from MPS to CPU. Log the selected device and fail clearly unless a configuration explicitly permits fallback.
+11. Log every experiment to Weights & Biases, whether or not the task brief mentions it. This covers training runs, evaluation-only jobs, diagnostics, and smoke tests.
+    - **Helper:** use `muq_inversion.wandb_logging.init_run`, which logs to the project's W&B project and records the environment manifest in the run config.
+    - **Grouping:** one W&B group per task (e.g. `task24-fitting-ladder`); one W&B run per arm or independent run; tags for the task and the representation.
+    - **What to log:** the resolved config and the training, evaluation and monitoring metrics at their native cadence. Store the W&B run id in the checkpoint, so a resumed run continues the same W&B run.
+    - **Failures:** if online initialization fails, continue offline rather than stopping training. Log failures must never stop training.
+    - **Local copy:** always keep a local JSONL mirror of everything logged. The local files stay the source of truth for reports.
+    - **Smoke tests:** run with `--wandb-mode disabled` (or offline) so smoke runs do not clutter the project.
 
 ## Native `uv` Workflow
 
