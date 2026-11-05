@@ -1,6 +1,11 @@
 # NEXT
 
-## Latest: TASK-24 result (2026-11-05)
+## Latest: TASK-25 running locally (2026-11-05)
+
+Full run `task25_v1` on MPS: three processes (`train --arms A`, `--arms B`, `--arms C,D,E,F`), logs in `runs/task25/task25_v1/logs/`. Protocol [[DECISIONS.md#task25-arch-vs-opt-protocol]]; runbook `aces/TASK25_ACES.md`.
+If interrupted, rerun the same train commands (they resume). Then run `uv run python scripts/task25_ablation.py report --config configs/task25.yaml --device mps --run-name task25_v1`.
+
+## Previous: TASK-24 result (2026-11-05)
 
 ACES 2296889 finished cleanly; files downloaded and verified. Training error rises monotonically with N (0.0002 -> 0.243 at N=256, about TASK-22's own training-crop level); errors are broad-based; N=256 is limited mainly by training fit, small N by transfer. See [[DECISIONS.md#task24-fitting-ladder-result]] and `artifacts/task24/task24_v1/ANALYSIS.md`.
 

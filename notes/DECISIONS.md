@@ -4215,3 +4215,21 @@ The full run was deliberately not done locally: the user asked for ACES executio
 - Transfer: monitoring improves with N; for N <= 16 it worsens during training (overfitting). At N=256 the fit/monitor gap is small (0.243 vs 0.309), so training fit dominates.
 
 **Interpretation (cautious).** The decoder cannot fit 256 fixed training pairs below about 0.24, which is TASK-22's own training-crop level (0.255; this anchor 0.238). That is consistent with TASK-22's error being mostly a fitting limitation, though the recipes differ. Increasing training error with N motivates capacity/architecture and optimization ablations; this run does not say which is responsible, does not rule out representation ambiguity, and does not show information loss. One sequence, one init. Listening pending. Full analysis: `artifacts/task24/task24_v1/ANALYSIS.md`.
+
+## task25-arch-vs-opt-protocol: LR x batch factorial (A-D) plus width (E) and learned resampling (F) on TASK-24's N=256 pool (2026-11-05)
+
+**Context.** TASK-25 (`tasks/TASK-25.md`): TASK-24 showed training error rising with N. Does fitting 256 fixed pairs improve with a lower LR, a larger batch, more width, or learned temporal upsampling?
+
+**Decisions.**
+- **Data and init reused:** TASK-24's cached pairs and init (hashes, manifest, anchor bit-exact, monitoring disjoint).
+  - A-D start from the shared TASK-23 B step 0.
+  - E is a seed-0 fresh 2x-wide build.
+  - F = seed-0 build + shared trunk copied; its resampler's output layer is zero-initialized, so F starts bit-identical to A-D's output.
+- **F's resampler:** phase-conditioned 4-tap local resampler; per-channel weights = linear [0, 1-w, w, 0] + MLP(w) (1 -> 32 -> 4*256), with clamped edges. Support goes from 2 to 4 MuQ frames (median influence 5 -> 7 frames); +2.7% parameters, +3.1% MACs. No deviation from the brief's preferred design was needed.
+- **Budget:** 819,200 presentations per arm from one shared sample stream grouped into batches. LR x0.1 at 204,800 and 614,400 presentations. No clipping (unchanged), no early stopping. Final checkpoints are the primary comparison; matched updates at 10k/50k are secondary.
+- **Logging:** W&B per arm (CLAUDE.md rule 11).
+- **Execution:** the full run executes **locally on MPS**. TASK-24's pairs are local, so nothing is recomputed, and the task says to run where an accelerator is available. Three parallel processes (A | B | C->D->E->F), each arm locked. Estimated about 2.2 h, free; the ACES alternative is about 12-16 billing-hours (scripts prepared).
+
+**Verification.** 12 tests; MPS smoke of all six arms passed (105 s).
+
+**Rollback.** Additive (`task25.py`, `task25_ablation.py`, configs, tests, `aces/*task25*`).

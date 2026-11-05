@@ -1897,3 +1897,8 @@ ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu
 - Manifest JSON compare bug (int vs str keys after a JSON round trip): fixed by normalizing before writing/comparing.
 - Smoke-script bugs fixed: `grep -q` + pipefail (broken pipe), a train stage before prepare, and the lock test's if-pipeline under pipefail.
 - `DEVICE=mps LOCAL=1 bash aces/task24_smoke.sh` PASS 189 s (artifacts/task24_smoke/t24_local_20261105T172122Z).
+
+## 2026-11-05 TASK-25
+- F init check: F(trunk copied, zero-init resampler output) == current decoder output bit-exact on the anchor; resampler mlp_in grad 0 at step 0 (expected).
+- MPS smoke throughput: b1 150 updates/s, b16 95 (1,500 presentations/s), E 39, F 81. With 3 concurrent processes: A/B 102 each, C 72.
+- Launched the full run locally (3 background processes).
