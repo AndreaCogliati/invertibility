@@ -1,0 +1,38 @@
+# TASK-24 smoke: N = 1, 2, 4 from the local TASK-22 SMOKE cache (6 blues training tracks, CPU-built) plus
+# the TASK-23 anchor pair (not in that cache, so the anchor-in-cache check is off), 600 updates with LR
+# drops after 200 and 400, matched exposure at 10x and 50x. Separate output directories. Not results.
+#   uv run python scripts/task24_ladder.py all --config configs/task24_smoke.yaml --device mps --run-name <tag>
+base_config: configs/task24.yaml
+data:
+  crop_manifest: data/manifests/task20_crops.csv
+  track_manifest: data/manifests/task20_tracks.csv
+  anchor_pair: runs/task23/task23_v1/pair.pt
+  anchor_crop_id: rock.00009:train_pool:pool:18
+  task22_cache_dir: data/cache/task22_smoke
+  anchor_must_be_in_cache: false
+  restrict_to_cache: true
+  hash_cache_file: false
+  selection_seed: 0
+  sizes: [1, 2, 4]
+  monitor_size: 2
+  showcase: [1, 2, 3]
+  manifest_csv: null                                   # smoke: manifests go to the run directory
+  manifest_json: null
+  cross_check_crops: 2
+  feature_match_rel_rms: 0.05
+  mel_match_atol: 1.0e-2
+  wave_match_atol: 1.0e-6
+training:
+  steps: 600
+  lr_drops: [[200, 0.1], [400, 0.1]]
+  milestones: [100, 200, 400, 600]
+  exposures: [10, 50]
+  log_every: 10
+  fit_eval_every: 50
+  monitor_eval_every: 100
+  latest_every: 100
+  eval_chunk: 64
+  spike_factor: 2.0
+  recovery_factor: 1.1
+run_root: runs/task24_smoke
+artifact_root: artifacts/task24_smoke

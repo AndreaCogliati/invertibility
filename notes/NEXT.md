@@ -1,6 +1,17 @@
 # NEXT
 
-## Latest: TASK-23 result (2026-11-05)
+## Latest: TASK-24 fitting ladder, prepared for ACES (2026-11-05)
+
+Spec, runbook, resources: `aces/TASK24_ACES.md`; protocol [[DECISIONS.md#task24-fitting-ladder-protocol]].
+Last successful command: `DEVICE=mps LOCAL=1 bash aces/task24_smoke.sh` (PASS). Not submitted, not committed.
+
+**Next (user):**
+1. Commit and push; `git pull` on ACES.
+2. On a PVC node: `bash aces/task24_smoke.sh`. Pass = RESUME and LOCK checks, an anchor bit-exact line, the cross-check under its thresholds, and a printed N=256 throughput estimate.
+3. Only when instructed: `mkdir -p aces/logs && sbatch --exclude=ac079 aces/run_task24_v1.slurm` (about 1-1.5 h, about 8-12 billing-hours; exit 3 -> resubmit).
+4. Copy back `artifacts/task24/task24_v1/`, `runs/task24/task24_v1/`, and `aces/logs/muq-task24-v1-*`.
+
+## Previous: TASK-23 result (2026-11-05)
 
 ACES 2296013 finished cleanly; all files were downloaded and verified. The decoder memorizes the pair (B 0.40%, C 0.41% of
 initial L1; A 0.07%). In one unblinded session the user heard no difference from the ground-truth-mel audio, apart

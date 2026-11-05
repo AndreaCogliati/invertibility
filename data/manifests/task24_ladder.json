@@ -1,0 +1,90 @@
+{
+  "task": "TASK-24",
+  "selection_seed": 0,
+  "sizes": [
+    1,
+    4,
+    16,
+    64,
+    256
+  ],
+  "monitor_size": 16,
+  "anchor_crop_id": "rock.00009:train_pool:pool:18",
+  "showcase_ranks": [
+    1,
+    2,
+    3
+  ],
+  "algorithm": "muq_inversion.task24.select_ladder (genre round-robin over a seeded track order, one seeded crop per track; anchor first; monitoring = next unused tracks)",
+  "source_manifests": {
+    "crop_manifest": "a08f15111fed53d07e4c10fc8eced014ec47f0c292766604ee869c97c45cf57b",
+    "track_manifest": "9446f461e68db3a951e986e36ab657a84c30b390212e47fb9ddf0b672a39f324"
+  },
+  "distinct_tracks": {
+    "1": 1,
+    "4": 4,
+    "16": 16,
+    "64": 64,
+    "256": 256
+  },
+  "genre_counts": {
+    "1": {
+      "rock": 1
+    },
+    "4": {
+      "disco": 1,
+      "jazz": 1,
+      "pop": 1,
+      "rock": 1
+    },
+    "16": {
+      "blues": 2,
+      "classical": 1,
+      "country": 1,
+      "disco": 2,
+      "hiphop": 1,
+      "jazz": 2,
+      "metal": 2,
+      "pop": 2,
+      "reggae": 1,
+      "rock": 2
+    },
+    "64": {
+      "blues": 6,
+      "classical": 6,
+      "country": 6,
+      "disco": 7,
+      "hiphop": 6,
+      "jazz": 7,
+      "metal": 6,
+      "pop": 7,
+      "reggae": 6,
+      "rock": 7
+    },
+    "256": {
+      "blues": 26,
+      "classical": 26,
+      "country": 25,
+      "disco": 26,
+      "hiphop": 25,
+      "jazz": 26,
+      "metal": 26,
+      "pop": 26,
+      "reggae": 25,
+      "rock": 25
+    }
+  },
+  "monitor_genres": {
+    "blues": 1,
+    "classical": 1,
+    "country": 2,
+    "disco": 2,
+    "hiphop": 2,
+    "jazz": 2,
+    "metal": 1,
+    "pop": 1,
+    "reggae": 2,
+    "rock": 2
+  },
+  "restricted_to_cache": false
+}

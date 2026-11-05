@@ -1890,3 +1890,10 @@ ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu
 - zsh does not word-split $VAR: pass CLI args explicitly in local loops.
 - `DEVICE=mps LOCAL=1 bash aces/task23_smoke.sh` PASS 109 s (artifacts/task23_smoke/t23_local_20261105T154532Z).
 - ACES 2295996: STOP, cached mel != recomputed mel (wave equal, feature diff 0.0155, fresh XPU not bit-exact over 2 passes). Fix: use cached mel; recomputed mel must agree within mel_match_atol 1e-2; diff recorded.
+
+## 2026-11-05 TASK-24 preparation
+- Anchor cross-check on the Mac: waveform max |diff| 8.9e-8 vs the ACES-made pair (soxr cross-platform) -> wave_match_atol 1e-6.
+- blues.00015:18 MPS fresh vs CPU smoke cache: max |diff| 0.228 (> 0.1); relative RMS over 8 crops 7e-4..8.5e-3; last_hidden_state vs block 1 about 1.07 -> gate on relative RMS <= 0.05.
+- Manifest JSON compare bug (int vs str keys after a JSON round trip): fixed by normalizing before writing/comparing.
+- Smoke-script bugs fixed: `grep -q` + pipefail (broken pipe), a train stage before prepare, and the lock test's if-pipeline under pipefail.
+- `DEVICE=mps LOCAL=1 bash aces/task24_smoke.sh` PASS 189 s (artifacts/task24_smoke/t24_local_20261105T172122Z).

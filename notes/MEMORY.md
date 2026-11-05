@@ -39,6 +39,10 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   `torch.use_deterministic_algorithms(True)`) and on multithreaded CPU (bit-exact with deterministic
   algorithms or 1 thread). At batch 1, two identical runs diverge visibly within about 50 updates. See
   [[task23-one-crop-overfit-protocol]].
+- Cross-platform/backend tolerances (2026-11-05, TASK-24):
+  - soxr resampling (`audio.resample`) differs between ACES (x86) and the Mac (arm64) by up to 8.9e-8 per sample;
+  - first-block MuQ features, MPS vs CPU: relative RMS 7e-4..8.5e-3 but max |diff| up to 0.23, so compare features by relative RMS (a wrong layer gives about 1.07).
+- XPU batch-1 throughput (TASK-23 job 2296013): about 340 updates/s with a report every 100 updates.
 - Batch-1 MuQToMelTranslator throughput: about 130-160 updates/s (MPS and CPU, M4 Max, with reports every 50).
 - ACES node ac079 has a PVC GPU that PyTorch cannot see (xpu device count 0, 2026-10-27); use
   `sbatch --exclude=ac079`.

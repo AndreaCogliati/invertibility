@@ -1,0 +1,61 @@
+# TASK-24: fixed-crop decoder fitting ladder (tasks/TASK-24.md, aces/TASK24_ACES.md).
+# Where does the first-block MuQ -> mel decoder lose its ability to fit TRAINING crops as the number of
+# fixed pairs grows? N = 1, 4, 16, 64, 256 nested subsets; N=1 is the exact TASK-23 pair.
+#   uv run python scripts/task24_ladder.py all --config configs/task24.yaml --device xpu --run-name task24_v1
+#
+# Unchanged from TASK-23 B (read from configs/task22.yaml arm L1 at runtime): MuQToMelTranslator
+# (1,271,908 params), direct masked mel L1, Adam (betas 0.9/0.999, weight decay 0), initial LR 1e-3,
+# no gradient clipping, FP32, batch size one, frame-center alignment, no feature/target normalization.
+# Every arm starts from TASK-23 B's step-0 weights (hash-checked). Deliberate change from TASK-23: the
+# fixed 200k-update budget and LR schedule below (comparisons with TASK-23 are not pure dataset-size ones).
+task: TASK-24
+recipe: {config: configs/task22.yaml, arm: L1}
+device_request: auto
+allow_cpu_fallback: false
+
+data:
+  crop_manifest: data/manifests/task20_crops.csv
+  track_manifest: data/manifests/task20_tracks.csv
+  anchor_pair: runs/task23/task23_v1/pair.pt           # TASK-23 cached pair (hashes verified)
+  anchor_crop_id: rock.00009:train_pool:pool:18
+  task22_cache_dir: data/cache/task22                  # TASK-22 first-block cache (ACES, job 2261697)
+  anchor_must_be_in_cache: true                        # the anchor row must equal TASK-23's pair bit for bit
+  restrict_to_cache: false                             # full cache holds every training-pool crop
+  hash_cache_file: true
+  selection_seed: 0
+  sizes: [1, 4, 16, 64, 256]
+  monitor_size: 16                                     # training tracks outside the 256-crop pool
+  showcase: [1, 2, 3]                                  # ladder ranks shown with the anchor (rank 0), fixed in advance
+  manifest_csv: data/manifests/task24_ladder.csv       # tracked; regenerated only if identical
+  manifest_json: data/manifests/task24_ladder.json
+  cross_check_crops: 4                                 # fresh MuQ/mel/wave recomputation of the first k fitting crops
+  # ||fresh - cached|| / ||cached||. Measured 2026-11-05: backend rounding (MPS fresh vs CPU cache) 7e-4..8.5e-3,
+  # while max |diff| reached 0.23 (outlier-sensitive, so recorded only); a wrong layer (last_hidden_state) ~1.07.
+  feature_match_rel_rms: 0.05
+  mel_match_atol: 1.0e-2                               # as TASK-23 (recomputed vs cached 9.5e-7)
+  wave_match_atol: 1.0e-6                              # soxr resampling differs across platforms by ~1e-7 (ACES-made anchor vs Mac: 8.9e-8)
+
+init:
+  checkpoint: runs/task23/task23_v1/B/checkpoints/milestone_000000.pt
+  summary: runs/task23/task23_v1/B/summary.json        # its init_sha256 must match
+
+training:
+  steps: 200000
+  lr_drops: [[50000, 0.1], [150000, 0.1]]              # x0.1 after update 50,000 and after 150,000
+  milestones: [20000, 50000, 100000, 150000, 200000]   # 50k / 150k = immediately before each reduction
+  exposures: [100, 500]                                # matched exposure: after exactly 100*N and 500*N updates
+  log_every: 100
+  fit_eval_every: 1000                                 # whole fitting subset
+  monitor_eval_every: 5000
+  latest_every: 5000
+  eval_chunk: 64
+  spike_factor: 2.0                                    # whole-set L1 > 2x best so far opens a spike event
+  recovery_factor: 1.1                                 # closed when back below 1.1x the pre-spike best
+
+report:
+  zoom_frames: 48
+  harmonic_max_bin: 64
+  task23_anchor_best_l1: 0.020259                      # TASK-23 B best (step 19,800; 20k updates at constant LR)
+
+run_root: runs/task24
+artifact_root: artifacts/task24

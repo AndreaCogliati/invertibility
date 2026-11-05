@@ -4173,3 +4173,21 @@ The full run was deliberately not done locally: the user asked for ACES executio
 **Interpretation (task rules; corrected 2026-11-05 after user review).** B/C succeed: the decoder and the L1 objective can fit this one pair accurately, so they impose no unavoidable blur floor on this example. This does NOT rule out decoder capacity or optimization as limits on TASK-22: memorizing one pair is much easier than learning a shared mapping across many crops. It also does not establish information preservation, correct temporal alignment, reliance on recoverable acoustic detail (vs memorizing the pair), that L1 cannot blur across diverse examples, transferable reconstruction, invertibility, or anything about more data. (The earlier wording "capacity and optimization are not what limits TASK-22" was unsupported and is withdrawn.)
 - Caveat: this pair is a TASK-22 training crop on which TASK-22 scored 0.238, and TASK-22 fits its memorized training crops about as well as held-out ones (0.255 vs 0.257-0.263). So TASK-22's error is already a multi-example fitting problem on training data, not only a generalization gap, which makes multi-example fitting the direct next question.
 - Next question: does the fit hold as the number and diversity of fixed training pairs grows? A nested fixed-crop fitting ladder (1 -> few -> many pairs) would separate single-pair memorization from difficulty learning a shared mapping. Full interpretation: `artifacts/task23/task23_v1/INTERPRETATION.md`.
+
+## task24-fitting-ladder-protocol: nested fixed-crop fitting ladder N = 1, 4, 16, 64, 256 from TASK-23 B's init (2026-11-05)
+
+**Context.** TASK-24 (`tasks/TASK-24.md`): where does the first-block decoder lose its ability to fit training crops as the number of fixed pairs grows? TASK-23 showed one-pair memorization only.
+
+**Decisions.**
+- **Selection** (`task24.select_ladder`, seed 0): anchor first, then genre round-robin over a seeded order of training tracks with one seeded crop per track. Subsets are prefixes, so nested; 256 distinct tracks with balanced genres. Monitoring = the next 16 unused training tracks. Tracked: `data/manifests/task24_ladder.{csv,json}`.
+- **Data:** gathered from TASK-22's cache. The anchor row must equal TASK-23's `pair.pt` bit for bit. Fresh cross-check of 4 crops:
+  - features by relative RMS <= 0.05, not max |diff|: on MPS vs a CPU cache, max |diff| reached 0.23 while relative RMS was 7e-4..8.5e-3; a wrong layer gives about 1.07;
+  - waveform <= 1e-6: soxr resampling differs across platforms by 8.9e-8;
+  - mel <= 1e-2.
+- **Init:** TASK-23 B step 0 for every arm. Recipe unchanged; batch 1; no unregularized arm.
+- **Schedule:** 200k updates; LR x0.1 after 50k and after 150k. Checkpoints at 20k/50k/100k/150k/200k, best, latest. Exposure points at 100N and 500N.
+- **Execution:** one ACES job runs all stages (`--dependency=singleton`) and each arm holds an O_EXCL lock file. The full ladder cannot run locally: the 271 non-anchor crops exist only in TASK-22's ACES cache, and recomputing them is excluded by the task.
+
+**Verification (local).** 11 tests; `DEVICE=mps LOCAL=1 bash aces/task24_smoke.sh` PASS (bit-exact CPU resume, MPS ladder, lock).
+
+**Rollback.** Additive only (`task24.py`, `task24_ladder.py`, configs, tests, manifests, `aces/*task24*`).
