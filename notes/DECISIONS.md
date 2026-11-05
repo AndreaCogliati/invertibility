@@ -4148,3 +4148,28 @@ The full run was deliberately not done locally: the user asked for ACES executio
 - Cause (probable): TASK-22 computed target mels on CPU in batches of 64 on its own node; TASK-23 recomputes one crop (batch 1), possibly on a node with a different CPU/BLAS path. The ACES smoke's identical check passed on its node.
 - Decision: the CACHED mel (the exact TASK-22 training target, which the task asks for) is the target. The recomputed mel only cross-checks it: max |diff| is recorded, STOP above `mel_match_atol: 1e-2` nats. The waveform must still match bit for bit.
 - Verified locally on the TASK-22 smoke cache (mel diff 0.0; target_source = task22_cache). Resubmitting the same run name is safe: nothing beyond run_manifest.json was written.
+
+
+## task23-one-crop-overfit-result: the TASK-22 decoder memorizes the pair; no difference heard vs ground-truth-mel vocoding (2026-11-05)
+
+**Run.** ACES 2296013 (ac083, commit 1cabc267, clean tree), 150 s, exit 0. Failed first attempt: 2295996 (see the amendment above).
+- Target: TASK-22's cached mel (recomputed max |diff| 9.5e-7).
+- Features: TASK-22's cached features (fresh max |diff| 0.0155). Fresh XPU MuQ features are not bit-exact across passes.
+
+**Direct mel L1 (eval mode, before vocoding).**
+- A: 1.971 -> 0.0013 (0.07%), criterion at 700 updates.
+- B: 5.064 -> best 0.0203 @ 19,800 (0.40%), criterion first at 3,000; no extension needed.
+- C: 5.064 -> 0.0207 @ 20,000 (0.41%), criterion at 2,900. C_seed1 not run.
+- For comparison, TASK-22's best model scored 0.238 on this crop.
+
+**Observations.**
+- B and C each had one transient blow-up: B near 8,100 (eval L1 1.41, train-loss window max 11.6), C near 9,700 (1.46). Both recovered within about 200 updates. Similar to TASK-22 at step 2,000. Constant LR 1e-3 and no clipping are possible contributors; their causal role was not tested. The B-C max |Δ| of 1.415 is that spike.
+- Train/eval max |Δ| was about 5e-6, already present at step 0. With no dropout or normalization layers, this is consistent with XPU forward-pass variability rather than a mode effect.
+- C disabled nothing and started from B's weights: a same-initialization repeat (differing only through nondeterminism), not a regularization ablation or an independent-seed replicate.
+- The 1% criterion is operational and depends on initialization (B's initial L1 5.06 vs A's 1.97). Absolute mel error and listening are more informative than the percentage.
+
+**Listening (user, one unblinded session).** All clips sound almost identical; no difference attributable to the decoder was detected relative to BigVGAN(ground-truth mel). A weak click near the end is already in BigVGAN(ground-truth mel) and in every reconstruction, so decoder error is not necessary for it. Its source (vocoder, crop handling, other) and timing are unresolved. Waveform correlation with the GT-mel audio: A 0.9992, B 0.973, C 0.980. Details: `artifacts/task23/task23_v1/LISTENING.md`.
+
+**Interpretation (task rules; corrected 2026-11-05 after user review).** B/C succeed: the decoder and the L1 objective can fit this one pair accurately, so they impose no unavoidable blur floor on this example. This does NOT rule out decoder capacity or optimization as limits on TASK-22: memorizing one pair is much easier than learning a shared mapping across many crops. It also does not establish information preservation, correct temporal alignment, reliance on recoverable acoustic detail (vs memorizing the pair), that L1 cannot blur across diverse examples, transferable reconstruction, invertibility, or anything about more data. (The earlier wording "capacity and optimization are not what limits TASK-22" was unsupported and is withdrawn.)
+- Caveat: this pair is a TASK-22 training crop on which TASK-22 scored 0.238, and TASK-22 fits its memorized training crops about as well as held-out ones (0.255 vs 0.257-0.263). So TASK-22's error is already a multi-example fitting problem on training data, not only a generalization gap, which makes multi-example fitting the direct next question.
+- Next question: does the fit hold as the number and diversity of fixed training pairs grows? A nested fixed-crop fitting ladder (1 -> few -> many pairs) would separate single-pair memorization from difficulty learning a shared mapping. Full interpretation: `artifacts/task23/task23_v1/INTERPRETATION.md`.

@@ -30,6 +30,10 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   block-1 output (`hidden_states[1]`) reaches mel L1 0.257-0.263 on all held-out sets at its window best
   (step 193k), vs 0.454-0.480 for `last_hidden_state` (step 60k). That is ~43-45% lower, with every
   track and every matched step favouring block 1. See [[task22-first-block-result]].
+- TASK-23 result (2026-11-05, ACES 2296013): on one fixed training pair the TASK-22 decoder (batch 1, TASK-22
+  recipe) reaches direct mel L1 0.020 (0.4% of initial) in 20k updates; the free-tensor control 0.0013. In one
+  unblinded session the user heard no difference from BigVGAN(ground-truth mel). This shows single-pair fitting
+  only; it does not rule out capacity/optimization limits across many crops. See [[task23-one-crop-overfit-result]].
 - Training nondeterminism (2026-11-05, TASK-23): `interpolate_at_positions` backward uses
   `index_put` accumulation. It is nondeterministic on MPS (no deterministic implementation; raises under
   `torch.use_deterministic_algorithms(True)`) and on multithreaded CPU (bit-exact with deterministic

@@ -1,6 +1,15 @@
 # NEXT
 
-## Latest: TASK-23 one-crop overfit diagnostic, prepared for ACES (2026-11-05)
+## Latest: TASK-23 result (2026-11-05)
+
+ACES 2296013 finished cleanly; all files were downloaded and verified. The decoder memorizes the pair (B 0.40%, C 0.41% of
+initial L1; A 0.07%). In one unblinded session the user heard no difference from the ground-truth-mel audio, apart
+from a weak click (source unresolved) present in all of them. This shows single-pair fitting only. Proposed next: a
+nested fixed-crop fitting ladder. See [[DECISIONS.md#task23-one-crop-overfit-result]].
+
+**Next (user):** commit the updated notes (the TASK-23 code is already in 1cabc267).
+
+## Previous: TASK-23 one-crop overfit diagnostic, prepared for ACES (2026-11-05)
 
 Gate: diagnostic (decoder fitting ability on one pair). Spec, runbook, resources: `aces/TASK23_ACES.md`.
 Protocol: [[DECISIONS.md#task23-one-crop-overfit-protocol]]. Last successful command:
