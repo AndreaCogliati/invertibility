@@ -30,6 +30,14 @@ module load uv
 uv sync --frozen
 echo "=== job $SLURM_JOB_ID | $(hostname) | $RUN_NAME ==="
 echo "commit $(git rev-parse HEAD) dirty=$(test -n "$(git status --porcelain)" && echo yes || echo no)"
+# Fail fast (and say why) if the allocated PVC GPU is not visible to PyTorch on this node.
+echo "node $(hostname) | SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-unset} GPU_DEVICE_ORDINAL=${GPU_DEVICE_ORDINAL:-unset} ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-unset} ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-unset}"
+if ! uv run python -c "import sys, torch; n = torch.xpu.device_count(); print('torch', torch.__version__, 'xpu_device_count', n); sys.exit(0 if n > 0 else 1)"; then
+    ls -l /dev/dri 2>&1 || true
+    xpu-smi discovery 2>&1 | head -20 || true
+    echo "ERROR: no XPU visible on $(hostname); resubmit excluding it: sbatch --exclude=$(hostname) aces/run_task22_T21eval_v1.slurm" >&2
+    exit 1
+fi
 if [ -f "artifacts/task22/$RUN_NAME/report.json" ]; then
     echo "ERROR: $RUN_NAME already finished; bump the version for a new run" >&2
     exit 1

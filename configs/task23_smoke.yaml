@@ -1,0 +1,25 @@
+# TASK-23 smoke: the same pair (features recomputed: no TASK-22 cache needed), A as in the full run,
+# B/C/C_seed1 shortened to 300 updates + extension to 500, so the extension and the C_seed1 branch
+# are exercised. Separate output directories. Numbers are not results.
+#   uv run python scripts/task23_overfit.py --config configs/task23_smoke.yaml --run-name <tag> [--stop-after B:150]
+base_config: configs/task23.yaml
+pair:
+  crop_manifest: data/manifests/task20_crops.csv
+  track_manifest: data/manifests/task20_tracks.csv
+  crop_id: rock.00009:train_pool:pool:18
+  feature_source: recompute
+  task22_cache_dir: data/cache/task22
+  feature_match_atol: 0.1
+  zoom_frames: 48
+  harmonic_max_bin: 64
+report_every: 50
+save_steps: [0, 100, 200, 300, 500]
+latest_every_steps: 100
+arms:
+  A: {kind: free_tensor, learning_rate: 0.01, init_noise_std: 0.01, init_seed: 0, steps: 20000, stop_at_criterion: true,
+      plateau: {window_steps: 2000, min_rel_improvement: 0.01, factor: 0.1, max_reductions: 2}}
+  B: {kind: decoder, init: {seed: recipe}, steps: 300, extension: {steps: 500, lr_factor: 0.1}, disable_regularizers: false}
+  C: {kind: decoder, init: {same_as: B}, steps: 300, extension: {steps: 500, lr_factor: 0.1}, disable_regularizers: true}
+  C_seed1: {kind: decoder, init: {seed: 1}, steps: 300, extension: {steps: 500, lr_factor: 0.1}, disable_regularizers: true, only_if_failed: C}
+run_root: runs/task23_smoke
+artifact_root: artifacts/task23_smoke

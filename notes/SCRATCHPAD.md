@@ -1872,3 +1872,20 @@ SD 0.0038. Spike at 22.077M coincides with train L1 max 2.4 and grad-norm max 10
 - Timing basis:
   - TASK-20 MuQ extraction: 12,800 crops in 92 s;
   - TASK-21: ~132 steps/s, 0.42 h to 200k.
+
+## 2026-10-27 TASK-22 L1 job failed: XPU device count 0
+ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu reported xpu unavailable. Same env and SBATCH lines as TASK-21 job 2248110, which saw 1 PVC GPU on ac012, so the cause is most likely the allocated node or its GPU allocation, not the code. Added a GPU check to both TASK-22 slurm scripts that prints node, GPU env vars, /dev/dri and xpu-smi, then exits early. Fix: resubmit with --exclude=<bad node>.
+
+## 2026-10-28 TASK-22 results check and analysis
+- Downloaded: logs 2261697/2261638, artifacts/task22/{task22_L1_v1,task22_T21eval_v1,layer_verification_2261697}, runs/task22 checkpoints (best, final, latest, 6 milestones). Complete: all extra checkpoints available; 16 listening examples x 6 wavs each, none missing.
+- `uv run python scripts/task22_analyze.py --t22 artifacts/task22/task22_L1_v1 --t21eval artifacts/task22/task22_T21eval_v1 --sacct-hours 0.840 0.347` -> artifacts/task22/analysis_v1.
+- L1 spike just before step 2,000: grad-norm window max 726, train L1 window max 66.8; recovered by 3k.
+- `uv run python scripts/task22_listening_package.py --l1 artifacts/task22/task22_L1_v1` -> listening_blind_v1 (+ _KEY).
+
+## 2026-11-05 TASK-23 preparation
+- Crop selection over 64 memorized training crops (HPSS harmonic fraction + onset peak/median rank-sum): top rock.00009:18 (0.942, 16.3).
+- B vs C differed at step 100 on MPS despite the same init -> determinism probe: MPS 100-step weight diff 3.0e-3, CPU 6.5e-3 (first differing step 6-29); CPU with 1 thread or deterministic algorithms: 0; MPS deterministic: RuntimeError index_put_with_accumulate_mps.
+- MPS has no float64: MuQ parameter checksums are computed in FP32 (same kernel, same tensors -> exact comparison).
+- Cache path probe (TASK-22 smoke cache, blues.00000 pool crop 6): CPU fresh vs CPU cache 1.3e-5; MPS fresh vs CPU cache 0.051 -> atol 1e-3 STOPPED; set to 0.1 (cached tensor is always the one trained on).
+- zsh does not word-split $VAR: pass CLI args explicitly in local loops.
+- `DEVICE=mps LOCAL=1 bash aces/task23_smoke.sh` PASS 109 s (artifacts/task23_smoke/t23_local_20261105T154532Z).

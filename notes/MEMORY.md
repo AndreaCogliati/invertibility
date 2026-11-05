@@ -26,6 +26,18 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   - [12] = encoder LayerNorm(block 12 output) = `last_hidden_state`.
   - All are (B, 50, 1024) per 47,872-sample crop, with the same token centers.
   - Block-1 output is ~2x the scale of `last_hidden_state`. See [[task22-first-block-protocol]].
+- TASK-22 result (2026-10-28, ACES 2261697 vs TASK-21 re-eval 2261638): the unchanged translator on
+  block-1 output (`hidden_states[1]`) reaches mel L1 0.257-0.263 on all held-out sets at its window best
+  (step 193k), vs 0.454-0.480 for `last_hidden_state` (step 60k). That is ~43-45% lower, with every
+  track and every matched step favouring block 1. See [[task22-first-block-result]].
+- Training nondeterminism (2026-11-05, TASK-23): `interpolate_at_positions` backward uses
+  `index_put` accumulation. It is nondeterministic on MPS (no deterministic implementation; raises under
+  `torch.use_deterministic_algorithms(True)`) and on multithreaded CPU (bit-exact with deterministic
+  algorithms or 1 thread). At batch 1, two identical runs diverge visibly within about 50 updates. See
+  [[task23-one-crop-overfit-protocol]].
+- Batch-1 MuQToMelTranslator throughput: about 130-160 updates/s (MPS and CPU, M4 Max, with reports every 50).
+- ACES node ac079 has a PVC GPU that PyTorch cannot see (xpu device count 0, 2026-10-27); use
+  `sbatch --exclude=ac079`.
 
 ## Working dependency versions (Apple Silicon, macOS 26.6.2, M4 Max, 2026-09-04)
 

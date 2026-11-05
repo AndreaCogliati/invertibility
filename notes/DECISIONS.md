@@ -4060,3 +4060,84 @@ behavior, and cache names for `last_hidden_state` are unchanged.
 - Milestone evaluation worked, and a missing milestone was reported unavailable.
 - The baseline evaluation-only job reproduced the stand-in run's own evaluation (max |Δ| 0).
 - Analysis and the blinded listening package were built. Smoke numbers are not results.
+
+## task22-first-block-result: block-1 features beat last_hidden_state by ~40% mel L1 on every set and at every matched step (2026-10-28)
+
+**Runs.** From commit 5e94361 (clean tree): ACES 2261697 (L1, node ac028, 0.84 h, exit 0) and 2261638
+(T21eval, ac079, 0.35 h); ~9.5 billing-hours. Two earlier L1 attempts (2261637, 2261678) failed on
+ac079 before training: `torch.xpu.device_count() == 0` on that node's GPU. Fixed by
+`--exclude=ac079`; a GPU check was added to both TASK-22 Slurm scripts afterwards (uncommitted).
+
+**Checks.**
+- Layer verification passed on ACES (`artifacts/task22/layer_verification_2261697/`).
+- All milestones were available for both runs. Baseline re-evaluation reproduced TASK-21's own
+  evaluation of best.pt (max |Δ mel L1| 2.4e-7, 3,840 rows, same best step 60,000).
+- Window best within 200k: L1 step 193,000 (val 0.2597); L12 step 60,000 (val 0.4554).
+
+**Result (mel L1, correct conditioning, window best L1 vs L12; Δ = L12 − L1 with 95% track-clustered CI).**
+
+| set | round trip | L12 | L1 | Δ [95% CI] | tracks L1 better |
+| --- | --- | --- | --- | --- | --- |
+| val | 0.112 | 0.455 | 0.260 | 0.196 [0.166, 0.223] | 8/8 |
+| test | 0.109 | 0.454 | 0.257 | 0.198 [0.159, 0.252] | 8/8 |
+| val2 | 0.109 | 0.473 | 0.260 | 0.213 [0.192, 0.238] | 24/24 |
+| test2 | 0.111 | 0.480 | 0.263 | 0.217 [0.191, 0.249] | 24/24 |
+| unseen crops of training tracks (96) | 0.110 | 0.427 | 0.258 | 0.169 [0.160, 0.178] | 96/96 |
+| memorized (96) | 0.111 | 0.386 | 0.255 | 0.131 [0.126, 0.135] | 96/96 |
+
+- **Matched steps** (10k, 20k, 50k, 60k, 100k, 200k): L1 is better on every set, with every CI
+  excluding 0 and 100% of tracks favouring L1. The relative gain on held-out sets grows from ~36% at 10k
+  to ~44-46% at 200k.
+- **Generalization gap.** L1's memorized and held-out errors are almost equal (0.255 vs 0.257-0.263).
+  L12's gap is 0.07-0.09. L1's held-out error keeps falling to 200k; L12's rose after ~60k (TASK-21).
+- **Secondary metrics at window best (held-out sets).** Chroma cosine 0.91-0.93 (L1) vs 0.85-0.87 (L12);
+  centroid correlation 0.88-0.93 vs 0.82-0.85; mel Pearson 0.986 vs 0.962. The median mel variance
+  ratio is similar (L1 0.84-0.87; L12 0.82-0.88); L12 has more crops above 1. So L1's advantage is
+  not just over-smoothing. Means of the `memorized_new` set are dominated by one near-silent crop
+  (ratio >5e4 in both runs); use medians.
+- **Controls.** All controls are far worse than correct conditioning for both runs. For L1, Δ
+  shuffled_time is 0.52-0.57 (L12 0.35-0.42) and Δ shuffled_across is 1.10-1.27 (L12 0.83-1.05).
+- **Instability.** L1 had one training blow-up just before step 2,000 (window grad-norm max 726,
+  train L1 max 66.8; val 1.93 at step 2,000). It recovered by ~3,000 steps and was never repeated.
+  No NaN/Inf. Likely causes: no clipping, constant LR 1e-3, and inputs at ~2x scale. It does not
+  affect the selected checkpoint.
+
+**Interpretation (limits as in the protocol).** With this translator and recipe, MuQ's first conformer
+block output is much more recoverable to the BigVGAN mel than `last_hidden_state`, and the gap is not a
+training-length or selection artifact. This shows greater recoverability, not that later layers
+discard information: a larger or differently-normalized translator could narrow the gap. Single seed;
+val/test/val2/test2 are reused evaluation sets. Blinded listening: `artifacts/task22/listening_blind_v1/`,
+**pending** human ratings. Analysis: `artifacts/task22/analysis_v1/TASK-22_ANALYSIS.md`.
+
+## task23-one-crop-overfit-protocol: fit one fixed training pair with a free tensor (A), the TASK-22 recipe (B), and B's init without regularizers (C) (2026-11-05)
+
+**Context.** TASK-23 (`tasks/TASK-23.md`) asks whether the TASK-22 decoder can reproduce ONE fixed target
+mel from its fixed first-block MuQ features. This tests fitting ability, not invertibility.
+
+**Decisions.**
+- **Pair:** `rock.00009:train_pool:pool:18`, a training crop that is also memorized crop 18; TASK-22 best mel L1 on it was 0.238. It is the top rank-sum of HPSS harmonic fraction (0.94) and onset peak/median (16.3) among the 64 memorized training crops. Scores are recomputed and stored in `pair_meta.json`.
+- **Features:** the full run uses TASK-22's own cached tensor (`data/cache/task22`, ACES), so the extraction context is identical. A fresh extraction cross-checks it with a STOP above 0.1 max |diff|.
+  - CPU, same backend: 1.3e-5.
+  - MPS vs a CPU-built cache: 0.051.
+  - A wrong layer differs by O(1-10).
+- **Recipe:** read from `configs/task22.yaml` arm L1 at runtime, not copied. The only change is batch 64 -> 1. Mask all ones (no padding exists); masked L1 equals TASK-22's loss at init (difference 0.0).
+- **C disables nothing.** The TASK-22 recipe has no dropout, normalization layers, buffers, weight decay, clipping, noise or augmentation, so C is a replicate of B. It is still run, as the task requires.
+- **A:** Adam LR 0.01; plateau rule x0.1 (2,000 updates without 1% improvement, max 2).
+- **Criterion:** eval-mode L1 <= 1% of the run's initial value (provisional). B/C extend from 20k to 50k at LR/10.
+
+**Evidence: nondeterminism found while preparing.**
+- The frame-center interpolation backward accumulates with `index_put`, which is not deterministic on MPS or on multithreaded CPU. Batch-1 Adam on L1 amplifies it: identical 100-update runs differ by 3e-3 (MPS) and 6e-3 (CPU) in weights.
+- With `torch.use_deterministic_algorithms(True)` the CPU is bit-exact. MPS raises (no deterministic `index_put_with_accumulate_mps`).
+- Therefore: `--deterministic` is an option, not the default (the default is the TASK-22 recipe). Bit-exact resume is verified on deterministic CPU. On the accelerator, the B-C spread is reported as the noise floor, and a B/C split on the criterion is flagged as not evidence about regularization.
+
+**Local verification (2026-11-05).**
+- 12 tests pass; full suite 360; ruff clean.
+- `DEVICE=mps LOCAL=1 bash aces/task23_smoke.sh`: PASS (109 s).
+  - CPU deterministic: B (stopped at 150, resumed) == C bit-exact at every report point and in its final weights.
+  - MPS: every arm and branch ran; B-C max |Δ eval L1| 0.082.
+- The TASK-22 smoke-cache path passed on CPU and MPS.
+
+**Consequences.** One ACES job (`aces/run_task23_v1.slurm`, about 35 min, about 5 billing-hours), not submitted.
+The full run was deliberately not done locally: the user asked for ACES execution, and only ACES has TASK-22's cached features.
+
+**Rollback.** TASK-23 adds files only (`task23.py`, `task23_overfit.py`, configs, tests, `aces/*task23*`); nothing existing changed.

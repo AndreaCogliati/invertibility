@@ -1,6 +1,30 @@
 # NEXT
 
-## Latest: TASK-22 first-block representation, prepared for ACES (2026-10-27)
+## Latest: TASK-23 one-crop overfit diagnostic, prepared for ACES (2026-11-05)
+
+Gate: diagnostic (decoder fitting ability on one pair). Spec, runbook, resources: `aces/TASK23_ACES.md`.
+Protocol: [[DECISIONS.md#task23-one-crop-overfit-protocol]]. Last successful command:
+`DEVICE=mps LOCAL=1 bash aces/task23_smoke.sh` (PASS). Not submitted, not committed.
+
+**Next (user):**
+1. Commit and push; `git pull` on ACES.
+2. On a PVC node: `bash aces/task23_smoke.sh`. Pass = "RESUME CHECK PASS", all arms on XPU, cache diff <= 0.1.
+3. Only when instructed: `mkdir -p aces/logs && sbatch --exclude=ac079 aces/run_task23_v1.slurm`.
+4. Copy back `artifacts/task23/task23_v1/`, `runs/task23/task23_v1/` (about 350 MB) and `aces/logs/muq-task23-v1-*`.
+5. Read `artifacts/task23/task23_v1/TASK-23_RESULTS.md`; listen to the WAVs (ratings pending).
+
+## Previous: TASK-22 result (2026-10-28)
+
+ACES 2261697 (L1) and 2261638 (T21eval) finished cleanly; all artifacts were downloaded and checked.
+Block-1 output beats `last_hidden_state` by ~43-45% mel L1 on every held-out set, at every matched step,
+on every track. Analysis: `artifacts/task22/analysis_v1/`. See [[DECISIONS.md#task22-first-block-result]].
+
+**Next (user):**
+1. Rate the blinded package `artifacts/task22/listening_blind_v1/` (do not open `_KEY`). Then run
+   `uv run python scripts/task22_listening_package.py --score artifacts/task22/listening_blind_v1`.
+2. Commit the notes and the Slurm GPU check (uncommitted).
+
+## Previous: TASK-22 first-block representation, prepared for ACES (2026-10-27)
 
 The translator is trained from scratch on MuQ conformer block 1 output (`hidden_states[1]`,
 hook-verified) for 200k steps, then compared with TASK-21 (`last_hidden_state`) at matched steps and

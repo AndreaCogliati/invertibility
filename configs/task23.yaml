@@ -1,0 +1,72 @@
+# TASK-23: one-crop decoder-overfit diagnostic (tasks/TASK-23.md, aces/TASK23_ACES.md).
+# Can the TASK-22 decoder reproduce ONE fixed target mel from its fixed first-block MuQ features?
+# Tests fitting ability, not invertibility. No new losses, no decoder redesign.
+#   uv run python scripts/task23_overfit.py --config configs/task23.yaml --device xpu --run-name task23_v1
+#
+# The decoder recipe is read from TASK-22 (not copied): configs/task22.yaml arm L1 -> muq_model_id,
+# bigvgan_revision, seed (0), hidden_channels (256), learning_rate (1e-3), adam_betas, num_mel_hops (187),
+# hop_size (256), muq_layer {block: 1}, temporal_alignment frame_centers, decode clamp. Verified in
+# code: Adam weight_decay 0, no gradient clipping, no dropout/normalization layers, no feature or
+# target normalization, FP32, constant LR. The only recipe change is batch size 64 -> 1 (one pair).
+task: TASK-23
+recipe: {config: configs/task22.yaml, arm: L1}
+device_request: auto
+allow_cpu_fallback: false
+
+pair:
+  crop_manifest: data/manifests/task20_crops.csv
+  track_manifest: data/manifests/task20_tracks.csv
+  # A TRAINING-pool crop (track in the committed train split, core32; also TASK-18..22's memorized
+  # crop 18 of this track, TASK-22 best mel L1 on it 0.238). Chosen from the 64 memorized training
+  # crops by rank-sum of harmonic energy fraction (HPSS, 0.94) and onset-strength peak/median (16.3);
+  # scripts/task23_overfit.py recomputes and records the scores (selection_scores in pair_meta.json).
+  crop_id: rock.00009:train_pool:pool:18
+  # TASK-22 extracted features per isolated 47,872-sample crop (batches of 16) from the
+  # peak-normalized track. task22_cache: use the exact tensor TASK-22 trained on (data/cache/task22,
+  # ACES) and check a fresh extraction against it; recompute: fresh extraction only (smoke/local).
+  feature_source: task22_cache
+  task22_cache_dir: data/cache/task22
+  # The pair always uses the cached TASK-22 tensor; the fresh extraction only cross-checks it. Measured
+  # 2026-11-05: same backend (CPU cache, CPU fresh, batch 16 vs 1) max |diff| 1.3e-5; MPS fresh vs CPU cache
+  # 0.051 (backend numerics). A wrong layer/crop differs by O(1-10). STOP above this:
+  feature_match_atol: 0.1
+  zoom_frames: 48                # width of the enlarged transient / harmonic views
+  harmonic_max_bin: 64           # harmonic view: mel bins 0..63
+
+criterion_fraction: 0.01         # provisional fitting criterion: eval-mode L1 <= 1% of the run's initial eval-mode L1
+report_every: 100
+save_steps: [0, 100, 1000, 5000, 20000, 50000]
+latest_every_steps: 1000
+
+arms:
+  A:                             # free target-shaped tensor, same masked L1, Adam (weight_decay 0)
+    kind: free_tensor
+    learning_rate: 0.01          # Adam moves each element ~lr/step: a 5-nat gap closes in ~500 steps; the
+                                 # stationary oscillation (~lr) is below 1% of the initial L1 (~2)
+    init_noise_std: 0.01         # around the target's global mean
+    init_seed: 0
+    steps: 20000
+    stop_at_criterion: true
+    plateau: {window_steps: 2000, min_rel_improvement: 0.01, factor: 0.1, max_reductions: 2}
+  B:                             # fresh TASK-22 decoder, TASK-22 seed and recipe, batch size one
+    kind: decoder
+    init: {seed: recipe}
+    steps: 20000
+    extension: {steps: 50000, lr_factor: 0.1}
+    disable_regularizers: false
+  C:                             # B's initial weights, explicit regularizers disabled
+    kind: decoder
+    init: {same_as: B}
+    steps: 20000
+    extension: {steps: 50000, lr_factor: 0.1}
+    disable_regularizers: true
+  C_seed1:                       # only if C misses the criterion: one more initialization seed
+    kind: decoder
+    init: {seed: 1}
+    steps: 20000
+    extension: {steps: 50000, lr_factor: 0.1}
+    disable_regularizers: true
+    only_if_failed: C
+
+run_root: runs/task23
+artifact_root: artifacts/task23
