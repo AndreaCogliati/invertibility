@@ -30,6 +30,10 @@ pair:
   # 2026-11-05: same backend (CPU cache, CPU fresh, batch 16 vs 1) max |diff| 1.3e-5; MPS fresh vs CPU cache
   # 0.051 (backend numerics). A wrong layer/crop differs by O(1-10). STOP above this:
   feature_match_atol: 0.1
+  # Target mel: the cached TASK-22 mel is used; a CPU recomputation (batch 1, possibly another node's
+  # BLAS path; TASK-22 used batches of 64) must agree within this (log-mel nats). ACES job 2295996 stopped
+  # on bit-exact equality (waveform equal, mel not).
+  mel_match_atol: 1.0e-2
   zoom_frames: 48                # width of the enlarged transient / harmonic views
   harmonic_max_bin: 64           # harmonic view: mel bins 0..63
 

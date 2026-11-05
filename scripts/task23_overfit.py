@@ -228,19 +228,30 @@ def prepare_pair(cfg: dict, recipe: dict, device: torch.device, pair_path: Path,
         i = cache["keys"].index((row["path"], s))
         cached = {k: cache["tensors"][k][i].clone() for k in ("muq", "mel", "wave")}
         diff = float((cached["muq"][None] - fresh).abs().max())
+        mel_diff = float((cached["mel"][None] - mel).abs().max())
         feature_info |= {"task22_cache": str(cache_path.relative_to(REPO_ROOT)), "task22_cache_index": i,
                          "task22_cache_key_parts": cache["key_parts"], "task22_cache_layer_check": cache.get("layer_check"),
                          "fresh_vs_task22_cache_max_abs_diff": diff,
                          "task22_cache_mel_equal_recomputed": bool(torch.equal(cached["mel"][None], mel)),
+                         "task22_cache_mel_vs_recomputed_max_abs_diff": mel_diff,
                          "task22_cache_wave_equal_recomputed": bool(torch.equal(cached["wave"], wave))}
         del cache
-        if not (feature_info["task22_cache_mel_equal_recomputed"] and feature_info["task22_cache_wave_equal_recomputed"]):
-            raise SystemExit(f"STOP: TASK-22 cached target/waveform differ from the recomputed ones: {feature_info}")
+        # The waveform must match bit for bit (same crop). The mel is recomputed on CPU in a batch of 1; TASK-22
+        # computed it in batches of 64 on another node, so CPU/BLAS rounding may differ: tolerated up to
+        # mel_match_atol, and the CACHED mel (the exact TASK-22 training target) is the one used.
+        if not feature_info["task22_cache_wave_equal_recomputed"]:
+            raise SystemExit(f"STOP: TASK-22 cached waveform differs from the recomputed one: {feature_info}")
+        if mel_diff > pc["mel_match_atol"]:
+            raise SystemExit(f"STOP: TASK-22 cached target mel differs from the recomputed one by {mel_diff} > {pc['mel_match_atol']}")
+        mel = cached["mel"][None].float().contiguous()
+        feature_info["target_source"] = "task22_cache (exact TASK-22 training target)"
         if diff > pc["feature_match_atol"]:
             raise SystemExit(f"STOP: fresh first-block features differ from TASK-22's cache by {diff} > {pc['feature_match_atol']}")
         features = cached["muq"][None].float()
     elif pc["feature_source"] != "recompute":
         raise SystemExit(f"unknown feature_source {pc['feature_source']}")
+    else:
+        feature_info["target_source"] = "recomputed (official BigVGAN mel, CPU)"
 
     # Alignment (physical centers, samples of the 24 kHz crop) and the valid mask.
     mel_c = bigvgan_mel_frame_centers(h, t_mel)

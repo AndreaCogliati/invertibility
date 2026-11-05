@@ -1889,3 +1889,4 @@ ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu
 - Cache path probe (TASK-22 smoke cache, blues.00000 pool crop 6): CPU fresh vs CPU cache 1.3e-5; MPS fresh vs CPU cache 0.051 -> atol 1e-3 STOPPED; set to 0.1 (cached tensor is always the one trained on).
 - zsh does not word-split $VAR: pass CLI args explicitly in local loops.
 - `DEVICE=mps LOCAL=1 bash aces/task23_smoke.sh` PASS 109 s (artifacts/task23_smoke/t23_local_20261105T154532Z).
+- ACES 2295996: STOP, cached mel != recomputed mel (wave equal, feature diff 0.0155, fresh XPU not bit-exact over 2 passes). Fix: use cached mel; recomputed mel must agree within mel_match_atol 1e-2; diff recorded.

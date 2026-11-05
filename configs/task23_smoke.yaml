@@ -10,6 +10,7 @@ pair:
   feature_source: recompute
   task22_cache_dir: data/cache/task22
   feature_match_atol: 0.1
+  mel_match_atol: 1.0e-2
   zoom_frames: 48
   harmonic_max_bin: 64
 report_every: 50

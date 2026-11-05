@@ -74,7 +74,7 @@ if [ -z "${LOCAL:-}" ]; then
 base_config: configs/task23_smoke.yaml
 pair: {crop_manifest: data/manifests/task20_crops.csv, track_manifest: data/manifests/task20_tracks.csv,
        crop_id: "rock.00009:train_pool:pool:18", feature_source: task22_cache, task22_cache_dir: data/cache/task22,
-       feature_match_atol: 0.1, zoom_frames: 48, harmonic_max_bin: 64}
+       feature_match_atol: 0.1, mel_match_atol: 1.0e-2, zoom_frames: 48, harmonic_max_bin: 64}
 arms:
   A: {kind: free_tensor, learning_rate: 0.01, init_noise_std: 0.01, init_seed: 0, steps: 1000, stop_at_criterion: true}
   B: {kind: decoder, init: {seed: recipe}, steps: 100, disable_regularizers: false}
@@ -85,8 +85,8 @@ import json, sys
 f = json.load(open(sys.argv[1]))["features"]
 print("  cache:", f["task22_cache"], "| index check:", f["index_check"])
 print("  fresh vs TASK-22 cache max |diff|:", f["fresh_vs_task22_cache_max_abs_diff"], "| mel equal:", f["task22_cache_mel_equal_recomputed"],
-      "| wave equal:", f["task22_cache_wave_equal_recomputed"])
-assert f["task22_cache_mel_equal_recomputed"] and f["task22_cache_wave_equal_recomputed"]
+      "| mel max |diff|:", f["task22_cache_mel_vs_recomputed_max_abs_diff"], "| wave equal:", f["task22_cache_wave_equal_recomputed"])
+assert f["task22_cache_wave_equal_recomputed"] and f["target_source"].startswith("task22_cache")
 EOF
 fi
 stamp "=== TASK-23 smoke PASSED ($OUT) ==="

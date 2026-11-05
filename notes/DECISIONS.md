@@ -4141,3 +4141,10 @@ mel from its fixed first-block MuQ features. This tests fitting ability, not inv
 The full run was deliberately not done locally: the user asked for ACES execution, and only ACES has TASK-22's cached features.
 
 **Rollback.** TASK-23 adds files only (`task23.py`, `task23_overfit.py`, configs, tests, `aces/*task23*`); nothing existing changed.
+
+**Amendment (2026-11-05): ACES job 2295996 stopped in pair preparation.**
+- The cached TASK-22 waveform equalled the recomputed one bit for bit, but the recomputed mel did not equal the cached mel.
+- Fresh-vs-cache feature diff was 0.0155 (passed). Fresh XPU MuQ features were not bit-exact across two passes.
+- Cause (probable): TASK-22 computed target mels on CPU in batches of 64 on its own node; TASK-23 recomputes one crop (batch 1), possibly on a node with a different CPU/BLAS path. The ACES smoke's identical check passed on its node.
+- Decision: the CACHED mel (the exact TASK-22 training target, which the task asks for) is the target. The recomputed mel only cross-checks it: max |diff| is recorded, STOP above `mel_match_atol: 1e-2` nats. The waveform must still match bit for bit.
+- Verified locally on the TASK-22 smoke cache (mel diff 0.0; target_source = task22_cache). Resubmitting the same run name is safe: nothing beyond run_manifest.json was written.
