@@ -1,0 +1,18 @@
+# TASK-25 smoke: every arm (A-F, both architectures changes) on the real TASK-24 pool, 4,096 presentations
+# (16 per crop) with LR drops at 1,024 and 3,072 and matched updates at 100 and 200. Separate output dirs.
+#   uv run python scripts/task25_ablation.py all --config configs/task25_smoke.yaml --device mps --run-name <tag> --wandb-mode disabled
+base_config: configs/task25.yaml
+budget:
+  total_presentations: 4096
+  lr_drops: [[1024, 0.1], [3072, 0.1]]
+  matched_updates: [100, 200]
+  log_every: 128
+  fit_eval_every: 512
+  monitor_eval_every: 1024
+  latest_every: 1024
+  eval_chunk: 64
+  sampler_seed: task25-sampler-0
+  spike_factor: 2.0
+  recovery_factor: 1.1
+run_root: runs/task25_smoke
+artifact_root: artifacts/task25_smoke

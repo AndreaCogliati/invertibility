@@ -1,0 +1,64 @@
+# TASK-25: architecture-versus-optimization ablation on TASK-24's fixed N=256 fitting pool
+# (tasks/TASK-25.md, aces/TASK25_ACES.md).
+#   uv run python scripts/task25_ablation.py all --config configs/task25.yaml --device mps --run-name task25_v1
+#
+# Fixed (reused, hash-verified, never recomputed): TASK-24's 256 cached training pairs + 16-crop monitoring
+# set (runs/task24/task24_v1/ladder_pairs.pt, manifest data/manifests/task24_ladder.csv), first-block MuQ
+# features, raw log-mel targets, all-valid masks, direct masked mel L1, frame-center source positions.
+# Recipe from configs/task22.yaml arm L1: Adam betas (0.9, 0.999), weight decay 0, no gradient clipping,
+# FP32, hidden width 256, no dropout/normalization/augmentation/noise. Only the per-arm fields below vary.
+task: TASK-25
+recipe: {config: configs/task22.yaml, arm: L1}
+device_request: auto
+allow_cpu_fallback: false
+
+data:
+  ladder_pairs: runs/task24/task24_v1/ladder_pairs.pt
+  init_state: runs/task24/task24_v1/init_state.pt       # TASK-23 B step 0 (= fresh seed-0 TASK-22 build)
+  manifest_csv: data/manifests/task24_ladder.csv
+  anchor_pair: runs/task23/task23_v1/pair.pt
+  task23_init_summary: runs/task23/task23_v1/B/summary.json
+  n_fit: 256
+  showcase_ranks: [1, 2, 3]                              # TASK-24's pre-selected examples (+ the anchor, rank 0)
+
+budget:
+  total_presentations: 819200                           # 3,200 presentations per crop
+  lr_drops: [[204800, 0.1], [614400, 0.1]]               # by cumulative presentations
+  matched_updates: [10000, 50000]                       # secondary matched-update comparison
+  log_every: 1000                                       # presentations
+  fit_eval_every: 16384                                 # whole 256-crop fitting pool
+  monitor_eval_every: 65536
+  latest_every: 65536
+  eval_chunk: 64
+  sampler_seed: task25-sampler-0                        # one sample stream for every arm, grouped into batches
+  spike_factor: 2.0
+  recovery_factor: 1.1
+
+init_seed: 0                                            # E/F: seed_everything(0) before building (TASK-22 order)
+
+arms:
+  A: {arch: current, batch: 1, lr: 1.0e-3, init: shared}
+  B: {arch: current, batch: 1, lr: 1.0e-4, init: shared}
+  C: {arch: current, batch: 16, lr: 1.0e-3, init: shared}
+  D: {arch: current, batch: 16, lr: 1.0e-4, init: shared}    # candidate optimization recipe (not a proven improvement)
+  E: {arch: current, width_multiplier: 2, batch: 16, lr: 1.0e-4, init: seed}
+  F: {arch: learned_resampler, resampler_hidden: 32, batch: 16, lr: 1.0e-4, init: shared_trunk}
+
+comparisons:                                            # [a, b, what b - a isolates]
+  - [A, B, "initial LR at batch 1"]
+  - [C, D, "initial LR at batch 16"]
+  - [A, C, "batch size at LR 1e-3 (matched exposure; 16x fewer updates)"]
+  - [B, D, "batch size at LR 1e-4 (matched exposure; 16x fewer updates)"]
+  - [D, E, "width x2"]
+  - [D, F, "learned temporal resampling"]
+
+report:
+  zoom_frames: 48
+  harmonic_max_bin: 64
+  billing_per_job_hour: 8                               # ACES pvc (sacct AllocTRES billing=8); local runs are free
+  task24_n256_final_fit_l1: 0.2434                      # historical context only (different schedule/budget)
+
+wandb_group: task25-arch-vs-opt
+wandb_tags: [task25, n256, fitting-pool, first-block, ablation]
+run_root: runs/task25
+artifact_root: artifacts/task25
