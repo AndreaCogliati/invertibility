@@ -1902,3 +1902,5 @@ ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu
 - F init check: F(trunk copied, zero-init resampler output) == current decoder output bit-exact on the anchor; resampler mlp_in grad 0 at step 0 (expected).
 - MPS smoke throughput: b1 150 updates/s, b16 95 (1,500 presentations/s), E 39, F 81. With 3 concurrent processes: A/B 102 each, C 72.
 - Launched the full run locally (3 background processes).
+- 2026-11-06: local MPS processes for task25_v1 died at session end (ConnectionResetError); renamed to runs/task25/task25_v1_local_incomplete. Downloaded the ACES run (rsync; artifacts 47 MB, runs 182 MB without checkpoints, logs, smoke log).
+- 2026-11-06: Listening (user, 2026-11-06; 4 training crops: anchor rock.00009, jazz.00027, disco.00090, pop.00040): hardly any audible difference between arms; possibly E slightly better on disco and pop, very subtle. All arms well below the ground-truth-mel oracle. The 0.23 -> 0.13 range of mel L1 differences is not perceptually salient here.

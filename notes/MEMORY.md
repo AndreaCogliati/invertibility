@@ -39,6 +39,8 @@ on a synthetic 2.0s / 48000-sample 24kHz clip, MuQ `OpenMuQ/MuQ-large-msd-iter`,
   `torch.use_deterministic_algorithms(True)`) and on multithreaded CPU (bit-exact with deterministic
   algorithms or 1 thread). At batch 1, two identical runs diverge visibly within about 50 updates. See
   [[task23-one-crop-overfit-protocol]].
+- TASK-25 result (2026-11-06, ACES 2299021): on TASK-24's N=256 pool at 819,200 presentations, final fit mel L1 is A(b1,1e-3) 0.230, B(b1,1e-4) 0.167, C(b16,1e-3) 0.170, D(b16,1e-4) 0.206, E(x2 width, D settings) 0.145, F(learned resampler, D settings) 0.203. Monitoring is inversely ordered (A 0.308 ... C 0.375). See [[task25-arch-vs-opt-result]]. Listening (user, 2026-11-06; 4 training crops: anchor rock.00009, jazz.00027, disco.00090, pop.00040): hardly any audible difference between arms; possibly E slightly better on disco and pop, very subtle. All arms well below the ground-truth-mel oracle. The 0.23 -> 0.13 range of mel L1 differences is not perceptually salient here.
+- XPU throughput (ACES PVC, TASK-25): batch-1 358 updates/s; batch-16 about 262 (4,200 presentations/s); x2 width 131; learned resampler 212.
 - TASK-24 result (2026-11-05, ACES 2296889): fitting ladder, 200k batch-1 updates. Final whole-fitting-set mel L1 for N = 1/4/16/64/256 is 0.0002/0.041/0.095/0.174/0.243; monitoring 1.34/1.13/0.66/0.44/0.31. Errors are broad-based. At N=256 the decoder fits its training crops only to TASK-22's level. See [[task24-fitting-ladder-result]].
 - Cross-platform/backend tolerances (2026-11-05, TASK-24):
   - soxr resampling (`audio.resample`) differs between ACES (x86) and the Mac (arm64) by up to 8.9e-8 per sample;

@@ -1,9 +1,17 @@
 # NEXT
 
-## Latest: TASK-25 running locally (2026-11-05)
+## Latest: TASK-25 result (2026-11-06)
 
-Full run `task25_v1` on MPS: three processes (`train --arms A`, `--arms B`, `--arms C,D,E,F`), logs in `runs/task25/task25_v1/logs/`. Protocol [[DECISIONS.md#task25-arch-vs-opt-protocol]]; runbook `aces/TASK25_ACES.md`.
-If interrupted, rerun the same train commands (they resume). Then run `uv run python scripts/task25_ablation.py report --config configs/task25.yaml --device mps --run-name task25_v1`.
+ACES 2299021 finished cleanly; downloaded and verified (`artifacts/task25/task25_v1/`, `runs/task25/task25_v1/` without checkpoints, `aces/logs/muq-task25-v1-2299021.*`). The local partial attempt is in `runs/task25/task25_v1_local_incomplete/`.
+- LR and batch size interact: B (b1, 1e-4) and C (b16, 1e-3) fit to about 0.17.
+- Width x2 fits best (0.145).
+- The learned resampler is negligible (-0.003).
+- Better fitting comes with worse monitoring.
+- Listening (user): hardly any audible difference between arms (maybe E on disco/pop, very subtle); all well below the ground-truth-mel oracle.
+
+See [[DECISIONS.md#task25-arch-vs-opt-result]] and `artifacts/task25/task25_v1/ANALYSIS.md`.
+
+**Next (user):** listen; decide follow-ups (e.g. width at C's settings; transfer/regularization). Uncommitted: notes.
 
 ## Previous: TASK-24 result (2026-11-05)
 

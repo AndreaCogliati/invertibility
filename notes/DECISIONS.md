@@ -4233,3 +4233,36 @@ The full run was deliberately not done locally: the user asked for ACES executio
 **Verification.** 12 tests; MPS smoke of all six arms passed (105 s).
 
 **Rollback.** Additive (`task25.py`, `task25_ablation.py`, configs, tests, `aces/*task25*`).
+
+**Amendment (2026-11-06): execution moved to ACES.** The local MPS run died when the session ended (all three processes: `ConnectionResetError: Connection lost`; C and D finished, A/B/E partial, F not started). The user ran `aces/run_task25_v1.slurm` instead. The local partial run was renamed (not deleted) to `runs/task25/task25_v1_local_incomplete/` before downloading the ACES run to `runs/task25/task25_v1/`.
+
+## task25-arch-vs-opt-result: LR x batch interaction; width helps fitting; learned resampling negligible; better fitting = worse monitoring (2026-11-06)
+
+**Run.** ACES 2299021 (ac083, commit 4a2430e2, clean tree), exit 0, 97 min, about 13 billing-hours. Exactly 819,200 presentations per arm, no non-finite values. W&B online, one run per arm. The ACES smoke passed, including bit-exact D/F resume.
+
+**Final whole-pool mel L1 / monitoring.**
+
+| arm | definition | fit L1 | monitoring |
+| --- | --- | --- | --- |
+| A | b1, 1e-3 | 0.230 | 0.308 |
+| B | b1, 1e-4 | 0.167 | 0.361 |
+| C | b16, 1e-3 | 0.170 | 0.375 |
+| D | b16, 1e-4 | 0.206 | 0.311 |
+| E | x2 width | 0.145 | 0.364 |
+| F | resampler | 0.203 | 0.315 |
+
+Paired per-crop differences (all with CIs excluding 0 for fitting):
+- **LR:** B-A -0.063 (lower LR helps at batch 1); D-C +0.037 (it hurts at batch 16).
+- **Batch:** C-A -0.061; D-B +0.039. LR and batch interact.
+- **Width:** E-D -0.061.
+- **Learned resampling:** F-D -0.003.
+
+**Monitoring is inversely ordered** relative to fitting. It rises during training for B/C/E and stays flat at about 0.31 for A/D/F.
+
+**Other observations.**
+- Errors broad-based in every arm.
+- Second LR reduction <= 2% (plateau under this schedule, not convergence).
+- Only A spiked (one event; gradient-norm max 224 vs <= 37 elsewhere).
+- D (the pre-specified candidate) is the weaker batch-16 LR for fitting, so E and F were compared against it.
+
+**Interpretation (hypotheses).** Optimization (effective step size, batch-1/1e-3 instability) explains part of TASK-24's 0.24 plateau. Width adds a capacity contribution (confounded with optimization and compute). The learned 4-tap resampler is not a major bottleneck at D's settings. On this pool, lower training error is memorization: transfer gets worse. Single seed. Listening (user, 2026-11-06): hardly any audible difference between arms, maybe E slightly better on disco/pop; all well below the ground-truth-mel oracle, so the measured fitting gains are not perceptually salient. Full analysis: `artifacts/task25/task25_v1/ANALYSIS.md`.
