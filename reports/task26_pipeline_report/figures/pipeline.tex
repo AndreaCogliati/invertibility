@@ -1,0 +1,76 @@
+% Figure A: implemented audio-to-audio pipeline (schematic layout; every number is from the code or
+% scripts/geometry.json for the TASK-23 anchor crop).
+\begin{tikzpicture}[
+  font=\scriptsize, >=Latex, node distance=3mm,
+  box/.style={draw, rounded corners=1.5pt, align=left, inner sep=2.5pt, text width=#1},
+  box/.default=4.6cm,
+  det/.style={box=#1, fill=detcol},
+  frz/.style={box=#1, fill=frzcol},
+  trn/.style={box=#1, fill=trncol},
+  det/.default=4.6cm, frz/.default=4.6cm, trn/.default=4.6cm,
+  unused/.style={draw, dashed, rounded corners=1.5pt, align=left, inner sep=2.5pt, text width=4.6cm, text=black!65},
+  shape/.style={font=\scriptsize\ttfamily, text=black!75},
+  arr/.style={->, thick},
+  grp/.style={draw=black!50, dashed, rounded corners=3pt, inner sep=3pt},
+]
+% ---------------- shared front end
+\node[det=15.3cm] (src) {\textbf{Source.} GTZAN WAV, 16-bit PCM, 22{,}050\,Hz, mono (channel mean if multichannel) $\to$ float32 \quad
+  \textbf{Resample} soxr\_hq (float64 internally) $\to$ 24{,}000\,Hz \quad
+  \textbf{Peak-normalize whole track} $\tilde x = 0.95\,x/\max|x|$ \quad
+  \textbf{Crop} $w$: 47{,}872 samples $=187\times256$ = 1.995\,s \hfill \texttt{bigvgan\_common.py, train\_task18\_heldout.py:build\_features}};
+% ---------------- MuQ column
+\node[frz, below=9mm of src.south west, anchor=north west] (fe) {\textbf{MuQ frontend} (frozen, eval): torchaudio STFT $n_\mathrm{fft}{=}$win${=}2048$ (Hann), hop 240 (10\,ms), \texttt{center=True}; power; 128 HTK mel bands 0--12\,kHz; $10\log_{10}$ (dB); last frame dropped; $(x-6.768)/18.418$\\
+  \textcolor{black!70}{\ttfamily (B, 128 mel, 199 frames) @ 100 Hz}};
+\node[frz, below=of fe] (conv) {\textbf{Conv2dSubsampling}: 2$\times$Res2d (3$\times$3, stride 2$\times$2, 512 ch, BatchNorm, ReLU) $\to$ Linear(16{,}384$\to$1024)\\
+  \textcolor{black!70}{\ttfamily hidden\_states[0]: (B, 50 tok, 1024) @ 25 Hz}};
+\node[frz, below=of conv] (b1) {\textbf{Conformer block 1} (self-attention over the 50 tokens, rotary positions; depthwise conv $k{=}31$; FFN 4096)\\
+  \textcolor{black!70}{\ttfamily hidden\_states[1]: (B, 50, 1024)} \hfill\textbf{TASK-22--25 input}};
+\node[frz, below=of b1] (b12) {\textbf{Blocks 2--12} + encoder LayerNorm\\
+  \textcolor{black!70}{\ttfamily last\_hidden\_state = hidden\_states[12]: (B, 50, 1024)} \hfill\textbf{TASK-15--21 input}};
+\node[unused, below=of b12] (rvq) {\textbf{Not on our path:} Mel-RVQ module (8 codebooks) and the 8192-way prediction head exist in the checkpoint; the RVQ is used only for MuQ \emph{pretraining} targets. The head's logits are computed and discarded. No codes or indices are taken.};
+\node[grp, fit=(fe)(conv)(b1)(b12)(rvq), label={[font=\scriptsize\bfseries, anchor=south west]north west:MuQ (frozen; 333.4\,M)}] {};
+% ---------------- translator column
+\node[det, right=9mm of fe.north east, anchor=north west] (cache) {\textbf{Feature cache}: CPU float32, content-addressed (MuQ id, BigVGAN rev., crop keys, layer); \textbf{no feature normalization}\\
+  \textcolor{black!70}{\ttfamily $h$: (B, 50, 1024) @ 25 Hz}};
+\node[trn, below=7mm of cache] (proj) {\textbf{Input projection} Linear(1024$\to$256), per token\\
+  \textcolor{black!70}{\ttfamily (B, 256, 50) @ 25 Hz}};
+\node[det, below=of proj] (interp) {\textbf{Frame-center interpolation} (fixed, linear): mel frame $j$ at sample $256j{+}128$ reads token position $p_j=\mathrm{clamp}((256j{+}128)/960,0,49)\in[0.133,49]$; frames 184--186 edge-replicated\\
+  \textcolor{black!70}{\ttfamily (B, 256, 187) @ 93.75 Hz}};
+\node[trn, below=of interp] (tcn) {\textbf{TemporalConvNet}: 3$\times$Conv1d(256, $k{=}5$, zero pad 2); GELU + residual on the first two; linear third. RF 13 mel frames = 138.7\,ms};
+\node[trn, below=of tcn] (out) {\textbf{Output projection} Linear(256$\to$100); unconstrained real output\\
+  \textcolor{black!70}{\ttfamily predicted log-mel $\hat y$: (B, 100, 187)}};
+\node[grp, fit=(proj)(interp)(tcn)(out), label={[font=\scriptsize\bfseries, anchor=south west]north west:Translator (trainable; 1{,}271{,}908)}] {};
+% ---------------- target column
+\node[det, right=6mm of cache.north east, anchor=north west, text width=4.3cm] (tmel) {\textbf{Target mel} (official \texttt{meldataset.mel\_spectrogram}, CPU): reflect pad 384; STFT $n_\mathrm{fft}{=}$win${=}1024$ (Hann), hop 256, \texttt{center=False}; $|X|$; 100 Slaney mel bands 0--12\,kHz; $\ln\max(\cdot,10^{-5})$\\
+  \textcolor{black!70}{\ttfamily $y$: (B, 100, 187) @ 93.75 Hz; floor $-11.513$ nats}};
+\node[draw, thick, fill=losscol, align=center, text width=4.3cm, below=14mm of tmel] (loss) {\textbf{Training loss}\\ $\mathcal L=\mathrm{mean}\,|\hat y-y|$ over $100{\times}187$\\ (before any vocoding; mask all ones)};
+% ---------------- decode row
+\node[det, below=12mm of out, text width=4.6cm] (clamp) {\textbf{Decode preparation} (evaluation only): clamp $\hat y\ge\ln 10^{-5}$ (TASK-16 onward); no other inverse normalization};
+\node[frz, below=of clamp, text width=4.6cm] (vg) {\textbf{BigVGAN-v2} 24\,kHz/100-band/256$\times$ (frozen, inference only; 112.4\,M params)\\
+  \textcolor{black!70}{\ttfamily $\hat w$: (B, 1, 47,872) @ 24 kHz}};
+\node[frz, right=6mm of vg, text width=4.3cm] (vgo) {\textbf{Same BigVGAN} on $y$ $\to$ ground-truth-mel audio (oracle reference); round trip = $\mathrm{mel}(\mathrm{BigVGAN}(y))$ vs $y$};
+% ---------------- arrows
+\draw[arr] (src.south -| fe.north) -- (fe.north);
+\draw[arr] (src.south -| tmel.north) -- (tmel.north);
+\draw[arr] (fe) -- (conv);
+\draw[arr] (conv) -- (b1);
+\draw[arr] (b1) -- (b12);
+\draw[arr] (b1.east) -- ++(4.5mm,0) |- ([yshift=1mm]cache.west);
+\draw[arr] (b12.east) -- ++(4.5mm,0) |- ([yshift=1mm]cache.west);
+\draw[arr] (cache) -- (proj);
+\draw[arr] (proj) -- (interp);
+\draw[arr] (interp) -- (tcn);
+\draw[arr] (tcn) -- (out);
+\draw[arr] (out.east) -- ++(1.5mm,0) |- (loss.west);
+\draw[arr] (tmel) -- (loss);
+\draw[arr] (out) -- (clamp);
+\draw[arr] (clamp) -- (vg);
+\draw[arr] (tmel.east) -- ++(1.5mm,0) |- (vgo.east);
+\node[font=\tiny, align=left, anchor=north west, text width=4.3cm] at ([yshift=-2mm]loss.south west) {Gradients flow only through the translator. MuQ features are cached and frozen. BigVGAN is never in the training graph.};
+% ---------------- legend
+\node[anchor=north west, font=\tiny, align=left] at ([yshift=-3mm]vg.south -| rvq.west) {%
+  \tikz\node[fill=frzcol,draw,minimum size=6pt,inner sep=0]{}; frozen pretrained \quad
+  \tikz\node[fill=trncol,draw,minimum size=6pt,inner sep=0]{}; trainable \quad
+  \tikz\node[fill=detcol,draw,minimum size=6pt,inner sep=0]{}; fixed deterministic op \quad
+  \tikz\node[draw,dashed,minimum size=6pt,inner sep=0]{}; present but unused. \quad Every tensor on the path is continuous-valued and stored as float32. No discrete quantizer codes are traversed.};
+\end{tikzpicture}

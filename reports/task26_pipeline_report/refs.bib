@@ -1,0 +1,43 @@
+% Only entries whose identifiers were checked (arXiv listing or the pinned model repository) are included.
+% MuQ and BigVGAN: verified against their arXiv listings on 2026-11-06. GTZAN and the fault analysis are the
+% dataset's original paper and the fault list already transcribed in data/manifests/gtzan_sturm2013_faults.yaml.
+
+@misc{zhu2025muq,
+  author       = {Zhu, Haina and others},
+  title        = {{MuQ}: Self-Supervised Music Representation Learning with Mel Residual Vector Quantization},
+  year         = {2025},
+  eprint       = {2501.01108},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.SD},
+  note         = {Code and checkpoints: \url{https://github.com/tencent-ailab/MuQ}; checkpoint used here:
+                  \texttt{OpenMuQ/MuQ-large-msd-iter}, Hugging Face snapshot \texttt{0562a578}}
+}
+
+@inproceedings{lee2023bigvgan,
+  author       = {Lee, Sang-gil and Ping, Wei and Ginsburg, Boris and Catanzaro, Bryan and Yoon, Sungroh},
+  title        = {{BigVGAN}: A Universal Neural Vocoder with Large-Scale Training},
+  booktitle    = {International Conference on Learning Representations (ICLR)},
+  year         = {2023},
+  eprint       = {2206.04658},
+  archivePrefix= {arXiv},
+  note         = {Checkpoint used here: \texttt{nvidia/bigvgan\_v2\_24khz\_100band\_256x}, revision
+                  \texttt{c329ede9e9bbc100ddf5c91e2330a61921262370}}
+}
+
+@article{tzanetakis2002gtzan,
+  author       = {Tzanetakis, George and Cook, Perry},
+  title        = {Musical Genre Classification of Audio Signals},
+  journal      = {IEEE Transactions on Speech and Audio Processing},
+  volume       = {10},
+  number       = {5},
+  pages        = {293--302},
+  year         = {2002}
+}
+
+@misc{sturm2013gtzan,
+  author       = {Sturm, Bob L.},
+  title        = {The {GTZAN} Dataset: Its Contents, Its Faults, Their Effects on Evaluation, and Its Future Use},
+  year         = {2013},
+  eprint       = {1306.1461},
+  archivePrefix= {arXiv}
+}

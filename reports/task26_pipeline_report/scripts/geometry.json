@@ -1,0 +1,1107 @@
+{
+ "pair_keys": [
+  "meta",
+  "sha256",
+  "tensors"
+ ],
+ "pair_tensors": {
+  "features": [
+   [
+    1,
+    50,
+    1024
+   ],
+   "torch.float32"
+  ],
+  "target_mel": [
+   [
+    1,
+    100,
+    187
+   ],
+   "torch.float32"
+  ],
+  "mask": [
+   [
+    187
+   ],
+   "torch.bool"
+  ],
+  "waveform": [
+   [
+    47872
+   ],
+   "torch.float32"
+  ],
+  "positions": [
+   [
+    187
+   ],
+   "torch.float32"
+  ]
+ },
+ "pair_meta": {
+  "task": "TASK-23",
+  "crop": {
+   "crop_id": "rock.00009:train_pool:pool:18",
+   "track_id": "rock.00009",
+   "genre": "rock",
+   "path": "data/raw/gtzan/genres/rock/rock.00009.wav",
+   "split": "train",
+   "crop_start_sample": "471082",
+   "crop_start_seconds": "19.628417",
+   "crop_num_samples": "47872"
+  },
+  "memorized_alias": "rock.00009:eval:memorized:18",
+  "track": {
+   "orig_sr": 22050,
+   "resampled_samples": 720321,
+   "peak_before_normalize": 1.992240071296692,
+   "checksum_sha256": "f70cd966d20669d661b6c0d0ef437ea04ebbf1274d2f8327b0118e9cdc70e207"
+  },
+  "extraction": {
+   "muq_model_id": "OpenMuQ/MuQ-large-msd-iter",
+   "bigvgan_revision": "c329ede9e9bbc100ddf5c91e2330a61921262370",
+   "bigvgan_generator_sha256": "6f9c5715550c9d0f11159ceb8935638da5aeb19e27d1e63677632df095e376f5",
+   "sample_rate": 24000,
+   "peak_normalize": 0.95,
+   "inference_mode": true,
+   "stochastic": "none (MuQ eval mode, no dropout active; BigVGAN mel deterministic on CPU)",
+   "device": "xpu",
+   "torch": "2.14.0+xpu"
+  },
+  "muq_frozen": {
+   "eval_mode": true,
+   "all_requires_grad_false": true,
+   "parameters_unchanged": true,
+   "still_eval_mode": true
+  },
+  "features": {
+   "layer": {
+    "block": 1,
+    "hidden_state_index": 1,
+    "module": "model.model.conformer.layers.0",
+    "name": "conformer_block_1_output",
+    "tag": "L1",
+    "num_blocks": 12
+   },
+   "index_check": {
+    "num_hidden_states": 13,
+    "num_blocks": 12,
+    "index0_is_block1_input": true,
+    "index_is_block_output": true,
+    "differs_from_index0": true,
+    "finite": true
+   },
+   "fresh_bit_exact_two_passes": false,
+   "fresh_vs_last_hidden_state_cosine_mean": 0.09700015187263489,
+   "source": "task22_cache",
+   "task22_cache": "data/cache/task22/task18_v1_L1_f9fe64dcb4a6f98d4569.pt",
+   "task22_cache_index": 11689,
+   "task22_cache_key_parts": {
+    "version": 1,
+    "muq": "OpenMuQ/MuQ-large-msd-iter",
+    "bigvgan": "c329ede9e9bbc100ddf5c91e2330a61921262370",
+    "num_hops": 187,
+    "backend": "xpu",
+    "torch": "2.14.0+xpu",
+    "muq_layer": "conformer_block_1_output",
+    "hidden_state_index": 1
+   },
+   "task22_cache_layer_check": {
+    "num_hidden_states": 13,
+    "num_blocks": 12,
+    "index0_is_block1_input": true,
+    "index_is_block_output": true,
+    "differs_from_index0": true,
+    "finite": true,
+    "batches_checked": 800,
+    "block": 1,
+    "hidden_state_index": 1,
+    "module": "model.model.conformer.layers.0",
+    "name": "conformer_block_1_output",
+    "tag": "L1"
+   },
+   "fresh_vs_task22_cache_max_abs_diff": 0.015508174896240234,
+   "task22_cache_mel_equal_recomputed": false,
+   "task22_cache_mel_vs_recomputed_max_abs_diff": 9.5367431640625e-07,
+   "task22_cache_wave_equal_recomputed": true,
+   "target_source": "task22_cache (exact TASK-22 training target)"
+  },
+  "alignment": {
+   "crop_samples": [
+    471082,
+    518954
+   ],
+   "crop_seconds_in_track": [
+    19.628416666666666,
+    21.623083333333334
+   ],
+   "mel": {
+    "frames": 187,
+    "hop": 256,
+    "n_fft": 1024,
+    "win_size": 1024,
+    "reflect_pad_samples": 384,
+    "center": false,
+    "frame_center_samples_first_last": [
+     128.0,
+     47744.0
+    ],
+    "first_frame_window_samples": [
+     -384,
+     640
+    ],
+    "last_frame_window_samples": [
+     47232.0,
+     48256.0
+    ],
+    "note": "frames whose n_fft window extends past the crop see reflect-padded audio of the crop, not the track"
+   },
+   "muq": {
+    "tokens": 50,
+    "token_center_samples_first_last": [
+     0.0,
+     47040.0
+    ],
+    "token_hop_samples": 960.0,
+    "frames_per_second": 25.066844919786096,
+    "extraction": "isolated crop (47,872 samples), as TASK-22; tokens near the crop ends see only crop audio"
+   },
+   "source_positions_min_max": [
+    0.13333334028720856,
+    49.0
+   ],
+   "edge_replicated_mel_frames": {
+    "count": 3,
+    "frames": [
+     184,
+     185,
+     186
+    ]
+   },
+   "translator_receptive_field_mel_frames": 13,
+   "boundary_definition": "mel frames within 6 of either crop end (half the translator's 13-frame receptive field: its convolutions zero-pad there) or with an edge-replicated MuQ source position",
+   "boundary_frames": 12,
+   "interior_frames": 175,
+   "unresolved": [
+    "MuQ token centers are geometric centers of the conv frontend; after the conformer's global attention a token is not localized, so a token's 'time' is a convention, not a measured receptive field",
+    "isolated-crop extraction: MuQ's edge tokens lack the track context outside the crop (as in TASK-22)",
+    "matching lengths (50 tokens -> 187 frames) does not by itself prove alignment; the frame-center mapping was audited in TASK-15/16 (impulse tests in tests/), not re-measured here"
+   ]
+  },
+  "target_dynamic_range": {
+   "min": -11.512925148010254,
+   "max": 0.4490634799003601,
+   "mean": -5.046633720397949,
+   "std": 2.519265651702881,
+   "p01_p50_p99": [
+    -11.512925148010254,
+    -4.824802398681641,
+    -0.5166698694229126
+   ],
+   "range_nats": 11.96198844909668,
+   "range_db": 103.90050506591797,
+   "fraction_at_log_floor": 0.043048128485679626,
+   "log_floor": -11.512925148010254
+  },
+  "normalization": {
+   "features": "identity (TASK-22 feeds raw features)",
+   "target": "identity (raw log-mel)",
+   "inverse_before_vocoding": "identity, then clamp(min=log floor) exactly as TASK-22's decode",
+   "inverse_check_max_abs": 0.0
+  },
+  "bigvgan_compatibility": {
+   "input_shape": [
+    1,
+    100,
+    187
+   ],
+   "num_mels_matches": true,
+   "output_samples": 47872,
+   "output_matches_crop_length": true,
+   "bins_raised_by_decode_clamp": 0,
+   "output_finite": true,
+   "gt_mel_round_trip_l1": 0.11044245958328247,
+   "note": "gt_mel_round_trip_l1 = official mel of BigVGAN(target) vs target: a waveform-to-mel round trip, NOT direct mel error"
+  },
+  "regions": {
+   "transient_frame": 112,
+   "transient_window": [
+    88,
+    136
+   ],
+   "harmonic_window": [
+    48,
+    96
+   ],
+   "harmonic_bins": [
+    0,
+    64
+   ],
+   "harmonic_fraction_window_mean": 0.7771831390758355,
+   "onset_note": "librosa onset_strength(center=False, hop 256): frame j covers samples from 256*j, about half a hop from mel frame j's center; used only to place the zoom window"
+  },
+  "selection_scores": [
+   {
+    "crop_id": "rock.00009:eval:memorized:18",
+    "start": 471082,
+    "harmonic_fraction": 0.9422970414161682,
+    "onset_peak_over_median": 16.29106903076172,
+    "rms": 0.0882185623049736,
+    "rank_sum": 111.0
+   },
+   {
+    "crop_id": "blues.00031:eval:memorized:18",
+    "start": 473790,
+    "harmonic_fraction": 0.9684628248214722,
+    "onset_peak_over_median": 12.530250549316406,
+    "rms": 0.16366250813007355,
+    "rank_sum": 107.0
+   },
+   {
+    "crop_id": "blues.00037:eval:memorized:6",
+    "start": 121427,
+    "harmonic_fraction": 0.8696027994155884,
+    "onset_peak_over_median": 18.376394271850586,
+    "rms": 0.11982860416173935,
+    "rank_sum": 107.0
+   },
+   {
+    "crop_id": "country.00054:eval:memorized:6",
+    "start": 119773,
+    "harmonic_fraction": 0.8659577965736389,
+    "onset_peak_over_median": 18.583276748657227,
+    "rms": 0.12985782325267792,
+    "rank_sum": 107.0
+   },
+   {
+    "crop_id": "country.00054:eval:memorized:18",
+    "start": 471183,
+    "harmonic_fraction": 0.8089388012886047,
+    "onset_peak_over_median": 21.78204917907715,
+    "rms": 0.12141350656747818,
+    "rank_sum": 101.0
+   },
+   {
+    "crop_id": "blues.00037:eval:memorized:18",
+    "start": 463270,
+    "harmonic_fraction": 0.8009667992591858,
+    "onset_peak_over_median": 28.877717971801758,
+    "rms": 0.09141772985458374,
+    "rank_sum": 100.0
+   },
+   {
+    "crop_id": "hiphop.00072:eval:memorized:6",
+    "start": 138377,
+    "harmonic_fraction": 0.8367185592651367,
+    "onset_peak_over_median": 17.7973690032959,
+    "rms": 0.28962793946266174,
+    "rank_sum": 100.0
+   },
+   {
+    "crop_id": "reggae.00025:eval:memorized:6",
+    "start": 123981,
+    "harmonic_fraction": 0.7821731567382812,
+    "onset_peak_over_median": 56.51060485839844,
+    "rms": 0.11889546364545822,
+    "rank_sum": 99.0
+   },
+   {
+    "crop_id": "country.00017:eval:memorized:6",
+    "start": 129927,
+    "harmonic_fraction": 0.8484098315238953,
+    "onset_peak_over_median": 15.703510284423828,
+    "rms": 0.19070978462696075,
+    "rank_sum": 98.0
+   },
+   {
+    "crop_id": "jazz.00000:eval:memorized:6",
+    "start": 136058,
+    "harmonic_fraction": 0.8708382248878479,
+    "onset_peak_over_median": 13.079365730285645,
+    "rms": 0.06724240630865097,
+    "rank_sum": 95.0
+   },
+   {
+    "crop_id": "blues.00031:eval:memorized:6",
+    "start": 132081,
+    "harmonic_fraction": 0.9541024565696716,
+    "onset_peak_over_median": 9.222441673278809,
+    "rms": 0.13845501840114594,
+    "rank_sum": 94.0
+   },
+   {
+    "crop_id": "reggae.00056:eval:memorized:6",
+    "start": 131589,
+    "harmonic_fraction": 0.8486146330833435,
+    "onset_peak_over_median": 11.95295238494873,
+    "rms": 0.14998941123485565,
+    "rank_sum": 90.0
+   },
+   {
+    "crop_id": "classical.00070:eval:memorized:18",
+    "start": 464257,
+    "harmonic_fraction": 0.989667534828186,
+    "onset_peak_over_median": 8.028133392333984,
+    "rms": 0.10279728472232819,
+    "rank_sum": 88.0
+   },
+   {
+    "crop_id": "jazz.00005:eval:memorized:18",
+    "start": 467287,
+    "harmonic_fraction": 0.8854302763938904,
+    "onset_peak_over_median": 10.581395149230957,
+    "rms": 0.10205462574958801,
+    "rank_sum": 87.0
+   },
+   {
+    "crop_id": "rock.00009:eval:memorized:6",
+    "start": 133185,
+    "harmonic_fraction": 0.6875622272491455,
+    "onset_peak_over_median": 36.44688034057617,
+    "rms": 0.0591915063560009,
+    "rank_sum": 86.0
+   },
+   {
+    "crop_id": "hiphop.00072:eval:memorized:18",
+    "start": 459557,
+    "harmonic_fraction": 0.8071568608283997,
+    "onset_peak_over_median": 11.261038780212402,
+    "rms": 0.2582622766494751,
+    "rank_sum": 80.0
+   },
+   {
+    "crop_id": "jazz.00073:eval:memorized:18",
+    "start": 469213,
+    "harmonic_fraction": 0.9449747800827026,
+    "onset_peak_over_median": 7.7427849769592285,
+    "rms": 0.15470555424690247,
+    "rank_sum": 79.0
+   },
+   {
+    "crop_id": "jazz.00005:eval:memorized:6",
+    "start": 120243,
+    "harmonic_fraction": 0.9192339777946472,
+    "onset_peak_over_median": 8.01998233795166,
+    "rms": 0.14479219913482666,
+    "rank_sum": 77.0
+   },
+   {
+    "crop_id": "country.00008:eval:memorized:18",
+    "start": 476044,
+    "harmonic_fraction": 0.9502221941947937,
+    "onset_peak_over_median": 7.1114821434021,
+    "rms": 0.28994664549827576,
+    "rank_sum": 76.0
+   },
+   {
+    "crop_id": "reggae.00025:eval:memorized:18",
+    "start": 457058,
+    "harmonic_fraction": 0.7129227519035339,
+    "onset_peak_over_median": 14.827295303344727,
+    "rms": 0.12447958439588547,
+    "rank_sum": 75.0
+   },
+   {
+    "crop_id": "reggae.00056:eval:memorized:18",
+    "start": 467600,
+    "harmonic_fraction": 0.7891396284103394,
+    "onset_peak_over_median": 11.060819625854492,
+    "rms": 0.13229955732822418,
+    "rank_sum": 73.0
+   },
+   {
+    "crop_id": "rock.00023:eval:memorized:6",
+    "start": 121798,
+    "harmonic_fraction": 0.8020423650741577,
+    "onset_peak_over_median": 9.236763000488281,
+    "rms": 0.12863752245903015,
+    "rank_sum": 73.0
+   },
+   {
+    "crop_id": "hiphop.00006:eval:memorized:18",
+    "start": 460355,
+    "harmonic_fraction": 0.6334842443466187,
+    "onset_peak_over_median": 17.117536544799805,
+    "rms": 0.16835720837116241,
+    "rank_sum": 72.0
+   },
+   {
+    "crop_id": "classical.00070:eval:memorized:6",
+    "start": 120979,
+    "harmonic_fraction": 0.9455390572547913,
+    "onset_peak_over_median": 5.726243019104004,
+    "rms": 0.1160481870174408,
+    "rank_sum": 71.0
+   },
+   {
+    "crop_id": "disco.00031:eval:memorized:6",
+    "start": 136850,
+    "harmonic_fraction": 0.7422916293144226,
+    "onset_peak_over_median": 11.374300956726074,
+    "rms": 0.20291896164417267,
+    "rank_sum": 71.0
+   },
+   {
+    "crop_id": "pop.00090:eval:memorized:18",
+    "start": 462545,
+    "harmonic_fraction": 0.7375560402870178,
+    "onset_peak_over_median": 11.897218704223633,
+    "rms": 0.15540938079357147,
+    "rank_sum": 71.0
+   },
+   {
+    "crop_id": "classical.00005:eval:memorized:18",
+    "start": 455672,
+    "harmonic_fraction": 0.9586672186851501,
+    "onset_peak_over_median": 4.575718879699707,
+    "rms": 0.158054381608963,
+    "rank_sum": 70.0
+   },
+   {
+    "crop_id": "country.00008:eval:memorized:6",
+    "start": 123669,
+    "harmonic_fraction": 0.903161346912384,
+    "onset_peak_over_median": 6.182445526123047,
+    "rms": 0.28707030415534973,
+    "rank_sum": 67.0
+   },
+   {
+    "crop_id": "country.00014:eval:memorized:18",
+    "start": 456189,
+    "harmonic_fraction": 0.7921589612960815,
+    "onset_peak_over_median": 8.44215202331543,
+    "rms": 0.16164067387580872,
+    "rank_sum": 66.0
+   },
+   {
+    "crop_id": "disco.00093:eval:memorized:18",
+    "start": 466198,
+    "harmonic_fraction": 0.46194201707839966,
+    "onset_peak_over_median": 21.833005905151367,
+    "rms": 0.16799044609069824,
+    "rank_sum": 65.0
+   },
+   {
+    "crop_id": "blues.00080:eval:memorized:6",
+    "start": 127242,
+    "harmonic_fraction": 0.7174078822135925,
+    "onset_peak_over_median": 11.147634506225586,
+    "rms": 0.2742812931537628,
+    "rank_sum": 64.0
+   },
+   {
+    "crop_id": "rock.00023:eval:memorized:18",
+    "start": 465114,
+    "harmonic_fraction": 0.8880556225776672,
+    "onset_peak_over_median": 5.15920352935791,
+    "rms": 0.1276863068342209,
+    "rank_sum": 63.0
+   },
+   {
+    "crop_id": "blues.00080:eval:memorized:18",
+    "start": 460777,
+    "harmonic_fraction": 0.6782195568084717,
+    "onset_peak_over_median": 11.191191673278809,
+    "rms": 0.2211376279592514,
+    "rank_sum": 61.0
+   },
+   {
+    "crop_id": "jazz.00000:eval:memorized:18",
+    "start": 457850,
+    "harmonic_fraction": 0.6138337850570679,
+    "onset_peak_over_median": 14.34349536895752,
+    "rms": 0.13594582676887512,
+    "rank_sum": 61.0
+   },
+   {
+    "crop_id": "classical.00005:eval:memorized:6",
+    "start": 122714,
+    "harmonic_fraction": 0.9288080334663391,
+    "onset_peak_over_median": 4.315066814422607,
+    "rms": 0.1213395968079567,
+    "rank_sum": 60.0
+   },
+   {
+    "crop_id": "classical.00046:eval:memorized:18",
+    "start": 456491,
+    "harmonic_fraction": 0.9348052144050598,
+    "onset_peak_over_median": 4.011440277099609,
+    "rms": 0.1785641610622406,
+    "rank_sum": 59.0
+   },
+   {
+    "crop_id": "pop.00039:eval:memorized:18",
+    "start": 464980,
+    "harmonic_fraction": 0.7749413847923279,
+    "onset_peak_over_median": 8.05410099029541,
+    "rms": 0.1831648051738739,
+    "rank_sum": 59.0
+   },
+   {
+    "crop_id": "country.00014:eval:memorized:6",
+    "start": 137096,
+    "harmonic_fraction": 0.4530544579029083,
+    "onset_peak_over_median": 17.077253341674805,
+    "rms": 0.10855893045663834,
+    "rank_sum": 57.0
+   },
+   {
+    "crop_id": "rock.00043:eval:memorized:18",
+    "start": 462821,
+    "harmonic_fraction": 0.5074744820594788,
+    "onset_peak_over_median": 15.173197746276855,
+    "rms": 0.12926290929317474,
+    "rank_sum": 57.0
+   },
+   {
+    "crop_id": "jazz.00073:eval:memorized:6",
+    "start": 130290,
+    "harmonic_fraction": 0.6756455898284912,
+    "onset_peak_over_median": 9.529434204101562,
+    "rms": 0.150911346077919,
+    "rank_sum": 56.0
+   },
+   {
+    "crop_id": "metal.00008:eval:memorized:18",
+    "start": 460754,
+    "harmonic_fraction": 0.7371010780334473,
+    "onset_peak_over_median": 8.2603178024292,
+    "rms": 0.14101248979568481,
+    "rank_sum": 55.0
+   },
+   {
+    "crop_id": "hiphop.00006:eval:memorized:6",
+    "start": 129932,
+    "harmonic_fraction": 0.43724390864372253,
+    "onset_peak_over_median": 15.866451263427734,
+    "rms": 0.13135729730129242,
+    "rank_sum": 54.0
+   },
+   {
+    "crop_id": "pop.00032:eval:memorized:18",
+    "start": 461253,
+    "harmonic_fraction": 0.5318357944488525,
+    "onset_peak_over_median": 13.228951454162598,
+    "rms": 0.16476206481456757,
+    "rank_sum": 54.0
+   },
+   {
+    "crop_id": "disco.00031:eval:memorized:18",
+    "start": 457168,
+    "harmonic_fraction": 0.4693377614021301,
+    "onset_peak_over_median": 13.665080070495605,
+    "rms": 0.14386464655399323,
+    "rank_sum": 53.0
+   },
+   {
+    "crop_id": "country.00017:eval:memorized:18",
+    "start": 456377,
+    "harmonic_fraction": 0.8203338980674744,
+    "onset_peak_over_median": 4.7369384765625,
+    "rms": 0.17845061421394348,
+    "rank_sum": 51.0
+   },
+   {
+    "crop_id": "metal.00095:eval:memorized:18",
+    "start": 468399,
+    "harmonic_fraction": 0.8391784429550171,
+    "onset_peak_over_median": 4.543790340423584,
+    "rms": 0.10316243022680283,
+    "rank_sum": 51.0
+   },
+   {
+    "crop_id": "pop.00032:eval:memorized:6",
+    "start": 131978,
+    "harmonic_fraction": 0.4543037712574005,
+    "onset_peak_over_median": 13.433338165283203,
+    "rms": 0.14095567166805267,
+    "rank_sum": 50.0
+   },
+   {
+    "crop_id": "classical.00046:eval:memorized:6",
+    "start": 124976,
+    "harmonic_fraction": 0.845282793045044,
+    "onset_peak_over_median": 4.29014253616333,
+    "rms": 0.16865547001361847,
+    "rank_sum": 49.0
+   },
+   {
+    "crop_id": "disco.00020:eval:memorized:6",
+    "start": 121674,
+    "harmonic_fraction": 0.7471700310707092,
+    "onset_peak_over_median": 7.218452453613281,
+    "rms": 0.17021729052066803,
+    "rank_sum": 49.0
+   },
+   {
+    "crop_id": "rock.00043:eval:memorized:6",
+    "start": 120161,
+    "harmonic_fraction": 0.6376761198043823,
+    "onset_peak_over_median": 8.975961685180664,
+    "rms": 0.14985984563827515,
+    "rank_sum": 49.0
+   },
+   {
+    "crop_id": "metal.00008:eval:memorized:6",
+    "start": 122575,
+    "harmonic_fraction": 0.6546626091003418,
+    "onset_peak_over_median": 8.298439025878906,
+    "rms": 0.151225745677948,
+    "rank_sum": 48.0
+   },
+   {
+    "crop_id": "pop.00090:eval:memorized:6",
+    "start": 128997,
+    "harmonic_fraction": 0.6304116249084473,
+    "onset_peak_over_median": 8.90432071685791,
+    "rms": 0.15832281112670898,
+    "rank_sum": 46.0
+   },
+   {
+    "crop_id": "pop.00039:eval:memorized:6",
+    "start": 137628,
+    "harmonic_fraction": 0.647345244884491,
+    "onset_peak_over_median": 8.1046781539917,
+    "rms": 0.17950984835624695,
+    "rank_sum": 45.0
+   },
+   {
+    "crop_id": "disco.00020:eval:memorized:18",
+    "start": 467012,
+    "harmonic_fraction": 0.7241331934928894,
+    "onset_peak_over_median": 6.9219441413879395,
+    "rms": 0.16866563260555267,
+    "rank_sum": 42.0
+   },
+   {
+    "crop_id": "metal.00000:eval:memorized:6",
+    "start": 121280,
+    "harmonic_fraction": 0.7521032094955444,
+    "onset_peak_over_median": 4.875227451324463,
+    "rms": 0.2000935971736908,
+    "rank_sum": 42.0
+   },
+   {
+    "crop_id": "hiphop.00091:eval:memorized:6",
+    "start": 127289,
+    "harmonic_fraction": 0.6942087411880493,
+    "onset_peak_over_median": 5.9317755699157715,
+    "rms": 0.18199269473552704,
+    "rank_sum": 37.0
+   },
+   {
+    "crop_id": "metal.00095:eval:memorized:6",
+    "start": 121025,
+    "harmonic_fraction": 0.511764645576477,
+    "onset_peak_over_median": 8.786405563354492,
+    "rms": 0.15080857276916504,
+    "rank_sum": 37.0
+   },
+   {
+    "crop_id": "reggae.00092:eval:memorized:18",
+    "start": 473294,
+    "harmonic_fraction": 0.7586977481842041,
+    "onset_peak_over_median": 3.717179536819458,
+    "rms": 0.18676850199699402,
+    "rank_sum": 35.0
+   },
+   {
+    "crop_id": "disco.00013:eval:memorized:6",
+    "start": 131958,
+    "harmonic_fraction": 0.6078948378562927,
+    "onset_peak_over_median": 7.757020473480225,
+    "rms": 0.18766997754573822,
+    "rank_sum": 33.0
+   },
+   {
+    "crop_id": "hiphop.00091:eval:memorized:18",
+    "start": 454951,
+    "harmonic_fraction": 0.6228176951408386,
+    "onset_peak_over_median": 7.426441192626953,
+    "rms": 0.15857453644275665,
+    "rank_sum": 32.0
+   },
+   {
+    "crop_id": "reggae.00092:eval:memorized:6",
+    "start": 137569,
+    "harmonic_fraction": 0.5391756892204285,
+    "onset_peak_over_median": 7.727384567260742,
+    "rms": 0.17764972150325775,
+    "rank_sum": 29.0
+   },
+   {
+    "crop_id": "disco.00093:eval:memorized:6",
+    "start": 126920,
+    "harmonic_fraction": 0.5515890717506409,
+    "onset_peak_over_median": 7.207443714141846,
+    "rms": 0.2060423642396927,
+    "rank_sum": 27.0
+   },
+   {
+    "crop_id": "metal.00000:eval:memorized:18",
+    "start": 456114,
+    "harmonic_fraction": 0.6453489661216736,
+    "onset_peak_over_median": 4.348545551300049,
+    "rms": 0.2046366184949875,
+    "rank_sum": 24.0
+   },
+   {
+    "crop_id": "disco.00013:eval:memorized:18",
+    "start": 460798,
+    "harmonic_fraction": 0.627568244934082,
+    "onset_peak_over_median": 3.5277276039123535,
+    "rms": 0.19905948638916016,
+    "rank_sum": 15.0
+   }
+  ],
+  "selection_top_rank_sum": "rock.00009:eval:memorized:18",
+  "selection_agrees": true,
+  "shapes": {
+   "features": [
+    1,
+    50,
+    1024
+   ],
+   "target_mel": [
+    1,
+    100,
+    187
+   ],
+   "mask": [
+    187
+   ],
+   "waveform": [
+    47872
+   ],
+   "positions": [
+    187
+   ]
+  }
+ },
+ "cached_positions_first3_last3": [
+  0.13333334028720856,
+  0.4000000059604645,
+  0.6666666865348816,
+  49.0,
+  49.0,
+  49.0
+ ],
+ "mask_shape_sum": [
+  [
+   187
+  ],
+  187.0
+ ],
+ "bigvgan": {
+  "sampling_rate": 24000,
+  "num_mels": 100,
+  "n_fft": 1024,
+  "win_size": 1024,
+  "hop_size": 256,
+  "fmin": 0,
+  "fmax": null,
+  "upsample_rates": [
+   4,
+   4,
+   2,
+   2,
+   2,
+   2
+  ],
+  "normalize_volume": true,
+  "upsample_product": 256,
+  "params": 112414512,
+  "requires_grad_any": false,
+  "log_mel_floor": -11.512925148010254,
+  "reflect_pad": 384
+ },
+ "crop": {
+  "num_samples": 47872,
+  "seconds": 1.9946666666666666,
+  "peak": 0.4770928919315338,
+  "rms": 0.0882185623049736
+ },
+ "target_mel": {
+  "shape": [
+   1,
+   100,
+   187
+  ],
+  "dtype": "torch.float32",
+  "min": -11.512925148010254,
+  "max": 0.4490634799003601,
+  "mean": -5.046633243560791,
+  "max_abs_diff_vs_cached": 0.0002994537353515625,
+  "frames_per_second": 93.75,
+  "bins_at_floor": 805
+ },
+ "bigvgan_output": {
+  "shape": [
+   1,
+   1,
+   47872
+  ],
+  "dtype": "torch.float32"
+ },
+ "muq": {
+  "model_id": "OpenMuQ/MuQ-large-msd-iter",
+  "params": 333401472,
+  "training_mode": false,
+  "requires_grad_any": false,
+  "frontend": {
+   "sample_rate": 24000,
+   "n_fft": 2048,
+   "win_length": 2048,
+   "hop_length": 240,
+   "center": true,
+   "pad": 0,
+   "power": 2.0,
+   "n_mels": 128,
+   "f_min": 0.0,
+   "f_max": 12000.0,
+   "mel_scale": "htk",
+   "norm": null,
+   "is_db": true,
+   "db_top_db": null,
+   "stat_keys": [
+    "melspec_2048_cnt",
+    "melspec_2048_mean",
+    "melspec_2048_std"
+   ],
+   "stat_values": {
+    "melspec_2048_cnt": 14282760192.0,
+    "melspec_2048_mean": 6.768444971712967,
+    "melspec_2048_std": 18.417922652295623
+   }
+  },
+  "n_fold": 4,
+  "label_rate": 25,
+  "conv": [
+   {
+    "conv1_stride": [
+     2,
+     2
+    ],
+    "conv1_kernel": [
+     3,
+     3
+    ],
+    "conv1_padding": [
+     1,
+     1
+    ],
+    "out_channels": 512,
+    "shortcut": true
+   },
+   {
+    "conv1_stride": [
+     2,
+     2
+    ],
+    "conv1_kernel": [
+     3,
+     3
+    ],
+    "conv1_padding": [
+     1,
+     1
+    ],
+    "out_channels": 512,
+    "shortcut": true
+   }
+  ],
+  "conv_linear": [
+   16384,
+   1024
+  ],
+  "conformer_layers": 12,
+  "has_rvq_attr": true,
+  "quantizer_attrs": [],
+  "is_flash": false,
+  "w2v2_config": {
+   "activation_dropout": 0.1,
+   "adapter_kernel_size": 3,
+   "adapter_stride": 2,
+   "add_adapter": false,
+   "apply_spec_augment": true,
+   "attention_dropout": 0.1,
+   "bos_token_id": 1,
+   "classifier_proj_size": 256,
+   "codevector_dim": 768,
+   "conformer_conv_dropout": 0.1,
+   "contrastive_logits_temperature": 0.1,
+   "conv_bias": true,
+   "conv_depthwise_kernel_size": 31,
+   "ctc_loss_reduction": "sum",
+   "ctc_zero_infinity": false,
+   "diversity_loss_weight": 0.1,
+   "do_stable_layer_norm": true,
+   "eos_token_id": 2,
+   "feat_extract_activation": "gelu",
+   "feat_extract_dropout": 0.0,
+   "feat_extract_norm": "layer",
+   "feat_proj_dropout": 0.1,
+   "feat_quantizer_dropout": 0.0,
+   "final_dropout": 0.1,
+   "gradient_checkpointing": false,
+   "hidden_act": "swish",
+   "hidden_dropout": 0.1,
+   "hidden_dropout_prob": 0.1,
+   "hidden_size": 1024,
+   "initializer_range": 0.02,
+   "intermediate_size": 4096,
+   "layer_norm_eps": 1e-05,
+   "layerdrop": 0.0,
+   "mask_feature_length": 10,
+   "mask_feature_min_masks": 0,
+   "mask_feature_prob": 0.0,
+   "mask_time_length": 10,
+   "mask_time_min_masks": 2,
+   "mask_time_prob": 0.05,
+   "max_source_positions": 5000,
+   "model_type": "wav2vec2-conformer",
+   "num_adapter_layers": 3,
+   "num_attention_heads": 16,
+   "num_codevector_groups": 2,
+   "num_codevectors_per_group": 320,
+   "num_conv_pos_embedding_groups": 16,
+   "num_conv_pos_embeddings": 128,
+   "num_feat_extract_layers": 7,
+   "num_hidden_layers": 24,
+   "num_negatives": 100,
+   "output_hidden_size": 1024,
+   "pad_token_id": 0,
+   "position_embeddings_type": "rotary",
+   "proj_codevector_dim": 768,
+   "rotary_embedding_base": 10000,
+   "torch_dtype": "float32",
+   "transformers_version": "4.19.0.dev0",
+   "use_weighted_layer_sum": false,
+   "vocab_size": 32,
+   "xvector_output_dim": 512
+  },
+  "frontend_out_shape": [
+   1,
+   128,
+   199
+  ],
+  "frontend_normalized_mean_std": [
+   -0.7710707783699036,
+   1.3037724494934082
+  ],
+  "conv_out_shape": [
+   1,
+   50,
+   1024
+  ],
+  "num_hidden_states": 13,
+  "hidden_state_shapes": {
+   "0": [
+    1,
+    50,
+    1024
+   ],
+   "1": [
+    1,
+    50,
+    1024
+   ],
+   "12": [
+    1,
+    50,
+    1024
+   ]
+  },
+  "hidden0_equals_conv_out": true,
+  "block1_check": {
+   "num_hidden_states": 13,
+   "num_blocks": 12,
+   "index0_is_block1_input": true,
+   "index_is_block_output": true,
+   "differs_from_index0": true,
+   "finite": true
+  },
+  "block1_vs_cached_max_abs": 0.010735750198364258,
+  "block1_vs_cached_rel_rms": 0.0005003917613066733,
+  "block1_std": 1.721854567527771,
+  "last_std": 0.8960517048835754,
+  "dtype": "torch.float32",
+  "finite": true
+ },
+ "alignment": {
+  "muq_token_centers_first3_last": [
+   0.0,
+   960.0,
+   1920.0,
+   47040.0
+  ],
+  "muq_token_hop_samples": 960.0,
+  "muq_frames_per_second_nominal": 25.0,
+  "muq_frames_per_second_crop": 25.066844919786096,
+  "mel_frame_centers_first3_last": [
+   128.0,
+   384.0,
+   640.0,
+   47744.0
+  ],
+  "positions_first3_last3": [
+   0.13333334028720856,
+   0.4000000059604645,
+   0.6666666865348816,
+   49.0,
+   49.0,
+   49.0
+  ],
+  "num_positions_clamped_high": 3,
+  "num_positions_clamped_low": 0,
+  "mel_per_muq": 3.75,
+  "last_token_center_s": 1.96,
+  "last_mel_center_s": 1.9893333333333334
+ },
+ "translator": {
+  "params": 1271908,
+  "receptive_field_mel_frames": 13,
+  "receptive_field_seconds": 0.13866666666666666,
+  "current": {
+   "params": 1271908,
+   "macs": 201818624,
+   "source_rf": {
+    "trunk_receptive_field_mel_frames": 13,
+    "resampling_support_source_frames": 2,
+    "source_frames_per_output_min_median_max": [
+     2,
+     5,
+     6
+    ]
+   }
+  },
+  "wide_x2": {
+   "params": 4509796,
+   "macs": 771294208,
+   "source_rf": {
+    "trunk_receptive_field_mel_frames": 13,
+    "resampling_support_source_frames": 2,
+    "source_frames_per_output_min_median_max": [
+     2,
+     5,
+     6
+    ]
+   }
+  },
+  "learned_resampler": {
+   "params": 1305764,
+   "macs": 208047968,
+   "source_rf": {
+    "trunk_receptive_field_mel_frames": 13,
+    "resampling_support_source_frames": 4,
+    "source_frames_per_output_min_median_max": [
+     3,
+     7,
+     8
+    ]
+   }
+  }
+ }
+}

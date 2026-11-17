@@ -1,0 +1,47 @@
+% Figure B: temporal grids at the start and end of one 47,872-sample crop. Drawn to scale: x is in samples of
+% the 24 kHz crop, relative to each panel's first sample (TeX dimensions cannot hold 47,872 directly, so
+% integer arithmetic uses \numexpr). Centers follow time_alignment.py (verified in scripts/geometry.json):
+% MuQ frontend frame k at 240k (center=True; frame 199 dropped by MuQ), token i at 960i, mel frame j at 256j+128.
+\newcommand{\gridpanel}[3]{% #1 first sample (int), #2 y offset, #3 title
+\begin{scope}[yshift=#2cm, x=0.0045cm]
+  \def\A{#1}
+  \node[anchor=south west, font=\scriptsize\bfseries] at (0,3.45) {#3};
+  \edef\cs{\the\numexpr 0-\A\relax}\ifnum\cs<0 \def\cs{0}\fi
+  \edef\ce{\the\numexpr 47872-\A\relax}\ifnum\ce>3000 \def\ce{3000}\fi
+  \fill[black!6] (\cs,0.05) rectangle (\ce,3.3);
+  \draw[->] (0,3.0) -- (3050,3.0);
+  \foreach \s in {0,...,100}{\edef\c{\the\numexpr 480*\s-\A\relax}
+     \ifnum\c<0\else\ifnum\c>3000\else \draw (\c,2.93) -- (\c,3.07);\fi\fi}
+  \foreach \k in {0,...,199}{\edef\c{\the\numexpr 240*\k-\A\relax}
+     \ifnum\c<0\else\ifnum\c>3000\else
+       \ifnum\k<199 \fill[muqcol!60] (\c,2.25) circle (1pt);\else \draw[muqcol!60] (\c,2.25) circle (1.3pt) node[above, font=\tiny] {dropped};\fi\fi\fi}
+  \foreach \i in {0,...,49}{\edef\c{\the\numexpr 960*\i-\A\relax}
+     \ifnum\c<0\else\ifnum\c>3000\else
+       \draw[muqcol, very thick] (\c,1.3) -- (\c,1.6); \node[font=\tiny, muqcol, anchor=south] at (\c,1.6) {$i{=}\i$};\fi\fi}
+  \foreach \j in {0,...,186}{\edef\c{\the\numexpr 256*\j+128-\A\relax}
+     \ifnum\c<0\else\ifnum\c>3000\else \fill[melcol] (\c,0.6) circle (1.2pt);\fi\fi}
+  \foreach \y/\t in {3.0/{waveform 24 kHz (ticks: 480 samples = 20 ms)},
+                     2.25/{MuQ STFT frames, hop 240 = 10 ms (100 Hz)},
+                     1.45/{MuQ tokens, hop 960 = 40 ms (25 Hz)},
+                     0.6/{BigVGAN mel frames, hop 256 = 10.67 ms (93.75 Hz)}}
+     \node[anchor=east, align=right, font=\tiny, text width=2.6cm] at (-30,\y) {\t};
+\end{scope}}
+\begin{tikzpicture}[font=\scriptsize, >=Latex]
+  \gridpanel{-500}{0}{(a) Crop start: samples $-500$ to 2{,}500}
+  \gridpanel{45200}{-4.4}{(b) Crop end: samples 45{,}200 to 48{,}200}
+  % panel (a) annotations, x relative to sample -500
+  \begin{scope}[x=0.0045cm]
+    \draw[melcol, |-|] (116,0.25) -- (1140,0.25) node[pos=0.5, below, font=\tiny, text=melcol] {mel frame 0 window: samples $-384$..640 (reflect-padded outside the crop)};
+    \draw[melcol, densely dotted, thick] (628,0.6) -- (628,1.3);
+    \node[font=\tiny, melcol, anchor=west] at (640,0.95) {$p_0 = 128/960 = 0.133$ (frame 0 reads mostly token 0)};
+    \draw[muqcol!70, |-|] (0,2.5) -- (1524,2.5);
+    \node[font=\tiny, muqcol!80, anchor=west] at (1540,2.5) {STFT frame 0 window: samples $-1024$..1024};
+    \node[font=\tiny, anchor=north] at (500,0.05) {crop start (sample 0)};
+  \end{scope}
+  % panel (b) annotations, x relative to sample 45,200
+  \begin{scope}[yshift=-4.4cm, x=0.0045cm]
+    \draw[thick] (2672,0.0) -- (2672,3.35) node[above, font=\tiny] {crop end (47{,}872)};
+    \draw[melcol, densely dotted, thick] (1840,1.3) -- (1840,0.35);
+    \node[font=\tiny, align=left, anchor=north west, text=melcol] at (30,0.4) {mel frames 184--186 (centers 47{,}232; 47{,}488; 47{,}744) lie after the last token center (47{,}040, $i{=}49$):\\their source positions are clamped to $p{=}49$ (edge replication).};
+  \end{scope}
+\end{tikzpicture}

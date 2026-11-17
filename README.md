@@ -1,205 +1,187 @@
 # muq-inversion
 
-Proof-of-concept: can a small HiFi-GAN-style decoder invert MuQ's final time-resolved
-representation (`last_hidden_state`) back into recognizable music audio? See `CLAUDE.md` for the
-full experimental scope, gates, and reproducibility rules.
+An interpretability experiment: can recognizable music audio be recovered from the time-resolved hidden
+states of a frozen music encoder, [MuQ](https://arxiv.org/abs/2501.01108)
+(`OpenMuQ/MuQ-large-msd-iter`)?
+
+The current pipeline (TASK-15 onward) trains only a small **translator**:
+
+```mermaid
+flowchart LR
+    A["GTZAN crop<br/>24 kHz mono, 47,872 samples (1.995 s)<br/>whole track peak-normalized to 0.95"] --> B["frozen MuQ<br/>conformer block 1 (hidden_states[1])<br/>50 x 1024 @ 25 Hz"]
+    A --> T["official BigVGAN log-mel (target)<br/>100 x 187 @ 93.75 Hz"]
+    B --> D["MuQToMelTranslator (trained)<br/>Linear 1024->256, frame-center interpolation,<br/>3x Conv1d k5, Linear 256->100"]
+    D --> E["predicted log-mel<br/>100 x 187"]
+    E -->|"L1 loss, before vocoding"| T
+    E --> F["clamp to log(1e-5)<br/>(evaluation only)"]
+    F --> G["frozen BigVGAN-v2<br/>nvidia/bigvgan_v2_24khz_100band_256x"]
+    G --> H["reconstructed waveform<br/>47,872 samples @ 24 kHz"]
+```
+
+- **Frozen:** MuQ and the [BigVGAN-v2](https://arxiv.org/abs/2206.04658) vocoder.
+  - BigVGAN is never in the training graph: the loss compares mel spectrograms before vocoding.
+  - No discrete quantizer codes are traversed. MuQ's RVQ is used only for its pretraining targets.
+- **Data:** 2-second crops of GTZAN; genre labels are metadata only.
+- **MuQ representation:**
+  - TASK-15 to TASK-21 used the final output (`last_hidden_state`).
+  - TASK-22 onward uses the output of the first conformer block, which a fixed decoder recovers much more easily.
+
+This replaces the project's original plans, which are kept in `notes/DECISIONS.md` as prior evidence:
+
+- a HiFi-GAN-style waveform decoder;
+- translators into frozen DAC and EnCodec codec latents (TASK-01 to TASK-14).
+
+The full write-up of the BigVGAN line, with every tensor shape, rate and alignment convention, is in
+**`reports/task26_pipeline_report/main.pdf`** (TASK-26).
+
+`CLAUDE.md` holds the reproducibility rules and working protocol. Its scope section still describes the
+earlier EnCodec pipeline.
+
+## Results so far (through TASK-25)
+
+Every number below is direct mel L1 in nats, the training loss, on one training seed. For reference, BigVGAN's
+own round trip (true mel → audio → mel) scores about 0.11 on every set. That is a different quantity, not a
+floor.
+
+**Unseen tracks** (identical evaluation crops; best checkpoint chosen on val):
+
+| Task | MuQ input; training data | val | test | val2 | test2 |
+| --- | --- | --- | --- | --- | --- |
+| TASK-18 | last layer; 32 tracks | 0.576 | 0.525 | 0.557 | 0.586 |
+| TASK-19 | last layer; 128 tracks | 0.513 | 0.490 | 0.510 | 0.517 |
+| TASK-20 | last layer; 512 tracks, early stopping | 0.475 | 0.465 | 0.481 | 0.494 |
+| TASK-21 | last layer; 512 tracks, 47 h of training | 0.455 | 0.454 | 0.473 | 0.480 |
+| TASK-22 | **first block**; 512 tracks | **0.260** | **0.257** | **0.260** | **0.263** |
+
+**Fixed training crops** (fitting diagnostics on the TASK-22 representation):
+
+| Task | Setting | Training-set fit | Unseen-track monitoring (16 crops) |
+| --- | --- | --- | --- |
+| TASK-23 | one crop | 0.020 | — |
+| TASK-24 | N = 1 / 4 / 16 / 64 / 256 crops | 0.0002 / 0.041 / 0.095 / 0.174 / 0.243 | 1.34 / 1.13 / 0.66 / 0.44 / 0.31 |
+| TASK-25 | N = 256: best optimizer settings / 2× width | 0.167–0.170 / 0.145 | 0.36–0.375 / 0.364 (vs 0.308 for the worst-fitting arm) |
+
+### What has been established
+
+- **Memorization works.**
+  - A few crops are memorized well below the round-trip level (TASK-15/16).
+  - One crop reaches 0.020 (TASK-23).
+  - Informal listening found no difference from vocoding the true mel.
+- **Unseen tracks are recognizable but well below the oracle.**
+  - Every model beats shuffled and constant-input controls.
+  - Blinded listening (TASK-19/20) rated the reconstructions recognizable but well below the oracle.
+  - The 4–10% gains from more data were not audible.
+- **Representation depth matters a lot.** Under the same translator and recipe, first-block features lower
+  unseen-track error by about 43% compared with the last layer (TASK-22). This shows greater recoverability with
+  this decoder, not that deeper layers discard information. Blinded listening of TASK-22 is still pending.
+- **Fitting many examples is the bottleneck now.** Training error rises steeply with the number of fixed crops
+  (TASK-24). With 512 tracks, training and unseen-track errors are almost equal (TASK-22: 0.255 vs 0.26).
+- **Optimization and width help fitting, but not unseen tracks.**
+  - Learning rate and batch size interact (TASK-25).
+  - Doubling the width gives the best fit.
+  - A learned temporal resampler is worth only 0.003.
+  - Lower training error came with higher unseen-track error.
+  - The arms sound nearly the same.
+
+### Open questions
+
+- Is the remaining error a matter of capacity, optimization, or an ambiguous mapping from features to mel?
+- Why does better fitting not transfer to unseen tracks?
+- Which mel errors are audible? Predictions are measurably smoother over time than the targets.
+- Variability across training seeds has not been measured.
+
+None of these results establishes an information ceiling, invertibility, or non-invertibility. See the
+TASK-26 report (Sections 6–7) for the full synthesis and the discriminating next experiments.
+
+## Where things are
+
+| Path | Contents |
+| --- | --- |
+| `tasks/TASK-NN.md` | Verbatim task briefs |
+| `notes/DECISIONS.md` | Protocol and result entry per task, plus corrections |
+| `notes/MEMORY.md` | Verified durable facts |
+| `notes/NEXT.md` | Current status and the next command to run |
+| `configs/taskNN*.yaml` | All tunable settings (`*_smoke.yaml` for bounded smoke runs) |
+| `src/muq_inversion/` | Package code, notably `bigvgan_common.py` (BigVGAN loading, official mel, floor), `time_alignment.py` (frame-center alignment), `models/muq_mel_translator.py`, `device.py`, `wandb_logging.py`, `taskNN.py` helpers |
+| `scripts/` | Entry points: `train_task18_heldout.py` (the shared TASK-18 to TASK-22 trainer), `task23_overfit.py`, `task24_ladder.py`, `task25_ablation.py`, `taskNN_analyze.py`, listening-package builders |
+| `aces/` | ACES (TAMU, Intel PVC) Slurm jobs, smoke scripts and `TASKNN_ACES.md` runbooks |
+| `reports/task26_pipeline_report/` | Synthesis report: LaTeX source, figures, inspection scripts |
+| `data/manifests/` | Tracked split and crop manifests, with the Sturm (2013) GTZAN fault list |
+| `artifacts/`, `runs/`, `data/raw`, `data/cache`, `third_party/` | Git-ignored outputs, checkpoints, audio, feature caches, BigVGAN code |
 
 ## Setup
 
 ```bash
-uv sync
-```
-
-## Gates implemented so far
-
-```bash
-uv run python -m muq_inversion.cli doctor --config configs/smoke.yaml       # Gate 0
-uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml # Gate 1
+uv sync --frozen
+uv run python scripts/fetch_bigvgan.py      # one time per machine: official BigVGAN code + weights at a pinned revision (~450 MB) into third_party/
 uv run pytest -q
 uv run ruff check .
 ```
 
-## BigVGAN-v2 memorization test (TASK-15)
-
-Uses NVIDIA's official `nvidia/bigvgan_v2_24khz_100band_256x` code and weights, fetched once at a
-pinned revision into the git-ignored `third_party/` directory (no new Python dependencies):
+GTZAN audio must be at `data/raw/gtzan/genres/<genre>/<genre>.NNNNN.wav`. Gate 0/1 checks:
 
 ```bash
-uv run python scripts/fetch_bigvgan.py                             # ~450 MB, one-time
-uv run python scripts/task15_bigvgan_oracle.py                     # positive control
-uv run python scripts/train_task15_bigvgan_memorization.py --n 2   # then --n 8
+uv run python -m muq_inversion.cli doctor --config configs/smoke.yaml
+uv run python -m muq_inversion.cli prepare-data --config configs/smoke.yaml
 ```
 
-TASK-16 reran N=2 with the two TASK-15 audit corrections (MuQ features interpolated at each mel
-frame's physical center time; predicted mel clamped to BigVGAN's log floor before decoding),
-switched on by its own config. TASK-15's config keeps the original behavior:
+## Running experiments
+
+Every task has its own config, script and smoke test. Smoke runs disable W&B; full runs log to W&B, with
+one group per task and one run per arm, and keep a local JSONL mirror. Examples:
 
 ```bash
-uv run python scripts/train_task15_bigvgan_memorization.py --config configs/task16_bigvgan_corrected.yaml --n 2
-uv run python scripts/task16_compare_n2.py                         # TASK-15 vs TASK-16 table
-```
-
-`tests/test_bigvgan_common.py` skips its BigVGAN-dependent tests until the fetch has run. Results:
-`artifacts/task15_bigvgan_memorization/TASK-15_RESULTS.md` (local) and
-`notes/DECISIONS.md#task15-bigvgan-memorization`.
-
-## Running TASK-15/16 on MPS, CUDA, XPU, or CPU
-
-The same scripts run on Apple MPS, NVIDIA CUDA, Intel XPU (e.g. Data Center GPU Max / PVC), and
-CPU. Only the device changes; the pipeline doesn't:
-
-```mermaid
-flowchart LR
-    A["GTZAN crop<br/>24 kHz mono, 47,872 samples"] --> B["frozen MuQ<br/>last_hidden_state<br/>50 x 1024"]
-    A --> T["official BigVGAN mel<br/>100 x 187 (target, CPU)"]
-    B --> C["time alignment<br/>(TASK-16: at mel frame centers)"]
-    C --> D["MuQToMelTranslator<br/>(only trained part)"]
-    D --> E["raw predicted log-mel<br/>100 x 187"]
-    E -->|"L1 loss, Adam, FP32"| T
-    E --> F["decode-time clamp to log(1e-5)<br/>(TASK-16 config)"]
-    F --> G["frozen BigVGAN-v2<br/>(use_cuda_kernel=False)"]
-    G --> H["waveform 47,872 samples"]
-    subgraph DEV["one device: --device auto | cuda | xpu | mps | cpu"]
-        B
-        C
-        D
-        E
-        F
-        G
-    end
-```
-
-**Device selection** (`src/muq_inversion/device.py`, the only module that calls `torch.cuda`,
-`torch.xpu`, or `torch.mps`):
-
-- `--device auto` picks CUDA, then XPU, then MPS. If none is available it fails, unless the
-  config sets `allow_cpu_fallback: true`.
-- An explicit `--device cuda|xpu|mps` fails clearly if that backend is unavailable. It never
-  falls back to CPU. `--device cpu` is always allowed.
-- `PYTORCH_ENABLE_MPS_FALLBACK=1` is refused, because it moves unsupported MPS ops to the CPU
-  silently.
-- Everything runs in FP32. There is no autocast and no mixed precision. MuQ and BigVGAN stay
-  frozen in eval mode.
-- `--device` overrides the config's `device_request`. Every other setting comes from the YAML.
-- Requested/resolved device, backend, device name, dtype, torch version, and accelerator
-  availability are recorded in the console log, `report.json`, checkpoints, and W&B.
-- Checkpoints load onto the CPU first (`map_location="cpu"`), then onto any device.
-
-**Numerical note.** Numerical trajectories need not be bit-identical across MPS, CUDA, XPU, and
-CPU. Kernels and reduction orders differ, and small differences compound over 5,000 Adam steps.
-The scientific pass criteria (the four TASK-15 memorization criteria, the shuffled-across
-control, and listening) are identical on every backend. Compare backends by those criteria, not by
-exact loss values.
-
-### Smoke test (bounded, no training)
-
-```bash
-uv run python scripts/task15_smoke_test.py --device mps    # Apple Silicon
-uv run python scripts/task15_smoke_test.py --device cuda   # NVIDIA
-uv run python scripts/task15_smoke_test.py --device cpu
-uv run --project envs/xpu python scripts/task15_smoke_test.py --device xpu   # Intel, see below
-```
-
-It runs each stage once on the N=2 crops, using the TASK-16 config by default:
-
-- MuQ forward;
-- corrected MuQ-to-mel alignment;
-- translator forward/backward;
-- raw predicted mel;
-- decode-time mel-floor clamp;
-- BigVGAN inference;
-- 3 optimizer steps;
-- checkpoint save, then load onto both CPU and the device;
-- shuffled-across control.
-
-It writes `artifacts/backend_smoke/<backend>_<UTC timestamp>/report.json` and exits 1 on the first
-failing stage. The error names the stage and device. The numbers after 3 steps aren't results.
-They only show that every stage runs.
-
-### Full commands per backend
-
-```bash
-# Apple MPS (M-series Mac)
-uv sync --frozen
+# TASK-15/16 memorization (BigVGAN oracle, then N = 2 or 8)
 uv run python scripts/task15_bigvgan_oracle.py --device mps
-uv run python scripts/train_task15_bigvgan_memorization.py --n 2 --device mps
 uv run python scripts/train_task15_bigvgan_memorization.py --config configs/task16_bigvgan_corrected.yaml --n 2 --device mps
 
-# NVIDIA CUDA (e.g. BlueHive; see bluehive/run_task15.slurm)
-uv sync --frozen
-uv run python scripts/task15_bigvgan_oracle.py --device cuda
-uv run python scripts/train_task15_bigvgan_memorization.py --n 2 --device cuda
+# TASK-18..22 held-out training (shared trainer; bounded smoke shown)
+uv run python scripts/train_task18_heldout.py --config configs/task22_smoke.yaml --device mps --wandb-mode disabled
 
-# Intel XPU (Linux x86_64, e.g. ACES PVC)
-uv sync --project envs/xpu --frozen
-uv run --project envs/xpu python scripts/task15_bigvgan_oracle.py --device xpu
-uv run --project envs/xpu python scripts/train_task15_bigvgan_memorization.py --n 2 --device xpu
+# TASK-25 ablation: all stages, smoke budget
+uv run python scripts/task25_ablation.py all --config configs/task25_smoke.yaml --device mps --run-name <tag> --wandb-mode disabled
 ```
 
-`scripts/fetch_bigvgan.py` must have run once on each machine, because `third_party/` is
-git-ignored.
+Full runs from TASK-18 onward ran on ACES. Each task's runbook is `aces/TASKNN_ACES.md`. The usual sequence:
 
-### Environment differences
+1. Run the interactive smoke test on a PVC node: `bash aces/taskNN_smoke.sh`.
+2. Submit the job: `sbatch --exclude=ac079 aces/run_taskNN_v1.slurm`. Node ac079 has a failed GPU.
+3. Copy back `artifacts/taskNN/`, `runs/taskNN/` and `aces/logs/`.
+
+Exit code 3 means the job checkpointed before its walltime; resubmitting resumes it.
+
+## Devices and environments
+
+The same code runs on Apple MPS, NVIDIA CUDA, Intel XPU and CPU. All device handling lives in
+`src/muq_inversion/device.py`:
+
+- `--device auto` picks CUDA, then XPU, then MPS. If none is available it fails, unless the config sets
+  `allow_cpu_fallback: true`.
+- An explicitly requested backend that is unavailable fails clearly; it never falls back to CPU silently.
+- `PYTORCH_ENABLE_MPS_FALLBACK=1` is refused.
+- Everything runs in FP32, with no autocast. MuQ and BigVGAN stay frozen in eval mode.
+- The device and environment are recorded in reports, checkpoints and W&B. Checkpoints load via the CPU.
+
+Trajectories are not bit-identical across backends. In particular, the backward pass of the frame-center
+interpolation is nondeterministic on MPS, XPU and multithreaded CPU. Resume equivalence is verified bit-exact
+on deterministic CPU (`--deterministic`).
 
 | Backend | Environment | Notes |
 | --- | --- | --- |
-| MPS | canonical `pyproject.toml` + `uv.lock` | macOS arm64 PyPI torch wheel. Leave `PYTORCH_ENABLE_MPS_FALLBACK` unset. |
-| CUDA | canonical `pyproject.toml` + `uv.lock` | The Linux x86_64 PyPI torch wheel is the CUDA build, and its `nvidia-*` libraries are in the lock. Needs an NVIDIA driver on the node. Determinism flags as in `bluehive/*.slurm`. |
-| XPU | `envs/xpu/pyproject.toml` + `envs/xpu/uv.lock` | Same torch/torchaudio/torchvision versions as `+xpu` builds (`2.14.0+xpu`, `2.11.0+xpu`, `0.29.0+xpu`) from `download.pytorch.org/whl/xpu`, because PyPI's Linux torchaudio/torchvision link CUDA (`libcudart.so.13`), plus Intel runtime wheels (`intel-sycl-rt`, `onemkl-*`, `triton-xpu`, ...). Every other package is pinned to the canonical lock's version. Needs the Intel GPU driver (Level Zero) on the node. Linux x86_64 only. |
-| CPU | canonical | `--device cpu` explicitly. Slow, but useful for checks. |
+| MPS | canonical `pyproject.toml` + `uv.lock` | macOS arm64 PyPI torch wheel |
+| CUDA | canonical | Linux x86_64 PyPI torch (CUDA build); needs an NVIDIA driver |
+| XPU | `envs/xpu/pyproject.toml` + `envs/xpu/uv.lock` | `+xpu` builds of torch, torchaudio and torchvision from `download.pytorch.org/whl/xpu`, plus Intel runtime wheels. Every other package is pinned to the canonical lock. Linux x86_64 only. Run with `uv run --project envs/xpu ...`; the ACES scripts set `UV_PROJECT`. |
+| CPU | canonical | `--device cpu`; slow, but useful for exact checks |
 
-The XPU environment is a separate uv project, so the canonical lock never changes for Intel. It
-installs this repository editable and gets its own `envs/xpu/.venv`. When the canonical `uv.lock`
-changes, regenerate the `constraint-dependencies` list in `envs/xpu/pyproject.toml` from it. Then
-run `uv lock --project envs/xpu` and check that only `torch`, `torchaudio`, and `torchvision` differ (by the `+xpu` suffix) between the two locks.
+When the canonical `uv.lock` changes:
 
-### ACES PVC smoke-test procedure
+1. Regenerate the `constraint-dependencies` list in `envs/xpu/pyproject.toml` from it.
+2. Run `uv lock --project envs/xpu`.
+3. Check that only `torch`, `torchaudio` and `torchvision` differ between the two locks.
 
-Cluster specifics such as partition, GRES name, modules, and paths are **assumptions to check
-against the ACES documentation before use**. They have not been tested from this repository.
-
-1. On a login node, install uv if needed (official standalone installer) and clone the repo to
-   scratch. Then run:
-
-   ```bash
-   export HF_HOME=$SCRATCH/hf_cache UV_CACHE_DIR=$SCRATCH/uv_cache
-   uv sync --project envs/xpu --frozen
-   uv run --project envs/xpu python scripts/fetch_bigvgan.py
-   ```
-
-   The login node needs network access, both for this step and to download the MuQ weights.
-   Copy or link `data/raw/gtzan` (git-ignored) so that the N=2 manifest
-   (`data/manifests/gate3_scale_2.csv`) resolves.
-2. Get an interactive PVC allocation. For example, `srun --partition=pvc --gres=gpu:pvc:1
-   --time=00:30:00 --pty bash` (check the partition and GRES names). Then confirm the device is
-   visible:
-
-   ```bash
-   uv run --project envs/xpu python -c "import torch; print(torch.xpu.is_available(), torch.xpu.get_device_name(0))"
-   ```
-
-3. Run the bounded smoke test with `HF_HUB_OFFLINE=1`:
-
-   ```bash
-   HF_HUB_OFFLINE=1 uv run --project envs/xpu python scripts/task15_smoke_test.py --device xpu
-   uv run --project envs/xpu pytest -q tests/test_device.py tests/test_time_alignment.py
-   ```
-
-4. Pass: `PASSED`, and every stage in `report.json` reads `"status": "ok"`. `max_abs_diff_cpu_vs_device`
-   should be small, about 1e-5. If a stage fails, `report.json` records the stage, the exception,
-   and the operator name. Nothing is retried on the CPU, so record the failure as-is before trying
-   a full run.
-5. Only after a pass, run the oracle and N=2 commands above with `--device xpu`. Judge the run by
-   the same pass criteria as MPS/CUDA.
-
-## TASK-18: held-out generalization (32/8/8) on ACES
+A bounded per-backend smoke test of every pipeline stage, with no training:
 
 ```bash
-uv run python scripts/build_task18_manifests.py --verify-audio            # fixed manifests (committed)
-uv run python scripts/train_task18_heldout.py --config configs/task18_smoke.yaml --device mps --wandb-mode disabled   # bounded smoke
+uv run python scripts/task15_smoke_test.py --device mps
+uv run --project envs/xpu python scripts/task15_smoke_test.py --device xpu
 ```
-
-The full run is the SLURM job `aces/run_task18_v1.slurm` on one PVC. Step-by-step instructions,
-including the interactive smoke test `aces/task18_smoke.sh`, are in `aces/TASK18_ACES.md`.
-
-See `notes/NEXT.md` for current status and the next command to run.

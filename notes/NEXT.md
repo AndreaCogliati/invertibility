@@ -1,5 +1,12 @@
 # NEXT
 
+## Latest: TASK-26 synthesis report (2026-11-06)
+
+`reports/task26_pipeline_report/` (brief `tasks/TASK-26.md`): LaTeX report on the MuQ -> mel -> BigVGAN line (TASK-15..25), compiled `main.pdf` (17 pp.). Documentation only; no training.
+- Build: see its README (`inspect_geometry.py`, `make_figures.py`, `check_numbers.py` 51/51, then `latexmk -pdf main.tex`).
+- New observations made for it (descriptive, from saved predictions): multi-example predictions are temporally smoother than targets (mean |dt| ratio 0.57-0.83 on TASK-25 monitoring crops; lowest-L1 arms smoothest); the anchor track's source has a full-scale glitch at 7.18 s that sets its whole-track peak-normalization gain (x0.477).
+- Cheapest next diagnostics (no training): rate `artifacts/task22/listening_blind_v1/`; decompose saved-prediction errors by band/transients; vocode smoothed ground-truth mels.
+
 ## Latest: TASK-25 result (2026-11-06)
 
 ACES 2299021 finished cleanly; downloaded and verified (`artifacts/task25/task25_v1/`, `runs/task25/task25_v1/` without checkpoints, `aces/logs/muq-task25-v1-2299021.*`). The local partial attempt is in `runs/task25/task25_v1_local_incomplete/`.

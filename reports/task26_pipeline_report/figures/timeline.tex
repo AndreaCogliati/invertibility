@@ -1,0 +1,31 @@
+% Figure C: experiment sequence of the MuQ -> mel -> BigVGAN line (schematic).
+\begin{tikzpicture}[font=\scriptsize, >=Latex,
+  q/.style={draw, rounded corners=1.5pt, fill=detcol, text width=6.3cm, align=left, inner sep=2pt, minimum height=7mm},
+  a/.style={draw, rounded corners=1.5pt, fill=white, text width=7.3cm, align=left, inner sep=2pt, minimum height=7mm},
+  t/.style={font=\scriptsize\bfseries, text width=1.35cm, align=left, anchor=west},
+  ph/.style={font=\scriptsize\itshape, text=black!60, anchor=west}]
+\def\rows{%
+  15/{Is MuQ$_{12}$\,$\to$\,mel\,$\to$\,BigVGAN mechanically viable? Memorize $N{=}2$, 8 fixed crops.}/{Yes: mel L1 0.024 ($N{=}2$), 0.032 ($N{=}8$); shuffled control $>$1.2. Listening: matches oracle.},
+  16/{Do the audit fixes (frame-center alignment, mel-floor clamp) change $N{=}2$?}/{No material change (0.025/0.023). Fixes kept for all later tasks.},
+  17/{Can the same code run on MPS/CUDA/XPU/CPU?}/{Yes; device module; XPU env. No scientific change.},
+  18/{Do unseen tracks reconstruct? (32/8/8 tracks)}/{Held-out beats all controls; recognizable but poor (val 0.576, test 0.525); overfits after 1k steps.},
+  19/{Data (32 vs 128 tracks) $\times$ schedule (warmup+cosine)?}/{More data helps 9--10\%; schedule does nothing; blinded listening: arms indistinguishable.},
+  20/{Does 512 tracks help further? (early stopping)}/{Yes, 4--7\%, diminishing; train/held-out gap nearly closed.},
+  21/{Was T20's stop a transient? Train 47\,h.}/{Recovered; best at 60k (2--3\% on non-selection sets); afterwards training fit improves, held-out does not.},
+  22/{Same translator on conformer block 1 instead of the last layer?}/{$\approx$40--45\% lower mel L1 on every set and step (val 0.455$\to$0.260).},
+  23/{Can the decoder memorize ONE pair (the anchor)?}/{Yes (0.020 vs 0.238 for T22 on the same crop); no audible decoder difference.},
+  24/{Where does fitting break as $N$ fixed pairs grows (1--256)?}/{Fit error rises with $N$ (0.0002$\to$0.243); monitoring improves (1.34$\to$0.31).},
+  25/{Optimization (LR$\times$batch) vs width vs learned upsampling at $N{=}256$?}/{LR$\times$batch interact; width fits best (0.145); resampler $-$0.003; better fit $\Rightarrow$ worse monitoring.}}
+\foreach \n/\qq/\aa [count=\r] in \rows {
+  \node[t] (t\r) at (0,-\r*0.95) {TASK-\n};
+  \node[q, right=1mm of t\r] (q\r) {\qq};
+  \node[a, right=2mm of q\r] (a\r) {\aa};
+  \draw[->] (q\r) -- (a\r);
+}
+\node[ph] at (1.45,-0.3) {Question};
+\node[ph] at (8.3,-0.3) {Main observation (details and caveats in Sec.~\ref{sec:sequence})};
+\draw[decorate, decoration={brace, amplitude=3pt, mirror}, thick, black!50] (-0.15,-0.55) -- node[left=4pt, align=right, font=\tiny] {mechanics} (-0.15,-3.2);
+\draw[decorate, decoration={brace, amplitude=3pt, mirror}, thick, black!50] (-0.15,-3.45) -- node[left=4pt, align=right, font=\tiny] {held-out\\data\\duration} (-0.15,-7.0);
+\draw[decorate, decoration={brace, amplitude=3pt, mirror}, thick, black!50] (-0.15,-7.25) -- node[left=4pt, align=right, font=\tiny] {repre-\\sentation} (-0.15,-7.95);
+\draw[decorate, decoration={brace, amplitude=3pt, mirror}, thick, black!50] (-0.15,-8.2) -- node[left=4pt, align=right, font=\tiny] {fitting\\diagnostics} (-0.15,-10.8);
+\end{tikzpicture}

@@ -1904,3 +1904,10 @@ ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu
 - Launched the full run locally (3 background processes).
 - 2026-11-06: local MPS processes for task25_v1 died at session end (ConnectionResetError); renamed to runs/task25/task25_v1_local_incomplete. Downloaded the ACES run (rsync; artifacts 47 MB, runs 182 MB without checkpoints, logs, smoke log).
 - 2026-11-06: Listening (user, 2026-11-06; 4 training crops: anchor rock.00009, jazz.00027, disco.00090, pop.00040): hardly any audible difference between arms; possibly E slightly better on disco and pop, very subtle. All arms well below the ground-truth-mel oracle. The 0.23 -> 0.13 range of mel L1 differences is not perceptually salient here.
+
+## 2026-11-06 TASK-26 (synthesis report)
+- Report in reports/task26_pipeline_report/. geometry.json measured on CPU: MuQ frontend (1,128,199) dB, std-normalized (6.7684/18.4179); hs[0]/hs[1]/hs[12] (1,50,1024); target mel (1,100,187), floor -11.513, 805 bins at floor on anchor; RVQ module present (use_rvq_target true) but only called in get_targets; 8192-way head logits computed and discarded.
+- Regenerated anchor preds: T21 best 0.371573 (recorded 0.371579), T22 best 0.2383648 (recorded 0.2383647).
+- Temporal variation V=mean|m[:,t+1]-m[:,t]|: anchor target 0.254; T23 B 0.255; T21 0.137; T22 0.149; T24 N256 0.150; T25 C 0.171, E 0.167. T25 monitoring ratio pred/target: A .63 B .75 C .83 D .57 E .69 F .58.
+- rock.00009 raw has alternating +-1 samples at 7.18 s; soxr resample peak 1.992 -> whole-track gain x0.477.
+- TASK-24 p90/median across N is 1.04-1.13 (N=16: 1.132); DECISIONS says 1.04-1.12 (rounding).
