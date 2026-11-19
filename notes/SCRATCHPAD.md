@@ -1911,3 +1911,11 @@ ACES job 2261678 (task22_L1_v1) died in task22_verify_layer.py: torch 2.14.0+xpu
 - Temporal variation V=mean|m[:,t+1]-m[:,t]|: anchor target 0.254; T23 B 0.255; T21 0.137; T22 0.149; T24 N256 0.150; T25 C 0.171, E 0.167. T25 monitoring ratio pred/target: A .63 B .75 C .83 D .57 E .69 F .58.
 - rock.00009 raw has alternating +-1 samples at 7.18 s; soxr resample peak 1.992 -> whole-track gain x0.477.
 - TASK-24 p90/median across N is 1.04-1.13 (N=16: 1.132); DECISIONS says 1.04-1.12 (rounding).
+
+## 2026-11-19 TASK-27 (adversarial fine-tuning; prepared, not run on ACES)
+- C final checkpoint not local (TASK-25 download excluded checkpoints); ssh login.aces.hprc.tamu.edu -> Permission denied (publickey). Stand-in for local smoke: runs/task25/task25_v1_local_incomplete/C/checkpoints/final.pt (sha 47844330..., fit L1 0.169788 on MPS).
+- D: 334,097 params, RF 28x28 (298.7 ms), logits 19x40; D fwd ~0.5 GMAC/crop vs G 0.2.
+- Calibration lambda depends on warm-up trajectory: MPS 0.0151 (|gL1| 0.258, |gadv| 1.709), deterministic CPU 0.00885 (|gadv| 2.91), CPU with 20 warm-up updates 0.0428. D sign accuracy ~0.50 after 100 warm-up updates at LR 1e-4 (hinge 2.000 -> ~1.995).
+- MPS smoke t27_dev1 (256 updates): A and B identical to 4 decimals (fit 0.16995, monitor 0.3736/0.3737); weighted adv/L1 grad 0.10 -> 0.54 by the end.
+- `DEVICE=mps LOCAL=1 bash aces/task27_smoke.sh` PASSED (496 s): 19 tests; RESUME CHECK PASS (A@30, B@40; calibration identical); MPS A 85, B 19 updates/s -> estimate ~1.2 h / ~10 billing-h (upper; XPU faster).
+- First CPU resume attempt with the 256-update smoke budget was too slow (~10 min per B pass) -> stopped; added configs/task27_resume*.yaml (64 updates, 20 warm-up, 2 calibration batches) for the CPU resume step only.

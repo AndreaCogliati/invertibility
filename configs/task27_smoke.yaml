@@ -1,0 +1,23 @@
+# TASK-27 smoke: both arms, calibration and report on the real pool and the real TASK-25 C start
+# (ACES), 4,096 presentations (256 generator updates). Separate output directories.
+#   uv run python scripts/task27_adversarial.py all --config configs/task27_smoke.yaml --device xpu --run-name <tag> --wandb-mode disabled
+base_config: configs/task27.yaml
+training:
+  batch: 16
+  total_presentations: 4096
+  lr_drops: [[2048, 0.1], [3072, 0.1]]
+  g_lr: 1.0e-4
+  g_betas: [0.9, 0.999]
+  d_lr: 1.0e-4
+  d_betas: [0.5, 0.9]
+  lambda_ramp_fraction: 0.1
+  sampler_seed: task27-sampler-0
+  log_every: 128
+  fit_eval_every: 512
+  monitor_eval_every: 1024
+  latest_every: 1024
+  eval_chunk: 64
+  spike_factor: 2.0
+  recovery_factor: 1.1
+run_root: runs/task27_smoke
+artifact_root: artifacts/task27_smoke

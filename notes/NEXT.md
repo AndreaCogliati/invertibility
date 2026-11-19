@@ -1,5 +1,18 @@
 # NEXT
 
+## Latest: TASK-27 adversarial fine-tuning, prepared for ACES (2026-11-19)
+
+Spec, runbook, resources: `aces/TASK27_ACES.md`; protocol [[DECISIONS.md#task27-adversarial-protocol]].
+Blocker for running here: the common start (TASK-25 C final checkpoint) exists only on ACES, and ACES SSH from this Mac now fails (publickey). Nothing submitted, nothing committed.
+Last successful command: `DEVICE=mps LOCAL=1 bash aces/task27_smoke.sh` (stand-in start; see SCRATCHPAD for result).
+
+**Next (user):**
+1. Decide on the calibration caveat: the discriminator is at chance after the prescribed 100-update warm-up, so lambda is calibrated against an almost uninformative D and depends on backend/trajectory (MPS 0.0151 vs CPU 0.0089). Run as written, or change the warm-up?
+2. Commit and push; `git pull` on ACES.
+3. On a PVC node: `module load WebProxy uv && bash aces/task27_smoke.sh`. Pass = 19 tests, RESUME CHECK PASS, both arms and report on XPU, prepare shows start `e52fc84e...` (no STAND-IN); note the printed estimate.
+4. Only when instructed: `mkdir -p aces/logs && sbatch --exclude=ac079 aces/run_task27_v1.slurm` (about 0.6-0.8 h, about 5-7 billing-hours; exit 3 -> resubmit).
+5. Copy back `artifacts/task27/task27_v1/`, `runs/task27/task27_v1/` (checkpoints optional), `aces/logs/muq-task27-v1-*`; rate `artifacts/task27/task27_v1/listening_blind/` blind, then `score-listening`.
+
 ## Latest: TASK-26 synthesis report (2026-11-06)
 
 `reports/task26_pipeline_report/` (brief `tasks/TASK-26.md`): LaTeX report on the MuQ -> mel -> BigVGAN line (TASK-15..25), compiled `main.pdf` (17 pp.). Documentation only; no training.

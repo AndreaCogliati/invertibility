@@ -1,0 +1,31 @@
+# TASK-27 deterministic-CPU resume check only (used by aces/task27_smoke.sh step 1): the smoke config with a
+# 1,024-presentation budget (64 generator updates) and a short calibration, so the CPU run stays bounded.
+# Mechanics test, not a result. Separate output directories.
+base_config: configs/task27_smoke_local.yaml
+calibration:
+  warmup_updates: 20
+  warmup_sampler_seed: task27-dwarmup-0
+  n_batches: 2
+  batch_sampler_seed: task27-calib-0
+  target_ratio: 0.1
+  min_grad_norm: 1.0e-8
+  max_saturation: 0.99
+training:
+  batch: 16
+  total_presentations: 1024
+  lr_drops: [[512, 0.1], [768, 0.1]]
+  g_lr: 1.0e-4
+  g_betas: [0.9, 0.999]
+  d_lr: 1.0e-4
+  d_betas: [0.5, 0.9]
+  lambda_ramp_fraction: 0.1
+  sampler_seed: task27-sampler-0
+  log_every: 64
+  fit_eval_every: 256
+  monitor_eval_every: 512
+  latest_every: 512
+  eval_chunk: 64
+  spike_factor: 2.0
+  recovery_factor: 1.1
+run_root: runs/task27_resume
+artifact_root: artifacts/task27_resume

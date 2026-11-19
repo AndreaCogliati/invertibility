@@ -1,0 +1,87 @@
+# TASK-27: adversarial mel-spectrogram reconstruction (tasks/TASK-27.md, aces/TASK27_ACES.md).
+#   uv run python scripts/task27_adversarial.py all --config configs/task27.yaml --device xpu --run-name task27_v1
+#
+# A loss ablation: two arms continue TASK-25 C's final generator on TASK-24's fixed N=256 pool (+ the 16-crop
+# monitoring set) with identical start weights, sample stream, batch, LR schedule, exposure and evaluation
+# schedule. A: masked mel L1. B: masked mel L1 + lambda * hinge adversarial loss (conditional PatchGAN).
+# Generator recipe otherwise from TASK-22/25: original width (hidden 256), Adam (0.9, 0.999), weight decay 0,
+# no gradient clipping, FP32. MuQ features are cached (frozen; no gradient); BigVGAN only for evaluation.
+task: TASK-27
+recipe: {config: configs/task22.yaml, arm: L1}
+device_request: auto
+allow_cpu_fallback: false
+seed: 0                                   # seed_everything before calibration and before each arm
+
+data:
+  ladder_pairs: runs/task24/task24_v1/ladder_pairs.pt
+  manifest_csv: data/manifests/task24_ladder.csv
+  anchor_pair: runs/task23/task23_v1/pair.pt
+  n_fit: 256
+  n_monitor: 16
+
+start:                                    # common start: TASK-25 C final (ACES job 2299021); never substituted
+  checkpoint: runs/task25/task25_v1/C/checkpoints/final.pt
+  expected_sha256: e52fc84ecfc4e17b365f22074aab83e9602dff0cc8780316b361c027957d7656   # runs/task25/task25_v1/C/summary.json final_sha256
+  expected_fit_l1: 0.16956926882266998                                                # same summary, final fit L1 (XPU)
+  fit_l1_atol: 1.0e-4                     # re-evaluation on the same backend; accelerator nondeterminism only
+  expected_update: 51200
+  expected_spec: {name: C, batch: 16, base_lr: 0.001, total_presentations: 819200}
+  standin: false
+
+discriminator:
+  cond_channels: 16                       # SN 1x1 Conv1d projection of the aligned MuQ features, broadcast over bins
+  channels: [32, 64, 128, 128]            # SN Conv2d widths; kernels/strides in task27.D_LAYERS: (3,1) (4,2) (4,2) (3,1) (3,1), no padding
+  leaky_slope: 0.2
+  init_seed: 0                            # same initialization for calibration and arm B
+
+calibration:
+  warmup_updates: 100                     # D-only updates before measuring (and again at the start of arm B)
+  warmup_sampler_seed: task27-dwarmup-0   # its own sample stream: the generator sample order stays identical in A and B
+  n_batches: 8                            # fixed training batches for the gradient-norm measurement
+  batch_sampler_seed: task27-calib-0
+  target_ratio: 0.1                       # lambda * median |g_adv| = 0.1 * median |g_L1|
+  min_grad_norm: 1.0e-8                   # below this a median gradient norm counts as degenerate
+  max_saturation: 0.99                    # both real and generated logits saturated after warm-up -> degenerate
+
+training:
+  batch: 16
+  total_presentations: 819200             # 51,200 generator updates
+  lr_drops: [[409600, 0.1], [614400, 0.1]]  # x0.1 at 50% and 75% of the exposure budget (generator and discriminator)
+  g_lr: 1.0e-4
+  g_betas: [0.9, 0.999]
+  d_lr: 1.0e-4
+  d_betas: [0.5, 0.9]
+  lambda_ramp_fraction: 0.1               # linear 0 -> lambda over the first 10% of generator updates
+  sampler_seed: task27-sampler-0          # one sample stream, identical in both arms
+  log_every: 1024                         # presentations
+  fit_eval_every: 16384
+  monitor_eval_every: 65536
+  latest_every: 65536
+  eval_chunk: 64
+  spike_factor: 2.0
+  recovery_factor: 1.1
+
+arms:
+  A: {adversarial: false}
+  B: {adversarial: true}
+
+listening:
+  selection_seed: task27-listening-0
+  training_fixed_ranks: [0, 1, 2, 3]      # TASK-23 anchor + TASK-24/25's pre-selected examples
+  n_training: 8
+  n_monitoring: 8
+  blind_seed: task27-blind-0
+
+report:
+  showcase_ranks: [0, 1, 2, 3]
+  zoom_frames: 48
+  harmonic_max_bin: 64
+  listening_peak: 0.9                     # one common gain for every file in the package (never > 1)
+  hop_size: 256
+  sample_rate: 24000
+  billing_per_job_hour: 8
+
+wandb_group: task27-adversarial-mel
+wandb_tags: [task27, n256, first-block, adversarial, loss-ablation]
+run_root: runs/task27
+artifact_root: artifacts/task27

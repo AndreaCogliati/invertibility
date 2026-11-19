@@ -16,11 +16,19 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from muq_inversion.bigvgan_common import bigvgan_log_mel_floor, load_bigvgan, official_mel
+from muq_inversion.bigvgan_common import (
+    bigvgan_log_mel_floor,
+    load_bigvgan,
+    official_mel,
+)
 from muq_inversion.encoder import FrozenMuQEncoder
 from muq_inversion.models.muq_mel_translator import MuQToMelTranslator
 from muq_inversion.task25 import build_model, forward_macs, source_receptive_field
-from muq_inversion.time_alignment import bigvgan_mel_frame_centers, muq_token_centers, source_positions
+from muq_inversion.time_alignment import (
+    bigvgan_mel_frame_centers,
+    muq_token_centers,
+    source_positions,
+)
 
 REPO = Path(__file__).resolve().parents[3]
 OUT = Path(__file__).resolve().parent / "geometry.json"

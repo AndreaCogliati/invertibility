@@ -1,0 +1,13 @@
+# TASK-27 LOCAL smoke only: TASK-25 C's ACES checkpoint is not on this machine, so the smoke uses the
+# explicitly labeled STAND-IN from the interrupted local MPS TASK-25 run (same arm C recipe, completed to
+# 819,200 presentations on MPS; runs/task25/task25_v1_local_incomplete/C/summary.json). Never used for results.
+base_config: configs/task27_smoke.yaml
+start:
+  checkpoint: runs/task25/task25_v1_local_incomplete/C/checkpoints/final.pt
+  expected_sha256: 478443302fbf358ff172e9cd3c58423bd4c508ce5cfbb0f553874fa2fa63b3a4
+  expected_fit_l1: 0.16978833079338074
+  fit_l1_atol: 1.0e-3
+  expected_update: 51200
+  expected_spec: {name: C, batch: 16, base_lr: 0.001, total_presentations: 819200}
+  standin: true
+  note: "local smoke stand-in (MPS-trained TASK-25 C); not the TASK-25 C ACES checkpoint"

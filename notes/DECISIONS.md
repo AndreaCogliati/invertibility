@@ -4266,3 +4266,80 @@ Paired per-crop differences (all with CIs excluding 0 for fitting):
 - D (the pre-specified candidate) is the weaker batch-16 LR for fitting, so E and F were compared against it.
 
 **Interpretation (hypotheses).** Optimization (effective step size, batch-1/1e-3 instability) explains part of TASK-24's 0.24 plateau. Width adds a capacity contribution (confounded with optimization and compute). The learned 4-tap resampler is not a major bottleneck at D's settings. On this pool, lower training error is memorization: transfer gets worse. Single seed. Listening (user, 2026-11-06): hardly any audible difference between arms, maybe E slightly better on disco/pop; all well below the ground-truth-mel oracle, so the measured fitting gains are not perceptually salient. Full analysis: `artifacts/task25/task25_v1/ANALYSIS.md`.
+
+## task27-adversarial-protocol: L1-only vs L1 + conditional PatchGAN hinge loss, continuing TASK-25 C on the N=256 pool (2026-11-19)
+
+**Context (`tasks/TASK-27.md`).** A loss ablation: does an adversarial term improve perceptual reconstruction without
+losing source correspondence?
+- **Relation to TASK-26.** The TASK-26 "specification" is the synthesis report (`reports/task26_pipeline_report/`); it
+  has no protocol or data that conflicts with TASK-27.
+  - TASK-27 tests the report's "objective / perceptual mismatch" possibility.
+  - The report had listed cheaper no-training diagnostics first (rate the TASK-22 package; decompose errors; vocode
+    smoothed true mels). They remain open; TASK-27 does not replace them.
+  - The report's temporal-smoothness observation is consistent with an objective effect, but it does not establish one.
+
+**Decisions.**
+- **Common start.**
+  - TASK-25 C's final checkpoint (ACES), verified by:
+    - state-dict SHA-256 `e52fc84e…` (from `runs/task25/task25_v1/C/summary.json`);
+    - its spec fields and update 51,200;
+    - a re-evaluated fit L1 equal to the recorded 0.169569 (±1e-4).
+  - **Missing locally:** the TASK-25 download excluded checkpoints, and ACES SSH from the Mac was refused on 2026-11-19
+    (publickey). The full run must execute on ACES.
+  - The local smoke uses an explicitly labeled stand-in, the MPS-trained C from the interrupted local TASK-25 run
+    (`configs/task27_smoke_local.yaml`, `standin: true`). It is never used for results.
+- **Arms.** A (L1) and B (L1 + lambda·hinge). Shared settings:
+  - identical start weights;
+  - `seed_everything(0)` per arm;
+  - the sample stream `task27-sampler-0`, order hash-checked equal;
+  - batch 16; 819,200 presentations (51,200 updates).
+  - Generator: Adam (0.9, 0.999) at LR 1e-4. The optimizer state is reset, as the brief asks: a new fine-tuning phase.
+  - LR ×0.1 at 50% and 75% of exposure (409,600 and 614,400), for the generator and the discriminator.
+  - FP32, no clipping, no early stopping. The evaluation schedule is TASK-25's (fit every 16,384; monitoring every 65,536).
+- **Discriminator.**
+  - Conditional 2D PatchGAN; spectral norm on every layer; no normalization; LeakyReLU 0.2; linear logits.
+  - Layers: 5 unpadded convs (k3 s1, k4 s2, k4 s2, k3 s1, k3 s1).
+  - Size: 334,097 parameters; receptive field 28 bins × 28 frames (298.7 ms); 19×40 logits per crop.
+  - Unpadded convolutions mean every receptive field lies inside the crop. Logits whose field touches an invalid frame
+    are masked (`logit_valid_mask`; all frames are valid here).
+  - **Conditioning.** Cached block-1 features, put on the mel grid by the generator's own frame-center interpolation,
+    then SN 1×1 Conv1d (1024→16), broadcast over the bins. The same conditioning is used for each real/fake pair (one
+    concatenated batch).
+  - **Input.** Clamp at the BigVGAN floor (what BigVGAN sees; targets already satisfy it), then a fixed affine using the
+    training targets' mean and std. Real and generated mels get the same preprocessing.
+- **Losses and gradient flow.**
+  - Hinge losses, exactly as in the brief. The L1 term is the existing `masked_l1`.
+  - Discriminator update: the prediction is detached.
+  - Generator update: D in eval mode (no spectral-norm power iteration) with `requires_grad` off. Gradients reach the
+    generated mel; D accumulates none.
+  - One D update per G update, made first; the G adversarial term uses the updated D.
+  - The two generator gradient terms are computed separately (`autograd.grad`), so their norms are logged every update.
+  - Arm A runs the same code path without a discriminator.
+- **Lambda.**
+  - Temporary generator (start weights) and discriminator (seed 0).
+  - 100 D-only warm-up updates, from their own sample stream `task27-dwarmup-0`, so the generator order is not shifted.
+  - Gradient norms measured on 8 fixed training batches (`task27-calib-0`).
+  - lambda = 0.1 × median |g_L1| / median |g_adv|. The run stops if anything is non-finite or degenerate.
+  - Everything is rebuilt before the actual run. Arm B repeats the same warm-up, then ramps lambda over 5,120 updates.
+- **Listening.**
+  - Fixed in `prepare`, before training: training ranks 0–3 (anchor and the TASK-24/25 examples) plus 4 seeded picks;
+    8 seeded picks of the 16 monitoring crops.
+  - Package: two labeled references, then start / A final / B final in random order.
+  - Ratings: 3 scales (quality/artifacts, transient sharpness, pitch/timbre fidelity) plus overall preference.
+  - One common gain for every file; the key is kept separately.
+
+**Verification (local, 2026-11-19).**
+- Tests: 19 in `tests/test_task27.py`, including bit-exact resume of B and gradient isolation. Full suite: 402 passed.
+  Ruff clean.
+- MPS smoke `t27_dev1`: prepare → report end to end, 49 s.
+- Throughput on MPS: A 120 and B 19 generator updates/s.
+
+**Caveat found in the smoke: the warm-up D is at chance.**
+- After 100 updates at LR 1e-4, the discriminator's sign accuracy is about 0.50 (hinge 2.000 → 1.995).
+- The calibrated lambda therefore depends on the warm-up trajectory: 0.0151 on MPS vs 0.0089 on deterministic CPU, from
+  identical seeds and data. Within one backend the 8-batch spread is small.
+- As the discriminator learns, the weighted adversarial share grows (0.10 at calibration; 0.54 after 256 smoke updates).
+- The brief's procedure is followed as written. This is flagged for the user before submission.
+
+**Rollback.** Additive only: `task27.py`, `task27_adversarial.py`, `configs/task27*.yaml`, `tests/test_task27.py`,
+`aces/*task27*`.

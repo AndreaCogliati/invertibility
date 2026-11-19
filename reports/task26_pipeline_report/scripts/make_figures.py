@@ -26,15 +26,15 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.lines  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-import matplotlib.ticker  # noqa: E402
-import numpy as np  # noqa: E402
-import torch  # noqa: E402
+import matplotlib.lines
+import matplotlib.pyplot as plt
+import matplotlib.ticker
+import numpy as np
+import torch
 
-from muq_inversion.bigvgan_common import bigvgan_log_mel_floor  # noqa: E402
-from muq_inversion.encoder import FrozenMuQEncoder  # noqa: E402
-from muq_inversion.models.muq_mel_translator import MuQToMelTranslator  # noqa: E402
+from muq_inversion.bigvgan_common import bigvgan_log_mel_floor
+from muq_inversion.encoder import FrozenMuQEncoder
+from muq_inversion.models.muq_mel_translator import MuQToMelTranslator
 
 REPO = Path(__file__).resolve().parents[3]
 FIG = Path(__file__).resolve().parents[1] / "figures"
@@ -85,7 +85,7 @@ data["anchor"] = {
     "task22_best_l1_regenerated": l1(pred_l1, target), "task22_best_l1_recorded": recorded["task22_best"],
 }
 t23 = torch.load(REPO / "runs/task23/task23_v1/B/preds/best.pt", weights_only=False)
-preds["TASK-23 B best (1 crop, update %d)" % t23["step"]] = t23["eval"].reshape(100, 187).float()
+preds[f"TASK-23 B best (1 crop, update {t23['step']})"] = t23["eval"].reshape(100, 187).float()
 t24 = torch.load(REPO / "runs/task24/task24_v1/N0256/preds/final.pt", weights_only=False)
 preds["TASK-24 N=256 final (200k updates)"] = t24["fit"][0].float()
 t25 = {a: torch.load(REPO / f"runs/task25/task25_v1/{a}/preds/final.pt", weights_only=False) for a in "ABCDEF"}
@@ -128,7 +128,7 @@ fig.savefig(FIG / "anchor_depth.pdf")
 plt.close(fig)
 
 # Figure: fitting regimes on the same anchor (one crop vs many crops), shared scales.
-regimes = [("TASK-23 B best\n1 fixed crop", "TASK-23 B best (1 crop, update %d)" % t23["step"]),
+regimes = [("TASK-23 B best\n1 fixed crop", f"TASK-23 B best (1 crop, update {t23['step']})"),
            ("TASK-22 best\n512 tracks (pool)", "TASK-22 best (block 1, step 193k)"),
            ("TASK-24 N=256\nfinal (b1, 1e-3)", "TASK-24 N=256 final (200k updates)"),
            ("TASK-25 E final\nN=256, width x2", "TASK-25 E final (width x2)")]

@@ -86,7 +86,6 @@ checks = [
     ("D 0.57, F 0.58, A 0.63", fig["task25_temporal_variation_ratio"]["D"]["monitor16"], 2),
     ("E 0.69, B 0.75, C 0.83", fig["task25_temporal_variation_ratio"]["C"]["monitor16"], 2),
 ]
-anchor_ladder = t24["summaries"] if "summaries" in t24 else None
 
 bad = 0
 for text, value, prec in checks:
